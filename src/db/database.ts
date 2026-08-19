@@ -11,11 +11,13 @@ import type {
   Tournament,
 } from '../domain/tournament'
 import type { InputSchema } from '../config/input-schema'
+import type { ScoringTestCase } from '../config/scoring-test-case'
 import {
   DATABASE_SCHEMA_VERSION,
   schemaV1,
   schemaV2,
   schemaV3,
+  schemaV4,
   type AcknowledgementRecord,
   type AppMetaRecord,
   type AuditEventRecord,
@@ -38,6 +40,7 @@ export class AppDatabase extends Dexie {
   scoringSessions!: Table<ScoringSession, string>
   inputSchemas!: Table<InputSchema, string>
   scoringProfiles!: Table<ScoringProfile, string>
+  scoringTestCases!: Table<ScoringTestCase, string>
   configVersions!: Table<ConfigVersionRecord, number>
   results!: Table<Result, string>
   resultRevisions!: Table<ResultRevision, string>
@@ -53,7 +56,8 @@ export class AppDatabase extends Dexie {
     super(name)
     this.version(1).stores(schemaV1)
     this.version(2).stores(schemaV2)
-    this.version(DATABASE_SCHEMA_VERSION).stores(schemaV3)
+    this.version(3).stores(schemaV3)
+    this.version(DATABASE_SCHEMA_VERSION).stores(schemaV4)
   }
 }
 
