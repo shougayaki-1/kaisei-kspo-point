@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { TournamentId } from '../domain/ids'
+import type { ExactValue } from '../domain/exact-decimal'
 import type { AggregationRule, RankingDirection, TieAwardRule } from '../domain/scoring'
 import type { InputScope } from '../domain/tournament'
 import type { InputField } from '../config/input-schema'
@@ -57,9 +58,9 @@ const changeClasses: ConfigChangeClass[] = [
   'INPUT_SCHEMA',
 ]
 
-function optionalNumber(value: string): number | undefined {
+function optionalDecimalText(value: string): string | undefined {
   if (value.trim() === '') return undefined
-  return Number(value)
+  return value.trim()
 }
 
 function replaceFieldType(field: InputField, type: InputField['type']): InputField {
@@ -483,7 +484,7 @@ export function TournamentConfigEditor({
                                     onChange={(event) => replaceInputField(
                                       schema.inputSchemaId,
                                       fieldIndex,
-                                      { ...field, min: optionalNumber(event.target.value) },
+                                      { ...field, min: optionalDecimalText(event.target.value) },
                                     )}
                                   />
                                 </label>
@@ -495,7 +496,7 @@ export function TournamentConfigEditor({
                                     onChange={(event) => replaceInputField(
                                       schema.inputSchemaId,
                                       fieldIndex,
-                                      { ...field, max: optionalNumber(event.target.value) },
+                                      { ...field, max: optionalDecimalText(event.target.value) },
                                     )}
                                   />
                                 </label>
@@ -507,7 +508,7 @@ export function TournamentConfigEditor({
                                     onChange={(event) => replaceInputField(
                                       schema.inputSchemaId,
                                       fieldIndex,
-                                      { ...field, step: optionalNumber(event.target.value) },
+                                      { ...field, step: optionalDecimalText(event.target.value) },
                                     )}
                                   />
                                 </label>
@@ -673,9 +674,9 @@ export function TournamentConfigEditor({
                                     )
                                     if (!target) return
                                     const nextRank = Number(event.target.value)
-                                    const points = (target.awardRule.rankPoints as Record<string, number>)[rawRank]
-                                    delete (target.awardRule.rankPoints as Record<string, number>)[rawRank]
-                                    ;(target.awardRule.rankPoints as Record<string, number>)[String(nextRank)] = points
+                                    const points = (target.awardRule.rankPoints as Record<string, ExactValue>)[rawRank]
+                                    delete (target.awardRule.rankPoints as Record<string, ExactValue>)[rawRank]
+                                    ;(target.awardRule.rankPoints as Record<string, ExactValue>)[String(nextRank)] = points
                                   })}
                                 />
                               </label>
@@ -689,7 +690,7 @@ export function TournamentConfigEditor({
                                       (item) => item.scoringProfileId === profile.scoringProfileId,
                                     )
                                     if (target) {
-                                      ;(target.awardRule.rankPoints as Record<string, number>)[rawRank] = Number(event.target.value)
+                                      ;(target.awardRule.rankPoints as Record<string, ExactValue>)[rawRank] = event.target.value
                                     }
                                   })}
                                 />
@@ -700,7 +701,7 @@ export function TournamentConfigEditor({
                                   const target = next.scoringProfiles.find(
                                     (item) => item.scoringProfileId === profile.scoringProfileId,
                                   )
-                                  if (target) delete (target.awardRule.rankPoints as Record<string, number>)[rawRank]
+                                  if (target) delete (target.awardRule.rankPoints as Record<string, ExactValue>)[rawRank]
                                 })}
                               >
                                 配点を削除
