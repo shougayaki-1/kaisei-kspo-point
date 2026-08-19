@@ -9,6 +9,7 @@ const MAX_SAFE_INTEGER = BigInt(Number.MAX_SAFE_INTEGER)
 const MIN_SAFE_INTEGER = -MAX_SAFE_INTEGER
 const DECIMAL_PATTERN = /^([+-]?)(?:(\d+)(?:\.(\d*))?|\.(\d+))$/
 const RATIONAL_PATTERN = /^([+-]?\d+)\/([1-9]\d*)$/
+const SCIENTIFIC_PATTERN = /^([+-]?)(\d+)(?:\.(\d+))?e([+-]?\d+)$/i
 
 export class InvalidExactValueError extends Error {
   constructor(value: unknown, message = 'Invalid exact numeric value') {
@@ -120,6 +121,40 @@ function rationalToValue(value: Rational): ExactValue {
     return Number(value.numerator)
   }
   return serializeRational(value)
+}
+
+function expandScientificDecimal(text: string): string {
+  if (!/[eE]/.test(text)) return text
+  const match = SCIENTIFIC_PATTERN.exec(text)
+  if (!match) throw new InvalidExactValueError(text, 'Legacy numeric value is invalid')
+
+  const sign = match[1] ?? ''
+  const integerPart = match[2] ?? '0'
+  const fractionalPart = match[3] ?? ''
+  const exponent = Number(match[4])
+  if (!Number.isSafeInteger(exponent)) {
+    throw new InvalidExactValueError(text, 'Legacy numeric exponent is invalid')
+  }
+
+  const digits = `${integerPart}${fractionalPart}`
+  const decimalIndex = integerPart.length + exponent
+  if (decimalIndex <= 0) {
+    return `${sign}0.${'0'.repeat(-decimalIndex)}${digits}`
+  }
+  if (decimalIndex >= digits.length) {
+    return `${sign}${digits}${'0'.repeat(decimalIndex - digits.length)}`
+  }
+  return `${sign}${digits.slice(0, decimalIndex)}.${digits.slice(decimalIndex)}`
+}
+
+export function canonicalizeLegacyNumber(value: number): ExactValue {
+  if (!Number.isFinite(value)) {
+    throw new InvalidExactValueError(value, 'Legacy numeric value must be finite')
+  }
+  if (Number.isSafeInteger(value)) return value
+
+  const decimalText = expandScientificDecimal(value.toString())
+  return serializeRational(parseDecimal(decimalText))
 }
 
 export function canonicalizeExactValue(value: ExactValue): ExactValue {
