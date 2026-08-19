@@ -15,7 +15,7 @@ export function createCourtTransferHistoryServices(
 
       const rows = await repository.listOutgoingBatches(tournament.tournamentId)
       return rows.map((row) => ({
-        batchId: row.batchId,
+        batchId: row.batchId as BatchId,
         createdAt: row.createdAt,
         status: row.status,
         revisionIds: row.batch.revisions.map((revision) => revision.revisionId),
@@ -27,7 +27,7 @@ export function createCourtTransferHistoryServices(
       const row = await repository.getOutgoingBatch(batchId)
       if (!row) throw new Error('unknown outgoing batch')
       return {
-        batchId: row.batchId,
+        batchId: row.batchId as BatchId,
         encodedParts: [...row.encodedParts],
         currentPartIndex: row.currentPartIndex,
       }
