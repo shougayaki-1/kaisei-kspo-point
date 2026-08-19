@@ -61,7 +61,7 @@ function result(item: ResultRevision): Result {
 }
 
 describe('createCourtTransferHistoryServices', () => {
-  it('lists stored history and reopens the exact immutable batch without creating a new one', async () => {
+  it('lists stored history and reopens the exact immutable batch without creating authoritative data', async () => {
     const db = open(`court-history-service-${crypto.randomUUID()}`)
     await db.tournaments.add({
       tournamentId,
@@ -71,17 +71,23 @@ describe('createCourtTransferHistoryServices', () => {
     })
     const repository = new TransferRepository(db)
     const item = revision()
+    const storedResult = result(item)
+    await db.results.add(storedResult)
+    await db.resultRevisions.add(item)
+
     const batch = createTransferBatch({
       tournamentId,
       sourceDeviceId: deviceId,
-      results: [result(item)],
+      results: [storedResult],
       revisions: [item],
       createdAt: '2026-08-19T10:10:00+09:00',
       batchId: 'batch-history',
     })
     const encodedParts = await encodeBatchFragments(batch, 90)
     await repository.saveOutgoingBatch(batch, encodedParts)
-    const beforeCount = await db.transferBatches.count()
+    const beforeBatchCount = await db.transferBatches.count()
+    const beforeResultCount = await db.results.count()
+    const beforeRevisionCount = await db.resultRevisions.count()
 
     const services = createCourtTransferHistoryServices(db)
     const history = await services.listHistory()
@@ -101,7 +107,9 @@ describe('createCourtTransferHistoryServices', () => {
       encodedParts,
       currentPartIndex: 0,
     })
-    expect(await db.transferBatches.count()).toBe(beforeCount)
+    expect(await db.transferBatches.count()).toBe(beforeBatchCount)
+    expect(await db.results.count()).toBe(beforeResultCount)
+    expect(await db.resultRevisions.count()).toBe(beforeRevisionCount)
     expect((await repository.getOutgoingBatch(batch.batchId))?.batch).toEqual(batch)
   })
 })
