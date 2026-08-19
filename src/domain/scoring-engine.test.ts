@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { CompetitionId, ScoringProfileId, TeamId } from './ids'
 import type { ScoringProfile } from './scoring'
-import { calculateRankedScores } from './scoring-engine'
+import { calculateRankedScores, calculateScoringScenario } from './scoring-engine'
 
 const teams = {
   one: 'team-1' as TeamId,
@@ -76,5 +76,35 @@ describe('calculateRankedScores', () => {
       { teamId: teams.one, rank: 3 },
       { teamId: teams.four, rank: 4 },
     ])
+  })
+})
+
+describe('calculateScoringScenario', () => {
+  it('sums award scores across rounds and records the aggregate expression', () => {
+    const result = calculateScoringScenario({
+      rounds: [
+        {
+          roundId: 'round-1',
+          values: [
+            { participantId: 'entry-1', value: 100 },
+            { participantId: 'entry-2', value: 80 },
+          ],
+        },
+        {
+          roundId: 'round-2',
+          values: [
+            { participantId: 'entry-1', value: 70 },
+            { participantId: 'entry-2', value: 90 },
+          ],
+        },
+      ],
+    }, profile())
+
+    const entryOne = result.participants.find((item) => item.participantId === 'entry-1')
+    expect(entryOne?.rounds.map((round) => round.awardScore)).toEqual([30, 20])
+    expect(entryOne?.aggregateScore).toBe(50)
+    expect(entryOne?.aggregateTrace).toContainEqual(
+      expect.objectContaining({ code: 'AGGREGATE', expression: '30 + 20 = 50', value: 50 }),
+    )
   })
 })
