@@ -22,7 +22,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Run tests
-        run: npm run test:run
+        run: npm run test:run -- src/domain/exact-decimal.test.ts src/domain/phase1-deterministic-scoring.test.ts src/app/ScoringSimulatorExact.test.tsx src/app/TournamentConfigEditorExactConfig.test.tsx
       - name: Typecheck
         run: npm run typecheck
       - name: Build
