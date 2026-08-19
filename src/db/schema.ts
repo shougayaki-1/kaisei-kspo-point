@@ -10,21 +10,27 @@ import type {
   Team,
   Tournament,
 } from '../domain/tournament'
+import type { InputSchema } from '../config/input-schema'
+import type { TournamentConfigSnapshot } from '../config/tournament-config'
 import type { AckBatch, TransferBatch } from '../transfer/types'
 
-export const DATABASE_SCHEMA_VERSION = 2
+export const DATABASE_SCHEMA_VERSION = 3
 
 export interface AppMetaRecord {
   key: string
   value: unknown
 }
 
+export type ConfigChangeClass = 'DISPLAY_ONLY' | 'SCHEDULE' | 'SCORING' | 'INPUT_SCHEMA'
+
 export interface ConfigVersionRecord {
   id?: number
   tournamentId: string
   version: number
   createdAt: string
-  snapshot: unknown
+  operator: string
+  changeClass: ConfigChangeClass
+  snapshot: TournamentConfigSnapshot
 }
 
 export type TransferBatchStatus = 'PENDING' | 'ACKNOWLEDGED' | 'MANUAL'
@@ -95,6 +101,7 @@ export type DatabaseRecordTypes = {
   scheduleSlots: ScheduleSlot
   courtRuns: CourtRun
   scoringSessions: ScoringSession
+  inputSchemas: InputSchema
   scoringProfiles: ScoringProfile
   configVersions: ConfigVersionRecord
   results: Result
@@ -133,4 +140,9 @@ export const schemaV2 = {
   ...schemaV1,
   receivedQrParts: '++id,[batchId+partIndex],batchId,tournamentId',
   revisionDeliveries: 'revisionId,batchId,status',
+} as const
+
+export const schemaV3 = {
+  ...schemaV2,
+  inputSchemas: 'inputSchemaId,competitionId,version',
 } as const
