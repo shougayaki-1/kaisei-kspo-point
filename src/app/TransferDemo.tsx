@@ -166,7 +166,7 @@ function createBrowserTransferServices(deviceId: DeviceId): TransferDemoServices
 
       await transferRepository.saveReceivedPart(encoded, new Date().toISOString())
       const receiver = await transferRepository.restoreReceiver(tournament.tournamentId)
-      const progress = receiver.getProgress(fragment.batchId)
+      const progress = receiver.getProgress(fragment.transferId)
       if (!progress) throw new Error('読取状態を復元できません')
       return progress
     },
@@ -404,50 +404,51 @@ export function TransferDemo({
 
             <div className="manual-override">
               <label>
-                手動送信済み担当者
-                <input value={manualOperator} onChange={(event) => setManualOperator(event.target.value)} />
+                担当者
+                <input
+                  value={manualOperator}
+                  onChange={(event) => setManualOperator(event.target.value)}
+                />
               </label>
               <button type="button" onClick={markManual} disabled={busy}>
-                手動で送信済みにする
+                手動で送信済み
               </button>
             </div>
           </div>
         )}
 
-        {message && <p className="transfer-message" role="status">{message}</p>}
-        {error && <p className="transfer-error" role="alert">{error}</p>}
+        {message && <p role="status">{message}</p>}
+        {error && <p role="alert">{error}</p>}
       </section>
     )
   }
 
   return (
     <section className="transfer-panel" aria-label="本部QR受信">
-      <h2>QR受信</h2>
-      <p>カメラ・USBリーダー実装前の共通入口です。読み取った文字列を同じ受信処理へ渡します。</p>
+      <h2>結果QR受信</h2>
       <label>
         QR文字列
         <textarea value={hostInput} onChange={(event) => setHostInput(event.target.value)} rows={5} />
       </label>
       <button type="button" onClick={() => void ingestHost()} disabled={busy}>
-        読み取る
+        読み取り
       </button>
 
-      {hostProgresses.map((hostProgress) => (
-        <div className="transfer-card" aria-label="QR読取進捗" key={hostProgress.batchId}>
-          <strong>{hostProgress.receivedCount} / {hostProgress.totalParts} 読み取り済み</strong>
-          <span>Batch {String(hostProgress.batchId).slice(0, 8)}</span>
-          <span>残り {hostProgress.remainingCount}</span>
-          <span>
-            未読: {hostProgress.missingPartIndexes.length > 0 ? hostProgress.missingPartIndexes.join(', ') : 'なし'}
-          </span>
-          <span>{hostProgress.complete ? 'すべて揃いました' : '読取継続中'}</span>
-          {hostProgress.complete && (
-            <button type="button" onClick={() => void processHost(hostProgress.batchId)} disabled={busy}>
-              処理してACK生成
+      <div className="transfer-progress-list">
+        {hostProgresses.map((progress) => (
+          <div className="transfer-card" key={progress.batchId}>
+            <strong>{progress.receivedCount} / {progress.totalParts}</strong>
+            <p>未読: {progress.missingPartIndexes.join(', ') || 'なし'}</p>
+            <button
+              type="button"
+              onClick={() => void processHost(progress.batchId)}
+              disabled={busy || !progress.complete}
+            >
+              取り込んでACK生成
             </button>
-          )}
-        </div>
-      ))}
+          </div>
+        ))}
+      </div>
 
       {hostAck && (
         <label>
@@ -456,8 +457,8 @@ export function TransferDemo({
         </label>
       )}
 
-      {message && <p className="transfer-message" role="status">{message}</p>}
-      {error && <p className="transfer-error" role="alert">{error}</p>}
+      {message && <p role="status">{message}</p>}
+      {error && <p role="alert">{error}</p>}
     </section>
   )
 }
