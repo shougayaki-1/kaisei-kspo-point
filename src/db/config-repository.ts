@@ -1,4 +1,4 @@
-import type { TournamentId } from '../domain/ids'
+import { createId, type TournamentId } from '../domain/ids'
 import {
   canonicalizeDecimalInput,
   canonicalizeExactValue,
@@ -11,6 +11,10 @@ import {
   scoringTestResultFingerprint,
   type ScoringTestRunResult,
 } from '../config/scoring-test-case'
+import {
+  areConfigVersionsEquivalent,
+  materializeConfigVersionId,
+} from '../config/config-version'
 import type { TournamentConfigSnapshot } from '../config/tournament-config'
 import { validateTournamentConfig } from '../config/tournament-config'
 import type { AppDatabase } from './database'
@@ -105,24 +109,52 @@ function normalizeSnapshot(snapshot: TournamentConfigSnapshot): TournamentConfig
   return normalized
 }
 
+function validateSnapshot(snapshot: TournamentConfigSnapshot): TournamentConfigSnapshot {
+  const normalized = normalizeSnapshot(snapshot)
+  const errors = validateTournamentConfig(normalized).filter((issue) => issue.severity === 'ERROR')
+  if (errors.length > 0) {
+    throw new Error(
+      `configuration validation failed: ${errors.map((issue) => `${issue.code}: ${issue.message}`).join('; ')}`,
+    )
+  }
+  return normalized
+}
+
 export class ConfigRepository {
   constructor(private readonly db: AppDatabase) {}
+
+  private materializeRecord(record: ConfigVersionRecord): ConfigVersionRecord {
+    return {
+      ...clone(record),
+      configVersionId: materializeConfigVersionId(record),
+      snapshot: normalizeSnapshot(record.snapshot),
+    }
+  }
 
   async listVersions(tournamentId: TournamentId): Promise<ConfigVersionRecord[]> {
     const records = await this.db.configVersions
       .where('tournamentId')
       .equals(tournamentId)
       .sortBy('version')
-    return records.map((record) => ({
-      ...clone(record),
-      snapshot: normalizeSnapshot(record.snapshot),
-    }))
+    return records.map((record) => this.materializeRecord(record))
+  }
+
+  async getVersionById(configVersionId: string): Promise<ConfigVersionRecord | undefined> {
+    const records = await this.db.configVersions.toArray()
+    const record = records.find((item) => materializeConfigVersionId(item) === configVersionId)
+    return record ? this.materializeRecord(record) : undefined
+  }
+
+  async getActiveVersion(tournamentId: TournamentId): Promise<ConfigVersionRecord | undefined> {
+    const tournament = await this.db.tournaments.get(tournamentId)
+    if (!tournament) return undefined
+    const versions = await this.listVersions(tournamentId)
+    return versions.find((record) => record.version === tournament.currentConfigVersion)
   }
 
   async loadCurrent(tournamentId: TournamentId): Promise<TournamentConfigSnapshot | undefined> {
-    const versions = await this.listVersions(tournamentId)
-    const latest = versions.at(-1)
-    if (latest) return normalizeSnapshot(latest.snapshot)
+    const active = await this.getActiveVersion(tournamentId)
+    if (active) return normalizeSnapshot(active.snapshot)
 
     const loaded = await this.loadFromNormalizedTables(tournamentId)
     return loaded ? normalizeSnapshot(loaded) : undefined
@@ -152,18 +184,81 @@ export class ConfigRepository {
     })
   }
 
+  async importVersion(record: ConfigVersionRecord): Promise<ConfigVersionRecord> {
+    if (!record.configVersionId) throw new Error('ConfigVersion ID is required')
+    if (!Number.isInteger(record.version) || record.version < 1) throw new Error('invalid ConfigVersion number')
+
+    const snapshot = validateSnapshot(record.snapshot)
+    if (
+      snapshot.tournament.tournamentId !== record.tournamentId ||
+      snapshot.tournament.currentConfigVersion !== record.version
+    ) {
+      throw new Error('ConfigVersion metadata mismatch')
+    }
+
+    const candidate: ConfigVersionRecord = {
+      configVersionId: record.configVersionId,
+      tournamentId: record.tournamentId,
+      version: record.version,
+      createdAt: record.createdAt,
+      operator: record.operator,
+      changeClass: record.changeClass,
+      snapshot,
+    }
+
+    return this.db.transaction('rw', this.db.configVersions, async () => {
+      const all = await this.db.configVersions.toArray()
+      const sameId = all.find((item) => materializeConfigVersionId(item) === candidate.configVersionId)
+      if (sameId) {
+        const materialized = this.materializeRecord(sameId)
+        if (!areConfigVersionsEquivalent(materialized, candidate)) {
+          throw new Error(`immutable ConfigVersion collision for ${candidate.configVersionId}`)
+        }
+        return materialized
+      }
+
+      const sameVersion = all.find(
+        (item) => item.tournamentId === candidate.tournamentId && item.version === candidate.version,
+      )
+      if (sameVersion) {
+        throw new Error(
+          `ConfigVersion version collision for ${candidate.tournamentId} v${candidate.version}`,
+        )
+      }
+
+      await this.db.configVersions.add(clone(candidate))
+      return clone(candidate)
+    })
+  }
+
+  async activateVersion(
+    configVersionId: string,
+    expectedTournamentId: TournamentId,
+  ): Promise<AppliedConfigVersion> {
+    const record = await this.getVersionById(configVersionId)
+    if (!record) throw new Error(`ConfigVersion ${configVersionId} does not exist`)
+    if (record.tournamentId !== expectedTournamentId) {
+      throw new Error('ConfigVersion tournament mismatch; version is not compatible with this tournament')
+    }
+
+    const snapshot = validateSnapshot(record.snapshot)
+    if (snapshot.tournament.tournamentId !== expectedTournamentId) {
+      throw new Error('ConfigVersion snapshot is not compatible with this tournament')
+    }
+    snapshot.tournament.currentConfigVersion = record.version
+
+    const tables = this.normalizedConfigTables()
+    return this.db.transaction('rw', tables, async () => {
+      await this.replaceNormalizedRows(snapshot)
+      return { version: record.version, snapshot: clone(snapshot) }
+    })
+  }
+
   async apply(
     snapshot: TournamentConfigSnapshot,
     metadata: ApplyConfigMetadata,
   ): Promise<AppliedConfigVersion> {
-    const normalizedInput = normalizeSnapshot(snapshot)
-    const validationIssues = validateTournamentConfig(normalizedInput)
-    const errors = validationIssues.filter((issue) => issue.severity === 'ERROR')
-    if (errors.length > 0) {
-      throw new Error(
-        `configuration validation failed: ${errors.map((issue) => `${issue.code}: ${issue.message}`).join('; ')}`,
-      )
-    }
+    const normalizedInput = validateSnapshot(snapshot)
 
     const regressionResults = await this.previewRegression(normalizedInput)
     const invalidResults = regressionResults.filter((result) => result.status === 'INVALID')
@@ -203,19 +298,7 @@ export class ConfigRepository {
     }
 
     const tournamentId = appliedSnapshot.tournament.tournamentId
-    const tables = [
-      this.db.tournaments,
-      this.db.teams,
-      this.db.competitions,
-      this.db.competitionEntries,
-      this.db.scheduleSlots,
-      this.db.courtRuns,
-      this.db.scoringSessions,
-      this.db.inputSchemas,
-      this.db.scoringProfiles,
-      this.db.scoringTestCases,
-      this.db.configVersions,
-    ]
+    const tables = [...this.normalizedConfigTables(), this.db.configVersions]
 
     return this.db.transaction('rw', tables, async () => {
       const existingVersions = await this.db.configVersions
@@ -226,83 +309,10 @@ export class ConfigRepository {
         existingVersions.reduce((maximum, record) => Math.max(maximum, record.version), 0) + 1
 
       appliedSnapshot.tournament.currentConfigVersion = nextVersion
-
-      const existingCompetitions = await this.db.competitions
-        .where('tournamentId')
-        .equals(tournamentId)
-        .toArray()
-      const existingCompetitionIds = existingCompetitions.map((item) => item.competitionId)
-      const existingSlots =
-        existingCompetitionIds.length > 0
-          ? await this.db.scheduleSlots
-              .where('competitionId')
-              .anyOf(existingCompetitionIds)
-              .toArray()
-          : []
-      const existingSlotIds = existingSlots.map((item) => item.slotId)
-
-      await this.db.tournaments.delete(tournamentId)
-      await this.db.teams.where('tournamentId').equals(tournamentId).delete()
-
-      if (existingCompetitionIds.length > 0) {
-        await this.db.competitionEntries
-          .where('competitionId')
-          .anyOf(existingCompetitionIds)
-          .delete()
-        await this.db.scheduleSlots
-          .where('competitionId')
-          .anyOf(existingCompetitionIds)
-          .delete()
-        await this.db.scoringSessions
-          .where('competitionId')
-          .anyOf(existingCompetitionIds)
-          .delete()
-        await this.db.inputSchemas
-          .where('competitionId')
-          .anyOf(existingCompetitionIds)
-          .delete()
-        await this.db.scoringProfiles
-          .where('competitionId')
-          .anyOf(existingCompetitionIds)
-          .delete()
-        await this.db.scoringTestCases
-          .where('competitionId')
-          .anyOf(existingCompetitionIds)
-          .delete()
-      }
-      if (existingSlotIds.length > 0) {
-        await this.db.courtRuns.where('slotId').anyOf(existingSlotIds).delete()
-      }
-      await this.db.competitions.where('tournamentId').equals(tournamentId).delete()
-
-      await this.db.tournaments.put(appliedSnapshot.tournament)
-      if (appliedSnapshot.teams.length > 0) await this.db.teams.bulkPut(appliedSnapshot.teams)
-      if (appliedSnapshot.competitions.length > 0) {
-        await this.db.competitions.bulkPut(appliedSnapshot.competitions)
-      }
-      if (appliedSnapshot.competitionEntries.length > 0) {
-        await this.db.competitionEntries.bulkPut(appliedSnapshot.competitionEntries)
-      }
-      if (appliedSnapshot.scheduleSlots.length > 0) {
-        await this.db.scheduleSlots.bulkPut(appliedSnapshot.scheduleSlots)
-      }
-      if (appliedSnapshot.courtRuns.length > 0) {
-        await this.db.courtRuns.bulkPut(appliedSnapshot.courtRuns)
-      }
-      if (appliedSnapshot.scoringSessions.length > 0) {
-        await this.db.scoringSessions.bulkPut(appliedSnapshot.scoringSessions)
-      }
-      if (appliedSnapshot.inputSchemas.length > 0) {
-        await this.db.inputSchemas.bulkPut(appliedSnapshot.inputSchemas)
-      }
-      if (appliedSnapshot.scoringProfiles.length > 0) {
-        await this.db.scoringProfiles.bulkPut(appliedSnapshot.scoringProfiles)
-      }
-      if (appliedSnapshot.scoringTestCases.length > 0) {
-        await this.db.scoringTestCases.bulkPut(appliedSnapshot.scoringTestCases)
-      }
+      await this.replaceNormalizedRows(appliedSnapshot)
 
       const versionRecord: ConfigVersionRecord = {
+        configVersionId: createId<string>(),
         tournamentId,
         version: nextVersion,
         createdAt: metadata.createdAt,
@@ -314,6 +324,99 @@ export class ConfigRepository {
 
       return { version: nextVersion, snapshot: clone(appliedSnapshot) }
     })
+  }
+
+  private normalizedConfigTables() {
+    return [
+      this.db.tournaments,
+      this.db.teams,
+      this.db.competitions,
+      this.db.competitionEntries,
+      this.db.scheduleSlots,
+      this.db.courtRuns,
+      this.db.scoringSessions,
+      this.db.inputSchemas,
+      this.db.scoringProfiles,
+      this.db.scoringTestCases,
+    ]
+  }
+
+  private async replaceNormalizedRows(appliedSnapshot: TournamentConfigSnapshot): Promise<void> {
+    const tournamentId = appliedSnapshot.tournament.tournamentId
+    const existingCompetitions = await this.db.competitions
+      .where('tournamentId')
+      .equals(tournamentId)
+      .toArray()
+    const existingCompetitionIds = existingCompetitions.map((item) => item.competitionId)
+    const existingSlots =
+      existingCompetitionIds.length > 0
+        ? await this.db.scheduleSlots
+            .where('competitionId')
+            .anyOf(existingCompetitionIds)
+            .toArray()
+        : []
+    const existingSlotIds = existingSlots.map((item) => item.slotId)
+
+    await this.db.tournaments.delete(tournamentId)
+    await this.db.teams.where('tournamentId').equals(tournamentId).delete()
+
+    if (existingCompetitionIds.length > 0) {
+      await this.db.competitionEntries
+        .where('competitionId')
+        .anyOf(existingCompetitionIds)
+        .delete()
+      await this.db.scheduleSlots
+        .where('competitionId')
+        .anyOf(existingCompetitionIds)
+        .delete()
+      await this.db.scoringSessions
+        .where('competitionId')
+        .anyOf(existingCompetitionIds)
+        .delete()
+      await this.db.inputSchemas
+        .where('competitionId')
+        .anyOf(existingCompetitionIds)
+        .delete()
+      await this.db.scoringProfiles
+        .where('competitionId')
+        .anyOf(existingCompetitionIds)
+        .delete()
+      await this.db.scoringTestCases
+        .where('competitionId')
+        .anyOf(existingCompetitionIds)
+        .delete()
+    }
+    if (existingSlotIds.length > 0) {
+      await this.db.courtRuns.where('slotId').anyOf(existingSlotIds).delete()
+    }
+    await this.db.competitions.where('tournamentId').equals(tournamentId).delete()
+
+    await this.db.tournaments.put(appliedSnapshot.tournament)
+    if (appliedSnapshot.teams.length > 0) await this.db.teams.bulkPut(appliedSnapshot.teams)
+    if (appliedSnapshot.competitions.length > 0) {
+      await this.db.competitions.bulkPut(appliedSnapshot.competitions)
+    }
+    if (appliedSnapshot.competitionEntries.length > 0) {
+      await this.db.competitionEntries.bulkPut(appliedSnapshot.competitionEntries)
+    }
+    if (appliedSnapshot.scheduleSlots.length > 0) {
+      await this.db.scheduleSlots.bulkPut(appliedSnapshot.scheduleSlots)
+    }
+    if (appliedSnapshot.courtRuns.length > 0) {
+      await this.db.courtRuns.bulkPut(appliedSnapshot.courtRuns)
+    }
+    if (appliedSnapshot.scoringSessions.length > 0) {
+      await this.db.scoringSessions.bulkPut(appliedSnapshot.scoringSessions)
+    }
+    if (appliedSnapshot.inputSchemas.length > 0) {
+      await this.db.inputSchemas.bulkPut(appliedSnapshot.inputSchemas)
+    }
+    if (appliedSnapshot.scoringProfiles.length > 0) {
+      await this.db.scoringProfiles.bulkPut(appliedSnapshot.scoringProfiles)
+    }
+    if (appliedSnapshot.scoringTestCases.length > 0) {
+      await this.db.scoringTestCases.bulkPut(appliedSnapshot.scoringTestCases)
+    }
   }
 
   private async loadFromNormalizedTables(
