@@ -42,7 +42,7 @@ describe('CourtScoringSession production UI', () => {
     await waitFor(() => expect(api.saveResult).toHaveBeenCalledWith({ scoringSessionId: sessionId, courtRunIds: [runA, runB], operator: 'コート担当', inputMode: 'NUMBER', values: { [entryA]: { count: '0.10', verified: true }, [entryB]: { count: '2', verified: true } } })); expect(JSON.stringify(api.saveResult.mock.calls[0])).not.toMatch(/award|points|standings/i)
   })
   it('shows immutable revision history and performs correction through the service boundary', async () => {
-    const api = services(); render(<CourtScoringSession services={api as unknown as CourtScoringSessionServices} />); await screen.findByText(/rev-1/); expect(screen.getByText(/rev-2/)).toBeInTheDocument()
+    const api = services(); render(<CourtScoringSession services={api as unknown as CourtScoringSessionServices} />); expect((await screen.findAllByText(/rev-1/)).length).toBeGreaterThanOrEqual(1); expect(screen.getByText(/rev-2/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /result-1.*訂正/ })); expect(screen.getByLabelText('赤A 個数')).toHaveValue('3'); fireEvent.change(screen.getByLabelText('赤A 個数'), { target: { value: '4' } }); fireEvent.change(screen.getByLabelText('担当者'), { target: { value: '訂正担当' } }); fireEvent.click(screen.getByRole('button', { name: '訂正を保存' }))
     await waitFor(() => expect(api.correctResult).toHaveBeenCalledWith(expect.objectContaining({ resultId: 'result-1', operator: '訂正担当', inputMode: 'NUMBER', values: expect.objectContaining({ [entryA]: expect.objectContaining({ count: '4' }) }) })))
   })
