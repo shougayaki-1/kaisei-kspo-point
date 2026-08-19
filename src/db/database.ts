@@ -10,10 +10,12 @@ import type {
   Team,
   Tournament,
 } from '../domain/tournament'
+import type { InputSchema } from '../config/input-schema'
 import {
   DATABASE_SCHEMA_VERSION,
   schemaV1,
   schemaV2,
+  schemaV3,
   type AcknowledgementRecord,
   type AppMetaRecord,
   type AuditEventRecord,
@@ -34,6 +36,7 @@ export class AppDatabase extends Dexie {
   scheduleSlots!: Table<ScheduleSlot, string>
   courtRuns!: Table<CourtRun, string>
   scoringSessions!: Table<ScoringSession, string>
+  inputSchemas!: Table<InputSchema, string>
   scoringProfiles!: Table<ScoringProfile, string>
   configVersions!: Table<ConfigVersionRecord, number>
   results!: Table<Result, string>
@@ -49,7 +52,8 @@ export class AppDatabase extends Dexie {
   constructor(name: string) {
     super(name)
     this.version(1).stores(schemaV1)
-    this.version(DATABASE_SCHEMA_VERSION).stores(schemaV2)
+    this.version(2).stores(schemaV2)
+    this.version(DATABASE_SCHEMA_VERSION).stores(schemaV3)
   }
 }
 
