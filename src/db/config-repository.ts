@@ -1,5 +1,11 @@
 import type { TournamentId } from '../domain/ids'
 import {
+  canonicalizeDecimalInput,
+  canonicalizeExactValue,
+  canonicalizeLegacyNumber,
+  type ExactValue,
+} from '../domain/exact-decimal'
+import {
   approveScoringTestChange,
   runScoringTestCase,
   scoringTestResultFingerprint,
@@ -40,9 +46,62 @@ function clone<T>(value: T): T {
   return structuredClone(value)
 }
 
+function normalizeDecimalValue(value: ExactValue): ExactValue {
+  try {
+    if (typeof value === 'number' && !Number.isSafeInteger(value)) {
+      return canonicalizeLegacyNumber(value)
+    }
+    const normalized = canonicalizeDecimalInput(value)
+    return typeof value === 'string' && typeof normalized === 'number'
+      ? String(normalized)
+      : normalized
+  } catch {
+    return value
+  }
+}
+
+function normalizeExactValue(value: ExactValue): ExactValue {
+  try {
+    if (typeof value === 'number' && !Number.isSafeInteger(value)) {
+      return canonicalizeLegacyNumber(value)
+    }
+    return canonicalizeExactValue(value)
+  } catch {
+    return value
+  }
+}
+
 function normalizeSnapshot(snapshot: TournamentConfigSnapshot): TournamentConfigSnapshot {
   const normalized = clone(snapshot)
   normalized.scoringTestCases ??= []
+
+  for (const schema of normalized.inputSchemas) {
+    for (const field of schema.fields) {
+      if (field.type !== 'NUMBER' && field.type !== 'PENALTY') continue
+      if (field.min !== undefined) field.min = normalizeDecimalValue(field.min)
+      if (field.max !== undefined) field.max = normalizeDecimalValue(field.max)
+      if (field.step !== undefined) field.step = normalizeDecimalValue(field.step)
+    }
+  }
+
+  for (const profile of normalized.scoringProfiles) {
+    for (const [rank, score] of Object.entries(profile.awardRule.rankPoints)) {
+      profile.awardRule.rankPoints[Number(rank)] = normalizeDecimalValue(score)
+    }
+  }
+
+  for (const testCase of normalized.scoringTestCases) {
+    for (const round of testCase.rounds) {
+      for (const value of round.values) {
+        value.value = normalizeDecimalValue(value.value)
+      }
+    }
+    for (const expected of testCase.expected) {
+      expected.roundAwardScores = expected.roundAwardScores.map(normalizeExactValue)
+      expected.aggregateScore = normalizeExactValue(expected.aggregateScore)
+    }
+  }
+
   return normalized
 }
 
@@ -65,7 +124,8 @@ export class ConfigRepository {
     const latest = versions.at(-1)
     if (latest) return normalizeSnapshot(latest.snapshot)
 
-    return this.loadFromNormalizedTables(tournamentId)
+    const loaded = await this.loadFromNormalizedTables(tournamentId)
+    return loaded ? normalizeSnapshot(loaded) : undefined
   }
 
   async previewRegression(snapshot: TournamentConfigSnapshot): Promise<ScoringTestRunResult[]> {
@@ -101,7 +161,7 @@ export class ConfigRepository {
     const errors = validationIssues.filter((issue) => issue.severity === 'ERROR')
     if (errors.length > 0) {
       throw new Error(
-        `configuration validation failed: ${errors.map((issue) => issue.code).join(', ')}`,
+        `configuration validation failed: ${errors.map((issue) => `${issue.code}: ${issue.message}`).join('; ')}`,
       )
     }
 

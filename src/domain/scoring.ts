@@ -1,4 +1,5 @@
 import type { CompetitionId, ScoringProfileId, TeamId } from './ids'
+import type { ExactValue } from './exact-decimal'
 
 export type RankingDirection = 'HIGHER_IS_BETTER' | 'LOWER_IS_BETTER'
 export type TieAwardRule = 'AVERAGE_OCCUPIED_PLACES' | 'SAME_RANK_SCORE'
@@ -10,7 +11,7 @@ export interface RankingRule {
 
 export interface RankAwardRule {
   type: 'RANK_POINTS'
-  rankPoints: Record<number, number>
+  rankPoints: Record<number, ExactValue>
 }
 
 export interface ScoringAggregationOptions {
@@ -32,25 +33,25 @@ export interface CalculationTraceStep {
   code: string
   label: string
   expression?: string
-  value?: number | string
+  value?: ExactValue
 }
 
 export interface TeamScoreResult {
   teamId: TeamId
   rank: number
-  awardScore: number
+  awardScore: ExactValue
   trace: CalculationTraceStep[]
 }
 
 export interface RankedParticipantValue<TId extends string = string> {
   participantId: TId
-  value: number
+  value: ExactValue
 }
 
 export interface ParticipantScoreResult<TId extends string = string> {
   participantId: TId
   rank: number
-  awardScore: number
+  awardScore: ExactValue
   trace: CalculationTraceStep[]
 }
 
@@ -66,14 +67,14 @@ export interface ScoringScenario<TId extends string = string> {
 export interface ScoringScenarioParticipantRoundResult {
   roundId: string
   rank: number
-  awardScore: number
+  awardScore: ExactValue
   trace: CalculationTraceStep[]
 }
 
 export interface ScoringScenarioParticipantResult<TId extends string = string> {
   participantId: TId
   rounds: ScoringScenarioParticipantRoundResult[]
-  aggregateScore: number
+  aggregateScore: ExactValue
   aggregateTrace: CalculationTraceStep[]
 }
 

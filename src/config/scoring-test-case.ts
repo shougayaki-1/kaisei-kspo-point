@@ -1,4 +1,9 @@
 import type { CompetitionEntryId, CompetitionId } from '../domain/ids'
+import {
+  canonicalizeExactValue,
+  exactValuesEqual,
+  type ExactValue,
+} from '../domain/exact-decimal'
 import type { ScoringProfile } from '../domain/scoring'
 import { calculateScoringScenario } from '../domain/scoring-engine'
 import type { CompetitionEntry } from '../domain/tournament'
@@ -6,14 +11,14 @@ import type { CompetitionEntry } from '../domain/tournament'
 export interface ScoringTestRound {
   roundId: string
   label: string
-  values: Array<{ entryId: CompetitionEntryId; value: number }>
+  values: Array<{ entryId: CompetitionEntryId; value: ExactValue }>
 }
 
 export interface ScoringTestExpectedParticipant {
   entryId: CompetitionEntryId
   roundRanks: number[]
-  roundAwardScores: number[]
-  aggregateScore: number
+  roundAwardScores: ExactValue[]
+  aggregateScore: ExactValue
 }
 
 export interface ScoringTestCase {
@@ -34,8 +39,8 @@ export type ScoringTestDiffField = 'roundRanks' | 'roundAwardScores' | 'aggregat
 export interface ScoringTestDiff {
   entryId: CompetitionEntryId
   field: ScoringTestDiffField
-  expected: number[] | number
-  actual: number[] | number
+  expected: number[] | ExactValue[] | ExactValue
+  actual: number[] | ExactValue[] | ExactValue
 }
 
 export interface ScoringTestRunResult {
@@ -51,6 +56,17 @@ export interface ScoringTestApprovalMetadata {
   approvedAt: string
 }
 
+function canonicalParticipant(
+  item: ScoringTestExpectedParticipant,
+): ScoringTestExpectedParticipant {
+  return {
+    entryId: item.entryId,
+    roundRanks: [...item.roundRanks],
+    roundAwardScores: item.roundAwardScores.map(canonicalizeExactValue),
+    aggregateScore: canonicalizeExactValue(item.aggregateScore),
+  }
+}
+
 export function scoringTestResultFingerprint(
   result: Pick<ScoringTestRunResult, 'testCaseId' | 'actual'>,
 ): string {
@@ -58,20 +74,19 @@ export function scoringTestResultFingerprint(
     testCaseId: result.testCaseId,
     actual: [...result.actual]
       .sort((left, right) => left.entryId.localeCompare(right.entryId))
-      .map((item) => ({
-        entryId: item.entryId,
-        roundRanks: item.roundRanks,
-        roundAwardScores: item.roundAwardScores,
-        aggregateScore: item.aggregateScore,
-      })),
+      .map(canonicalParticipant),
   })
 }
 
-function valuesEqual(left: number[] | number, right: number[] | number): boolean {
-  if (Array.isArray(left) && Array.isArray(right)) {
-    return left.length === right.length && left.every((value, index) => value === right[index])
-  }
-  return left === right
+function ranksEqual(left: number[], right: number[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index])
+}
+
+function exactArraysEqual(left: ExactValue[], right: ExactValue[]): boolean {
+  return left.length === right.length && left.every((value, index) => {
+    const other = right[index]
+    return other !== undefined && exactValuesEqual(value, other)
+  })
 }
 
 function invalid(testCase: ScoringTestCase, message: string): ScoringTestRunResult {
@@ -114,7 +129,7 @@ export function runScoringTestCase(
           roundId: round.roundId,
           values: round.values.map((value) => ({
             participantId: value.entryId,
-            value: value.value,
+            value: canonicalizeExactValue(value.value),
           })),
         })),
       },
@@ -140,8 +155,8 @@ export function runScoringTestCase(
     return [{
       entryId,
       roundRanks: participant.rounds.map((round) => round.rank),
-      roundAwardScores: participant.rounds.map((round) => round.awardScore),
-      aggregateScore: participant.aggregateScore,
+      roundAwardScores: participant.rounds.map((round) => canonicalizeExactValue(round.awardScore)),
+      aggregateScore: canonicalizeExactValue(participant.aggregateScore),
     }]
   })
 
@@ -154,16 +169,34 @@ export function runScoringTestCase(
       return invalid(testCase, `期待値の CompetitionEntry ${expected.entryId} が計算結果にありません。`)
     }
 
-    const fields: ScoringTestDiffField[] = ['roundRanks', 'roundAwardScores', 'aggregateScore']
-    for (const field of fields) {
-      if (!valuesEqual(expected[field], current[field])) {
+    if (!ranksEqual(expected.roundRanks, current.roundRanks)) {
+      diffs.push({
+        entryId: expected.entryId,
+        field: 'roundRanks',
+        expected: structuredClone(expected.roundRanks),
+        actual: structuredClone(current.roundRanks),
+      })
+    }
+
+    try {
+      if (!exactArraysEqual(expected.roundAwardScores, current.roundAwardScores)) {
         diffs.push({
           entryId: expected.entryId,
-          field,
-          expected: structuredClone(expected[field]),
-          actual: structuredClone(current[field]),
+          field: 'roundAwardScores',
+          expected: expected.roundAwardScores.map(canonicalizeExactValue),
+          actual: current.roundAwardScores.map(canonicalizeExactValue),
         })
       }
+      if (!exactValuesEqual(expected.aggregateScore, current.aggregateScore)) {
+        diffs.push({
+          entryId: expected.entryId,
+          field: 'aggregateScore',
+          expected: canonicalizeExactValue(expected.aggregateScore),
+          actual: canonicalizeExactValue(current.aggregateScore),
+        })
+      }
+    } catch (error) {
+      return invalid(testCase, error instanceof Error ? error.message : '得点テスト期待値が不正です。')
     }
   }
 
@@ -189,7 +222,7 @@ export function approveScoringTestChange(
   }
 
   const approved = structuredClone(testCase)
-  approved.expected = structuredClone(result.actual)
+  approved.expected = result.actual.map(canonicalParticipant)
   approved.lastApprovedChange = { ...metadata }
   return approved
 }
