@@ -256,6 +256,72 @@ fieldset {
   border-top: 1px solid #dbe3ec;
 }
 
+.scoring-simulator,
+.simulator-results,
+.simulator-trace,
+.simulator-save,
+.saved-scoring-tests {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.scoring-simulator h5,
+.scoring-simulator h6 {
+  margin: 0;
+}
+
+.simulator-round small {
+  display: block;
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
+.simulator-results {
+  padding-top: 0.75rem;
+  border-top: 1px solid #dbe3ec;
+}
+
+.simulator-result {
+  gap: 1rem;
+}
+
+.simulator-trace {
+  padding-top: 0.5rem;
+  border-top: 1px solid #e5e7eb;
+}
+
+.simulator-trace ul {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.aggregate-trace {
+  font-weight: 600;
+}
+
+.simulator-save {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  padding-top: 0.75rem;
+  border-top: 1px solid #dbe3ec;
+}
+
+.saved-scoring-tests {
+  padding-top: 0.75rem;
+  border-top: 1px solid #dbe3ec;
+}
+
+.regression-review {
+  border-width: 2px;
+}
+
+.review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
 .status-bar {
   display: flex;
   flex-wrap: wrap;
@@ -273,7 +339,8 @@ fieldset {
 
 @media (max-width: 720px) {
   .config-grid.two-columns,
-  .config-grid.three-columns {
+  .config-grid.three-columns,
+  .simulator-save {
     grid-template-columns: 1fr;
   }
 
