@@ -1,5 +1,14 @@
 import type { TeamId } from './ids'
-import type { CalculationTraceStep, ScoringProfile, TeamScoreResult } from './scoring'
+import type {
+  CalculationTraceStep,
+  ParticipantScoreResult,
+  RankedParticipantValue,
+  ScoringProfile,
+  ScoringScenario,
+  ScoringScenarioParticipantResult,
+  ScoringScenarioResult,
+  TeamScoreResult,
+} from './scoring'
 
 export interface RankedValue {
   teamId: TeamId
@@ -46,16 +55,16 @@ function awardForGroup(
   }
 }
 
-export function calculateRankedScores(
-  input: RankedValue[],
+export function calculateRankedParticipants<TId extends string>(
+  input: RankedParticipantValue<TId>[],
   profile: ScoringProfile,
-): TeamScoreResult[] {
+): ParticipantScoreResult<TId>[] {
   const sorted = [...input].sort((left, right) => {
     const delta = left.value - right.value
     return profile.rankingRule.direction === 'LOWER_IS_BETTER' ? delta : -delta
   })
 
-  const results: TeamScoreResult[] = []
+  const results: ParticipantScoreResult<TId>[] = []
   let index = 0
 
   while (index < sorted.length) {
@@ -76,7 +85,7 @@ export function calculateRankedScores(
       if (!item) continue
 
       results.push({
-        teamId: item.teamId,
+        participantId: item.participantId,
         rank,
         awardScore: award.score,
         trace: [
@@ -91,4 +100,65 @@ export function calculateRankedScores(
   }
 
   return results
+}
+
+export function calculateRankedScores(
+  input: RankedValue[],
+  profile: ScoringProfile,
+): TeamScoreResult[] {
+  return calculateRankedParticipants(
+    input.map((item) => ({ participantId: item.teamId, value: item.value })),
+    profile,
+  ).map((item) => ({
+    teamId: item.participantId,
+    rank: item.rank,
+    awardScore: item.awardScore,
+    trace: item.trace,
+  }))
+}
+
+export function calculateScoringScenario<TId extends string>(
+  scenario: ScoringScenario<TId>,
+  profile: ScoringProfile,
+): ScoringScenarioResult<TId> {
+  if (profile.aggregationRule !== 'SUM') {
+    throw new Error(`Unsupported aggregation rule: ${profile.aggregationRule}`)
+  }
+
+  const participants = new Map<TId, ScoringScenarioParticipantResult<TId>>()
+
+  for (const round of scenario.rounds) {
+    const ranked = calculateRankedParticipants(round.values, profile)
+    for (const result of ranked) {
+      const existing = participants.get(result.participantId) ?? {
+        participantId: result.participantId,
+        rounds: [],
+        aggregateScore: 0,
+        aggregateTrace: [],
+      }
+      existing.rounds.push({
+        roundId: round.roundId,
+        rank: result.rank,
+        awardScore: result.awardScore,
+        trace: result.trace,
+      })
+      participants.set(result.participantId, existing)
+    }
+  }
+
+  for (const participant of participants.values()) {
+    const scores = participant.rounds.map((round) => round.awardScore)
+    const aggregateScore = scores.reduce((sum, score) => sum + score, 0)
+    participant.aggregateScore = aggregateScore
+    participant.aggregateTrace = [
+      {
+        code: 'AGGREGATE',
+        label: 'ラウンド得点を合計',
+        expression: `${scores.join(' + ')} = ${aggregateScore}`,
+        value: aggregateScore,
+      },
+    ]
+  }
+
+  return { participants: [...participants.values()] }
 }
