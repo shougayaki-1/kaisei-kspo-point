@@ -87,7 +87,7 @@ describe('Host authoritative scoring service', () => {
     const projection = (await service.loadAuthoritativeState()).projections.find((item) => item.resultId === stored.resultId)!
     expect(projection.conflictState.status).toBe('RESOLVED')
     expect(projection.resolutionHistory).toHaveLength(1)
-    expect(projection.resolutionHistory[0]?.decision).toBe('MERGE')
+    expect(projection.resolutionHistory[0]?.decision).toBe('MERGED')
     const resolutionRevision = projection.revisions.find((item) => item.revisionId === projection.effectiveRevisionId)!
     expect(new Set(resolutionRevision.parentRevisionIds)).toEqual(new Set([left.revisionId, right.revisionId]))
     expect(await repository.hasRevision(left.revisionId)).toBe(true)
