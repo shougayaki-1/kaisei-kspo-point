@@ -16,11 +16,36 @@ body {
   min-height: 100vh;
 }
 
+button,
+input,
+textarea {
+  font: inherit;
+}
+
 button {
   min-height: 44px;
   padding: 0.75rem 1rem;
-  font: inherit;
   cursor: pointer;
+}
+
+textarea,
+input[type="text"],
+input:not([type]) {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.5rem;
+  padding: 0.65rem;
+  background: #ffffff;
+}
+
+textarea {
+  resize: vertical;
+  overflow-wrap: anywhere;
+}
+
+label {
+  display: grid;
+  gap: 0.35rem;
 }
 
 .app-shell {
@@ -30,15 +55,77 @@ button {
 }
 
 main {
-  width: min(720px, calc(100% - 2rem));
+  width: min(820px, calc(100% - 2rem));
   margin: 0 auto;
   padding: 3rem 0;
 }
 
-.mode-actions {
+.mode-actions,
+.mode-header,
+.transfer-navigation {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
+}
+
+.mode-header {
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+}
+
+.transfer-panel {
+  display: grid;
+  gap: 1rem;
+  padding: 1.25rem;
+  border: 1px solid #dbe3ec;
+  border-radius: 0.75rem;
+  background: #ffffff;
+}
+
+.transfer-panel h2,
+.transfer-panel p {
+  margin-top: 0;
+}
+
+.transfer-candidates {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+  border: 1px solid #dbe3ec;
+  border-radius: 0.5rem;
+}
+
+.transfer-candidates label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.transfer-card {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.5rem;
+  background: #f8fafc;
+}
+
+.manual-override {
+  display: grid;
+  gap: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #dbe3ec;
+}
+
+.transfer-message {
+  margin: 0;
+  font-weight: 600;
+}
+
+.transfer-error {
+  margin: 0;
+  font-weight: 600;
 }
 
 .status-bar {
