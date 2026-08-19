@@ -1,0 +1,29 @@
+name: Phase 5 PWA artifact gate
+
+on:
+  push:
+    branches:
+      - feat/phase5-pwa-offline-safety-data-controls
+
+permissions:
+  contents: read
+
+jobs:
+  verify-pwa-artifact:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Build production app
+        run: npm run build
+      - name: Require generated PWA artifact and app-shell precache
+        run: |
+          test -f dist/sw.js
+          test -f dist/manifest.webmanifest
+          grep -q 'index.html' dist/sw.js
+          grep -q 'assets/' dist/sw.js
