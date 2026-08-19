@@ -8,11 +8,13 @@ import { TransferDemo } from './TransferDemo'
 
 type AppMode = 'HOST' | 'COURT' | null
 type HostTab = 'CONFIG' | 'QR'
+type AppConfigRepository = Pick<ConfigRepository, 'loadCurrent' | 'apply'> &
+  Partial<Pick<ConfigRepository, 'previewRegression'>>
 
 export interface AppProps {
   confirmReload?: (message: string) => boolean
   reload?: () => void
-  configRepository?: Pick<ConfigRepository, 'loadCurrent' | 'apply'>
+  configRepository?: AppConfigRepository
   operatorName?: string
 }
 
@@ -34,9 +36,12 @@ export function App({
   const appDatabase = useMemo(() => createDatabase(), [])
   const browserConfigRepository = useMemo(() => new ConfigRepository(appDatabase), [appDatabase])
   const resolvedConfigRepository = configRepository ?? browserConfigRepository
-  const editorConfigRepository = useMemo<Pick<ConfigRepository, 'loadCurrent' | 'apply'>>(
+  const editorConfigRepository = useMemo<AppConfigRepository>(
     () => ({
       loadCurrent: (tournamentId) => resolvedConfigRepository.loadCurrent(tournamentId),
+      previewRegression: resolvedConfigRepository.previewRegression
+        ? (snapshot) => resolvedConfigRepository.previewRegression!(snapshot)
+        : undefined,
       apply: async (snapshot, metadata) => {
         const result = await resolvedConfigRepository.apply(snapshot, metadata)
         setActiveTournamentId(result.snapshot.tournament.tournamentId)

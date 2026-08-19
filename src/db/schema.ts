@@ -11,10 +11,11 @@ import type {
   Tournament,
 } from '../domain/tournament'
 import type { InputSchema } from '../config/input-schema'
+import type { ScoringTestCase } from '../config/scoring-test-case'
 import type { TournamentConfigSnapshot } from '../config/tournament-config'
 import type { AckBatch, TransferBatch } from '../transfer/types'
 
-export const DATABASE_SCHEMA_VERSION = 3
+export const DATABASE_SCHEMA_VERSION = 4
 
 export interface AppMetaRecord {
   key: string
@@ -103,6 +104,7 @@ export type DatabaseRecordTypes = {
   scoringSessions: ScoringSession
   inputSchemas: InputSchema
   scoringProfiles: ScoringProfile
+  scoringTestCases: ScoringTestCase
   configVersions: ConfigVersionRecord
   results: Result
   resultRevisions: ResultRevision
@@ -145,4 +147,9 @@ export const schemaV2 = {
 export const schemaV3 = {
   ...schemaV2,
   inputSchemas: 'inputSchemaId,competitionId,version',
+} as const
+
+export const schemaV4 = {
+  ...schemaV3,
+  scoringTestCases: 'testCaseId,competitionId',
 } as const
