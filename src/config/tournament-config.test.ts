@@ -86,6 +86,7 @@ function validSnapshot(): TournamentConfigSnapshot {
         aggregationRule: 'SUM',
       },
     ],
+    scoringTestCases: [],
   }
 }
 
