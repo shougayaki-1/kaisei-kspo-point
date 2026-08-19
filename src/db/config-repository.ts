@@ -210,6 +210,7 @@ export class ConfigRepository {
       scoringSessions,
       inputSchemas,
       scoringProfiles,
+      scoringTestCases: [],
     })
   }
 }
