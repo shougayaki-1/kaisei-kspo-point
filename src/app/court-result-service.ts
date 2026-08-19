@@ -1,4 +1,9 @@
-import type { InputField, InputSchema } from '../config/input-schema'
+import type {
+  InputField,
+  InputSchema,
+  NumberInputField,
+  PenaltyInputField,
+} from '../config/input-schema'
 import { validateTournamentConfig, type TournamentConfigSnapshot } from '../config/tournament-config'
 import {
   canonicalizeDecimalInput,
@@ -15,7 +20,13 @@ import {
   type ScoringSessionId,
   type TournamentId,
 } from '../domain/ids'
-import type { InputMode, RawResultData, Result, ResultRevision } from '../domain/result'
+import type {
+  InputMode,
+  RawResultData,
+  RawValue,
+  Result,
+  ResultRevision,
+} from '../domain/result'
 import type { ResultProjection } from '../domain/result-projection'
 import type { CompetitionEntry, CourtRun, InputScope, ScoringSession } from '../domain/tournament'
 import { ConfigRepository } from '../db/config-repository'
@@ -39,11 +50,13 @@ export interface CourtSessionDefinition {
   configVersion: number
 }
 
-export interface CourtRawResultData extends RawResultData {
+type CourtEntryValues = Record<string, RawValue>
+
+export type CourtRawResultData = {
   inputSchemaId: string
   inputSchemaVersion: number
   courtRunIds: CourtRunId[]
-  entries: Record<string, Record<string, unknown>>
+  entries: Record<string, CourtEntryValues>
 }
 
 export interface SaveCourtResultInput {
@@ -76,7 +89,10 @@ function clone<T>(value: T): T {
   return structuredClone(value)
 }
 
-function canonicalDecimal(value: unknown, field: InputField): ExactValue {
+function canonicalDecimal(
+  value: unknown,
+  field: NumberInputField | PenaltyInputField,
+): ExactValue {
   if (typeof value !== 'string' && typeof value !== 'number') {
     throw new Error(`${field.label} (${field.key}) must be a decimal value`)
   }
@@ -104,7 +120,7 @@ function integerValue(value: unknown, field: InputField, minimum: number): numbe
   return parsed
 }
 
-function canonicalFieldValue(field: InputField, value: unknown): unknown {
+function canonicalFieldValue(field: InputField, value: unknown): RawValue | undefined {
   if (value === undefined || value === null || value === '') {
     if (field.required) throw new Error(`${field.label} (${field.key}) is required`)
     return undefined
@@ -121,7 +137,7 @@ function canonicalFieldValue(field: InputField, value: unknown): unknown {
       if (typeof value !== 'boolean') throw new Error(`${field.label} (${field.key}) must be boolean`)
       return value
     case 'SELECT':
-      if (typeof value !== 'string' || !(field.options ?? []).includes(value)) {
+      if (typeof value !== 'string' || !field.options.some((option) => option.value === value)) {
         throw new Error(`${field.label} (${field.key}) must use a configured option`)
       }
       return value
@@ -134,7 +150,10 @@ function canonicalFieldValue(field: InputField, value: unknown): unknown {
   }
 }
 
-function selectActiveInputSchema(snapshot: TournamentConfigSnapshot, competitionId: string): InputSchema {
+function selectActiveInputSchema(
+  snapshot: TournamentConfigSnapshot,
+  competitionId: string,
+): InputSchema {
   const candidates = snapshot.inputSchemas.filter((schema) => schema.competitionId === competitionId)
   if (candidates.length === 0) throw new Error(`InputSchema is missing for competition ${competitionId}`)
   const highestVersion = Math.max(...candidates.map((schema) => schema.version))
@@ -145,7 +164,9 @@ function selectActiveInputSchema(snapshot: TournamentConfigSnapshot, competition
 
 function rawDataCourtRuns(rawData: RawResultData): CourtRunId[] | undefined {
   const value = rawData as Partial<CourtRawResultData>
-  if (!Array.isArray(value.courtRunIds) || !value.courtRunIds.every((item) => typeof item === 'string')) return undefined
+  if (!Array.isArray(value.courtRunIds) || !value.courtRunIds.every((item) => typeof item === 'string')) {
+    return undefined
+  }
   return value.courtRunIds as CourtRunId[]
 }
 
@@ -154,32 +175,47 @@ export function createCourtResultService(db: AppDatabase, options: CourtResultSe
   const resultRepository = new ResultRepository(db)
   const now = options.now ?? (() => new Date().toISOString())
 
-  async function activeSnapshot(): Promise<{ snapshot: TournamentConfigSnapshot; configVersion: number }> {
+  async function activeSnapshot(): Promise<{
+    snapshot: TournamentConfigSnapshot
+    configVersion: number
+  }> {
     const tournaments = await db.tournaments.toArray()
     if (tournaments.length === 0) throw new Error('Active Tournament / ConfigVersion is not configured')
     if (tournaments.length !== 1) throw new Error('Multiple active tournaments are not supported on one Court device')
     const active = await configRepository.getActiveVersion(tournaments[0]!.tournamentId)
     if (!active) throw new Error('Active ConfigVersion is not available')
     const errors = validateTournamentConfig(active.snapshot).filter((issue) => issue.severity === 'ERROR')
-    if (errors.length > 0) throw new Error(`Active ConfigVersion is invalid: ${errors.map((issue) => issue.code).join(', ')}`)
+    if (errors.length > 0) {
+      throw new Error(`Active ConfigVersion is invalid: ${errors.map((issue) => issue.code).join(', ')}`)
+    }
     return { snapshot: clone(active.snapshot), configVersion: active.version }
   }
 
-  async function sessionDefinition(scoringSessionId: ScoringSessionId): Promise<CourtSessionDefinition> {
+  async function sessionDefinition(
+    scoringSessionId: ScoringSessionId,
+  ): Promise<CourtSessionDefinition> {
     const { snapshot, configVersion } = await activeSnapshot()
     const session = snapshot.scoringSessions.find((item) => item.scoringSessionId === scoringSessionId)
-    if (!session) throw new Error(`ScoringSession ${scoringSessionId} does not exist in the active ConfigVersion`)
+    if (!session) {
+      throw new Error(`ScoringSession ${scoringSessionId} does not exist in the active ConfigVersion`)
+    }
     const inputSchema = selectActiveInputSchema(snapshot, session.competitionId)
     const persistedSchema = await db.inputSchemas.get(inputSchema.inputSchemaId)
-    if (!persistedSchema || persistedSchema.version !== inputSchema.version || persistedSchema.competitionId !== inputSchema.competitionId) {
+    if (
+      !persistedSchema ||
+      persistedSchema.version !== inputSchema.version ||
+      persistedSchema.competitionId !== inputSchema.competitionId
+    ) {
       throw new Error(`Active InputSchema ${inputSchema.inputSchemaId} is not materialized consistently`)
     }
+
     const courtRunById = new Map(snapshot.courtRuns.map((run) => [run.courtRunId, run]))
     const courtRuns = session.courtRunIds.map((id) => {
       const run = courtRunById.get(id)
       if (!run) throw new Error(`ScoringSession ${scoringSessionId} references unknown CourtRun ${id}`)
       return clone(run)
     })
+
     const entryById = new Map(snapshot.competitionEntries.map((entry) => [entry.entryId, entry]))
     const seen = new Set<string>()
     const entries: CompetitionEntry[] = []
@@ -194,6 +230,7 @@ export function createCourtResultService(db: AppDatabase, options: CourtResultSe
         entries.push(clone(entry))
       }
     }
+
     return {
       tournamentId: snapshot.tournament.tournamentId,
       session: clone(session),
@@ -210,28 +247,38 @@ export function createCourtResultService(db: AppDatabase, options: CourtResultSe
     const requestedSet = new Set(requestedIds)
     if (requestedSet.size !== requestedIds.length) throw new Error('Duplicate CourtRun selection is not allowed')
     for (const id of requestedSet) {
-      if (!definition.session.courtRunIds.includes(id)) throw new Error(`CourtRun ${id} is not part of the selected ScoringSession`)
+      if (!definition.session.courtRunIds.includes(id)) {
+        throw new Error(`CourtRun ${id} is not part of the selected ScoringSession`)
+      }
     }
     const courtRuns = definition.courtRuns.filter((run) => requestedSet.has(run.courtRunId))
     const entryIds = new Set<CompetitionEntryId>()
-    for (const run of courtRuns) for (const entryId of run.participantEntryIds) entryIds.add(entryId)
+    for (const run of courtRuns) {
+      for (const entryId of run.participantEntryIds) entryIds.add(entryId)
+    }
     const entries = definition.entries.filter((entry) => entryIds.has(entry.entryId))
     return { courtRuns, entries }
   }
 
-  function canonicalValues(schema: InputSchema, expectedEntries: CompetitionEntry[], values: Record<string, Record<string, unknown>>): Record<string, Record<string, unknown>> {
+  function canonicalValues(
+    schema: InputSchema,
+    expectedEntries: CompetitionEntry[],
+    values: Record<string, Record<string, unknown>>,
+  ): Record<string, CourtEntryValues> {
     const expected = new Set(expectedEntries.map((entry) => entry.entryId))
     for (const entryId of Object.keys(values)) {
-      if (!expected.has(entryId as CompetitionEntryId)) throw new Error(`Unknown CompetitionEntry ${entryId}`)
+      if (!expected.has(entryId as CompetitionEntryId)) {
+        throw new Error(`Unknown CompetitionEntry ${entryId}`)
+      }
     }
     const fieldKeys = new Set(schema.fields.map((field) => field.key))
-    const output: Record<string, Record<string, unknown>> = {}
+    const output: Record<string, CourtEntryValues> = {}
     for (const entry of expectedEntries) {
       const source = values[entry.entryId] ?? {}
       for (const key of Object.keys(source)) {
         if (!fieldKeys.has(key)) throw new Error(`Unknown InputSchema field ${key}`)
       }
-      const row: Record<string, unknown> = {}
+      const row: CourtEntryValues = {}
       for (const field of schema.fields) {
         const value = canonicalFieldValue(field, source[field.key])
         if (value !== undefined) row[field.key] = value
@@ -259,13 +306,22 @@ export function createCourtResultService(db: AppDatabase, options: CourtResultSe
         if (cause instanceof Error && /not configured/.test(cause.message)) return []
         throw cause
       }
-      const competitionById = new Map(active.snapshot.competitions.map((competition) => [competition.competitionId, competition]))
+      const competitionById = new Map(
+        active.snapshot.competitions.map((competition) => [competition.competitionId, competition]),
+      )
       return [...active.snapshot.scoringSessions]
-        .sort((left, right) => left.scoringSessionId < right.scoringSessionId ? -1 : left.scoringSessionId > right.scoringSessionId ? 1 : 0)
+        .sort((left, right) =>
+          left.scoringSessionId < right.scoringSessionId
+            ? -1
+            : left.scoringSessionId > right.scoringSessionId
+              ? 1
+              : 0,
+        )
         .map((session) => ({
           scoringSessionId: session.scoringSessionId,
           label: session.label,
-          competitionName: competitionById.get(session.competitionId)?.name ?? String(session.competitionId),
+          competitionName:
+            competitionById.get(session.competitionId)?.name ?? String(session.competitionId),
           inputScope: session.inputScope,
           courtRunCount: session.courtRunIds.length,
         }))
@@ -273,7 +329,9 @@ export function createCourtResultService(db: AppDatabase, options: CourtResultSe
 
     loadSession: sessionDefinition,
 
-    async saveResult(input: SaveCourtResultInput): Promise<{ result: Result; revision: ResultRevision }> {
+    async saveResult(
+      input: SaveCourtResultInput,
+    ): Promise<{ result: Result; revision: ResultRevision }> {
       if (!input.operator.trim()) throw new Error('Operator is required')
       const definition = await sessionDefinition(input.scoringSessionId)
       const selected = selectedContext(definition, input.courtRunIds)
@@ -314,7 +372,9 @@ export function createCourtResultService(db: AppDatabase, options: CourtResultSe
       return { result: stored, revision: clone(revision) }
     },
 
-    async correctResult(input: CorrectCourtResultInput): Promise<{ result: Result; revision: ResultRevision }> {
+    async correctResult(
+      input: CorrectCourtResultInput,
+    ): Promise<{ result: Result; revision: ResultRevision }> {
       if (!input.operator.trim()) throw new Error('Operator is required')
       const prior = await history(input.resultId)
       if (prior.projection.conflictState.status === 'UNRESOLVED') {
@@ -323,7 +383,9 @@ export function createCourtResultService(db: AppDatabase, options: CourtResultSe
       const parent = prior.projection.effectiveRevision
       if (!parent) throw new Error(`Result ${input.resultId} has no effective revision`)
       const definition = await sessionDefinition(prior.result.scoringSessionId)
-      if (definition.session.competitionId !== prior.result.competitionId) throw new Error('Active ScoringSession is incompatible with Result competition')
+      if (definition.session.competitionId !== prior.result.competitionId) {
+        throw new Error('Active ScoringSession is incompatible with Result competition')
+      }
       const selectedRunIds = rawDataCourtRuns(parent.rawData) ?? definition.session.courtRunIds
       const selected = selectedContext(definition, selectedRunIds)
       const entries = canonicalValues(definition.inputSchema, selected.entries, input.values)
