@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { getOrCreateDeviceId } from '../device/device-service'
+import { TransferDemo } from './TransferDemo'
 
 type AppMode = 'HOST' | 'COURT' | null
 
@@ -29,17 +30,27 @@ export function App({
   if (mode === 'HOST') {
     content = (
       <>
-        <h1>本部モード</h1>
-        <p>大会全体の集計・設定を管理します。</p>
-        <button type="button" onClick={() => setMode(null)}>モード選択へ戻る</button>
+        <div className="mode-header">
+          <div>
+            <h1>本部モード</h1>
+            <p>大会全体の集計・設定を管理します。</p>
+          </div>
+          <button type="button" onClick={() => setMode(null)}>モード選択へ戻る</button>
+        </div>
+        <TransferDemo mode="HOST" deviceId={deviceId} />
       </>
     )
   } else if (mode === 'COURT') {
     content = (
       <>
-        <h1>コートモード</h1>
-        <p>競技結果を端末内に記録します。</p>
-        <button type="button" onClick={() => setMode(null)}>モード選択へ戻る</button>
+        <div className="mode-header">
+          <div>
+            <h1>コートモード</h1>
+            <p>競技結果を端末内に記録します。</p>
+          </div>
+          <button type="button" onClick={() => setMode(null)}>モード選択へ戻る</button>
+        </div>
+        <TransferDemo mode="COURT" deviceId={deviceId} />
       </>
     )
   } else {

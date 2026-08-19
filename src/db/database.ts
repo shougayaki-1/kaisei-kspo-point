@@ -13,6 +13,7 @@ import type {
 import {
   DATABASE_SCHEMA_VERSION,
   schemaV1,
+  schemaV2,
   type AcknowledgementRecord,
   type AppMetaRecord,
   type AuditEventRecord,
@@ -20,6 +21,7 @@ import {
   type LocalSettingRecord,
   type OperatorRecord,
   type ReceivedQrPartRecord,
+  type RevisionDeliveryRecord,
   type TransferBatchRecord,
 } from './schema'
 
@@ -39,13 +41,15 @@ export class AppDatabase extends Dexie {
   transferBatches!: Table<TransferBatchRecord, string>
   receivedQrParts!: Table<ReceivedQrPartRecord, number>
   acknowledgements!: Table<AcknowledgementRecord, string>
+  revisionDeliveries!: Table<RevisionDeliveryRecord, string>
   operators!: Table<OperatorRecord, string>
   auditEvents!: Table<AuditEventRecord, string>
   localSettings!: Table<LocalSettingRecord, string>
 
   constructor(name: string) {
     super(name)
-    this.version(DATABASE_SCHEMA_VERSION).stores(schemaV1)
+    this.version(1).stores(schemaV1)
+    this.version(DATABASE_SCHEMA_VERSION).stores(schemaV2)
   }
 }
 
