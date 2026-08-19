@@ -11,6 +11,14 @@ import type { AppDatabase } from './database'
 export class ResultRepository {
   constructor(private readonly db: AppDatabase) {}
 
+  private assertResolutionMetadataPath(revision: ResultRevision): void {
+    if (revision.source === 'CONFLICT_RESOLUTION') {
+      throw new Error(
+        'CONFLICT_RESOLUTION revisions require resolution metadata; use saveConflictResolution',
+      )
+    }
+  }
+
   private async putRevisionImmutable(revision: ResultRevision): Promise<void> {
     const existing = await this.db.resultRevisions.get(revision.revisionId)
     if (existing) {
@@ -43,6 +51,7 @@ export class ResultRepository {
     if (result.resultId !== revision.resultId) {
       throw new Error('Result and revision IDs do not match')
     }
+    this.assertResolutionMetadataPath(revision)
 
     await this.db.transaction(
       'rw',
@@ -68,6 +77,7 @@ export class ResultRepository {
     if (resultSnapshot.resultId !== revision.resultId) {
       throw new Error('Result and revision IDs do not match')
     }
+    this.assertResolutionMetadataPath(revision)
 
     return this.db.transaction(
       'rw',
