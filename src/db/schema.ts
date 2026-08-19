@@ -1,3 +1,6 @@
+import type { RevisionId } from '../domain/ids'
+import type { Result, ResultRevision } from '../domain/result'
+import type { ScoringProfile } from '../domain/scoring'
 import type {
   Competition,
   CompetitionEntry,
@@ -7,10 +10,9 @@ import type {
   Team,
   Tournament,
 } from '../domain/tournament'
-import type { Result, ResultRevision } from '../domain/result'
-import type { ScoringProfile } from '../domain/scoring'
+import type { AckBatch, TransferBatch } from '../transfer/types'
 
-export const DATABASE_SCHEMA_VERSION = 1
+export const DATABASE_SCHEMA_VERSION = 2
 
 export interface AppMetaRecord {
   key: string
@@ -25,21 +27,28 @@ export interface ConfigVersionRecord {
   snapshot: unknown
 }
 
+export type TransferBatchStatus = 'PENDING' | 'ACKNOWLEDGED' | 'MANUAL'
+
 export interface TransferBatchRecord {
   batchId: string
   tournamentId: string
-  status: string
+  status: TransferBatchStatus
   createdAt: string
-  payload: unknown
+  batch: TransferBatch
+  encodedParts: string[]
+  currentPartIndex: number
 }
 
 export interface ReceivedQrPartRecord {
   id?: number
   batchId: string
+  tournamentId: string
   partIndex: number
   totalParts: number
-  payload: string
-  checksum: string
+  resultCount: number
+  batchChecksum: string
+  chunkChecksum: string
+  encoded: string
   receivedAt: string
 }
 
@@ -47,7 +56,16 @@ export interface AcknowledgementRecord {
   ackId: string
   batchId: string
   createdAt: string
-  payload: unknown
+  ack: AckBatch
+}
+
+export type RevisionDeliveryStatus = 'PENDING' | 'DELIVERED' | 'MANUAL'
+
+export interface RevisionDeliveryRecord {
+  revisionId: RevisionId
+  batchId: string
+  status: RevisionDeliveryStatus
+  updatedAt: string
 }
 
 export interface OperatorRecord {
@@ -84,6 +102,7 @@ export type DatabaseRecordTypes = {
   transferBatches: TransferBatchRecord
   receivedQrParts: ReceivedQrPartRecord
   acknowledgements: AcknowledgementRecord
+  revisionDeliveries: RevisionDeliveryRecord
   operators: OperatorRecord
   auditEvents: AuditEventRecord
   localSettings: LocalSettingRecord
@@ -108,4 +127,10 @@ export const schemaV1 = {
   operators: 'operatorId',
   auditEvents: 'eventId,type,timestamp',
   localSettings: 'key',
+} as const
+
+export const schemaV2 = {
+  ...schemaV1,
+  receivedQrParts: '++id,[batchId+partIndex],batchId,tournamentId',
+  revisionDeliveries: 'revisionId,batchId,status',
 } as const
