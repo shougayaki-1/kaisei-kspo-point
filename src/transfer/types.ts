@@ -4,6 +4,22 @@ import type { Result, ResultRevision } from '../domain/result'
 export const QR_PROTOCOL_VERSION = 1 as const
 export const QR_FRAME_PREFIX = 'KSPO1:' as const
 
+export type QrPayloadKind = 'RESULT_BATCH' | 'ACK_BATCH' | 'CONFIG_UPDATE'
+
+export interface QrFrame {
+  protocolVersion: typeof QR_PROTOCOL_VERSION
+  type: 'QR_FRAME'
+  payloadKind: QrPayloadKind
+  tournamentId: TournamentId
+  transferId: string
+  partIndex: number
+  totalParts: number
+  itemCount: number
+  chunkChecksum: string
+  payloadChecksum: string
+  data: string
+}
+
 export interface TransferBatch {
   protocolVersion: typeof QR_PROTOCOL_VERSION
   type: 'TRANSFER_BATCH'
@@ -16,18 +32,7 @@ export interface TransferBatch {
   revisions: ResultRevision[]
 }
 
-export interface TransferQrFragment {
-  protocolVersion: typeof QR_PROTOCOL_VERSION
-  type: 'TRANSFER_FRAGMENT'
-  tournamentId: TournamentId
-  batchId: BatchId
-  partIndex: number
-  totalParts: number
-  resultCount: number
-  chunkChecksum: string
-  batchChecksum: string
-  payload: string
-}
+export type TransferQrFragment = QrFrame
 
 export type AckRevisionStatus =
   | 'ACCEPTED'
