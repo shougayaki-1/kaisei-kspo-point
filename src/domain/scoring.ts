@@ -36,3 +36,42 @@ export interface TeamScoreResult {
   awardScore: number
   trace: CalculationTraceStep[]
 }
+
+export interface RankedParticipantValue<TId extends string = string> {
+  participantId: TId
+  value: number
+}
+
+export interface ParticipantScoreResult<TId extends string = string> {
+  participantId: TId
+  rank: number
+  awardScore: number
+  trace: CalculationTraceStep[]
+}
+
+export interface ScoringScenarioRound<TId extends string = string> {
+  roundId: string
+  values: RankedParticipantValue<TId>[]
+}
+
+export interface ScoringScenario<TId extends string = string> {
+  rounds: ScoringScenarioRound<TId>[]
+}
+
+export interface ScoringScenarioParticipantRoundResult {
+  roundId: string
+  rank: number
+  awardScore: number
+  trace: CalculationTraceStep[]
+}
+
+export interface ScoringScenarioParticipantResult<TId extends string = string> {
+  participantId: TId
+  rounds: ScoringScenarioParticipantRoundResult[]
+  aggregateScore: number
+  aggregateTrace: CalculationTraceStep[]
+}
+
+export interface ScoringScenarioResult<TId extends string = string> {
+  participants: ScoringScenarioParticipantResult<TId>[]
+}
