@@ -150,6 +150,14 @@ describe('validateTournamentConfig', () => {
     expect(errorCodes(snapshot)).toContain('DUPLICATE_RANK_POINT')
   })
 
+  it('requires a positive integer bestN for BEST_N aggregation', () => {
+    const snapshot = validSnapshot()
+    snapshot.scoringProfiles[0].aggregationRule = 'BEST_N'
+    snapshot.scoringProfiles[0].aggregationOptions = { bestN: 0 }
+
+    expect(errorCodes(snapshot)).toContain('INVALID_BEST_N')
+  })
+
   it('warns rather than errors when plannedStart is not before plannedEnd', () => {
     const snapshot = validSnapshot()
     snapshot.scheduleSlots[0].plannedStart = '10:00'
