@@ -51,6 +51,22 @@ export interface ScoringTestApprovalMetadata {
   approvedAt: string
 }
 
+export function scoringTestResultFingerprint(
+  result: Pick<ScoringTestRunResult, 'testCaseId' | 'actual'>,
+): string {
+  return JSON.stringify({
+    testCaseId: result.testCaseId,
+    actual: [...result.actual]
+      .sort((left, right) => left.entryId.localeCompare(right.entryId))
+      .map((item) => ({
+        entryId: item.entryId,
+        roundRanks: item.roundRanks,
+        roundAwardScores: item.roundAwardScores,
+        aggregateScore: item.aggregateScore,
+      })),
+  })
+}
+
 function valuesEqual(left: number[] | number, right: number[] | number): boolean {
   if (Array.isArray(left) && Array.isArray(right)) {
     return left.length === right.length && left.every((value, index) => value === right[index])
