@@ -158,4 +158,24 @@ describe('TournamentConfigEditor scoring regression integration', () => {
     })
     expect(await screen.findByText(/Config v2 を適用しました/)).toBeInTheDocument()
   })
+
+  it('locks the editable draft during review and can return without carrying an approval forward', async () => {
+    render(
+      <TournamentConfigEditor
+        repository={repository(configuredSnapshot())}
+        tournamentId={tournamentId}
+        operatorName="本部担当"
+      />,
+    )
+
+    await screen.findByText('Config v1')
+    fireEvent.change(screen.getByLabelText('得点 1'), { target: { value: '50' } })
+    fireEvent.click(screen.getByRole('button', { name: '設定を適用' }))
+    await screen.findByText('得点計算テストの確認が必要です。')
+
+    expect(screen.queryByRole('spinbutton', { name: '得点 1' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '設定を見直す' }))
+    expect(screen.getByRole('spinbutton', { name: '得点 1' })).toHaveValue(50)
+    expect(screen.queryByRole('button', { name: '承認して設定を適用' })).not.toBeInTheDocument()
+  })
 })
