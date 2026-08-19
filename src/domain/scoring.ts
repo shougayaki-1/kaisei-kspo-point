@@ -13,6 +13,10 @@ export interface RankAwardRule {
   rankPoints: Record<number, number>
 }
 
+export interface ScoringAggregationOptions {
+  bestN?: number
+}
+
 export interface ScoringProfile {
   scoringProfileId: ScoringProfileId
   competitionId: CompetitionId
@@ -21,6 +25,7 @@ export interface ScoringProfile {
   tieRule: TieAwardRule
   awardRule: RankAwardRule
   aggregationRule: AggregationRule
+  aggregationOptions?: ScoringAggregationOptions
 }
 
 export interface CalculationTraceStep {
