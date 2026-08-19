@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { DeviceId, TournamentId } from '../domain/ids'
-import type { ResultRevision } from '../domain/result'
+import type { CompetitionId, DeviceId, ScoringSessionId, TournamentId } from '../domain/ids'
+import type { Result, ResultRevision } from '../domain/result'
 import { createTransferBatch, encodeBatchFragments } from './codec'
 import { TransferReceiver } from './receiver'
 
@@ -22,11 +22,25 @@ function revision(id: string): ResultRevision {
   }
 }
 
+function resultFor(item: ResultRevision, targetTournamentId: TournamentId): Result {
+  return {
+    resultId: item.resultId,
+    tournamentId: targetTournamentId,
+    competitionId: 'competition-1' as CompetitionId,
+    scoringSessionId: 'session-1' as ScoringSessionId,
+    currentRevisionId: item.revisionId,
+    createdAt: '2026-08-19T09:59:00+09:00',
+    createdByDeviceId: sourceDeviceId,
+  }
+}
+
 async function encodedBatch(batchId: string, targetTournamentId = tournamentId) {
+  const item = revision(`rev-${batchId}`)
   const batch = createTransferBatch({
     tournamentId: targetTournamentId,
     sourceDeviceId,
-    revisions: [revision(`rev-${batchId}`)],
+    results: [resultFor(item, targetTournamentId)],
+    revisions: [item],
     createdAt: '2026-08-19T10:10:00+09:00',
     batchId,
   })
