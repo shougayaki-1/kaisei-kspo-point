@@ -33,6 +33,8 @@
 - `src/config/scoring-test-case.test.ts`: regression-state and approval tests.
 - `src/config/tournament-config.ts`: include `scoringTestCases` in the snapshot and validate references.
 - `src/config/tournament-config.test.ts`: snapshot validation coverage for test cases.
+- `src/config/draft-service.ts`: initialize test-case storage in new drafts.
+- `src/config/draft-service.test.ts`: draft compatibility coverage.
 - `src/db/schema.ts`: schema v4 with normalized scoring-test-case storage.
 - `src/db/database.ts`: expose the new table and preserve v1-v3 migrations.
 - `src/db/config-repository.ts`: persist/load scoring test cases and enforce the scoring regression gate on apply.
@@ -41,6 +43,7 @@
 - `src/app/ScoringSimulatorPanel.test.tsx`: simulator interaction tests.
 - `src/app/TournamentConfigEditor.tsx`: mount the simulator for each ScoringProfile and pass draft/update/apply context.
 - `src/app/TournamentConfigEditor.test.tsx`: integration tests for blocked and approved ConfigVersion application.
+- `src/app/App.test.tsx`: preserve Host/Court integration.
 - `src/index.css`: simulator layout only.
 
 ### Task 1: Generalize the scoring engine and add standard scenario aggregation
@@ -49,14 +52,16 @@
 - Modify: `src/domain/scoring.ts`
 - Modify: `src/domain/scoring-engine.ts`
 - Modify: `src/domain/scoring-engine.test.ts`
+- Modify: `src/config/tournament-config.ts`
+- Modify: `src/config/tournament-config.test.ts`
 
 **Interfaces:**
 - Produces `RankedParticipantValue<TId extends string>`, `ParticipantScoreResult<TId extends string>`, `ScoringScenario<TId>`, `ScoringScenarioResult<TId>`, and `calculateScoringScenario()`.
 - Keeps `calculateRankedScores()` as a compatibility wrapper for existing TeamId callers.
 - `calculateScoringScenario()` supports `SUM`, `AVERAGE`, `FINAL_ONLY`, and `BEST_N` for rank-point rounds. `BEST_N` requires `ScoringProfile.aggregationOptions.bestN`.
-- `WIN_POINTS` and `CUSTOM` return a typed unsupported error in this phase rather than silently computing.
+- `WIN_POINTS` and `CUSTOM` throw `UnsupportedAggregationError` in this phase rather than silently computing.
 
-- [ ] **Step 1: Write failing engine tests.** Add tests proving: generic CompetitionEntry IDs can be ranked; two rounds with `SUM` produce per-round trace plus `50 + 20 = 70`; `AVERAGE` produces the arithmetic expression; `FINAL_ONLY` uses only the last round; `BEST_N` uses `bestN`; a tie still produces occupied-place averaging; unsupported `WIN_POINTS`/`CUSTOM` are rejected explicitly.
+- [ ] **Step 1: Write failing engine tests.** Add tests proving: generic CompetitionEntry IDs can be ranked; two rounds with `SUM` produce per-round trace plus `30 + 20 = 50`; `AVERAGE` produces the arithmetic expression; `FINAL_ONLY` uses only the last round; `BEST_N` uses `bestN`; a tie still produces occupied-place averaging; unsupported `WIN_POINTS`/`CUSTOM` are rejected explicitly.
 
 ```ts
 const result = calculateScoringScenario({
@@ -71,9 +76,10 @@ expect(result.participants.find((item) => item.participantId === 'entry-1')?.agg
 ```
 
 - [ ] **Step 2: Run `npm run test:run -- src/domain/scoring-engine.test.ts` and verify red.** Expected failure: missing generic scenario types/functions.
-- [ ] **Step 3: Add participant-generic ranking without breaking `calculateRankedScores`.** Factor ranking into a generic internal/public function returning the same `CalculationTraceStep[]`; keep the existing TeamId wrapper signature intact.
-- [ ] **Step 4: Add standard aggregation.** Extend `ScoringProfile` with `aggregationOptions?: { bestN?: number }`; validate `BEST_N` requires a positive integer. Aggregate only completed round award scores and emit `AGGREGATE` trace steps containing the exact arithmetic expression.
-- [ ] **Step 5: Run focused tests, `npm run typecheck`, and `npm run build`; commit `feat: add scoring scenario engine`.**
+- [ ] **Step 3: Add participant-generic ranking without breaking `calculateRankedScores`.** Factor ranking into a generic public function returning the same `CalculationTraceStep[]`; keep the existing TeamId wrapper signature intact.
+- [ ] **Step 4: Add standard aggregation.** Extend `ScoringProfile` with `aggregationOptions?: { bestN?: number }`. Aggregate round award scores and emit `AGGREGATE` trace steps containing the exact arithmetic expression.
+- [ ] **Step 5: Extend configuration validation.** `BEST_N` must have a positive integer `bestN`; other aggregation rules ignore `bestN`. Add focused validation tests.
+- [ ] **Step 6: Run focused tests, `npm run typecheck`, and `npm run build`; commit `feat: add scoring scenario engine`.**
 
 ### Task 2: Saved scoring test-case model and deterministic regression runner
 
@@ -82,15 +88,19 @@ expect(result.participants.find((item) => item.participantId === 'entry-1')?.agg
 - Create: `src/config/scoring-test-case.test.ts`
 - Modify: `src/config/tournament-config.ts`
 - Modify: `src/config/tournament-config.test.ts`
+- Modify: `src/config/draft-service.ts`
+- Modify: `src/config/draft-service.test.ts`
+- Modify fixture builders in `src/db/config-repository.test.ts` and any compile-failing snapshot fixtures.
 
 **Interfaces:**
 - Produces:
   - `ScoringTestCase`
   - `ScoringTestExpectedParticipant`
   - `ScoringTestRunResult`
-  - `runScoringTestCase(testCase, profile)`
+  - `runScoringTestCase(testCase, profile, entries)`
   - `captureExpectedFromScenario(testCase, actual)`
   - `approveScoringTestChange(testCase, actual, metadata)`
+- `runScoringTestCase` receives the competition's `CompetitionEntry[]` so it can reject missing/mismatched entry references deterministically.
 - `ScoringTestCase` fields:
 
 ```ts
@@ -116,10 +126,10 @@ interface ScoringTestCase {
 }
 ```
 
-- [ ] **Step 1: Write failing tests.** Cover PASS with identical ranks/scores; FAIL with changed award points; FAIL with changed tie handling; INVALID when a referenced CompetitionEntry is missing from the configuration; approval replacing only expected output while preserving inputs/name/IDs; deterministic diff ordering.
+- [ ] **Step 1: Write failing tests.** Cover PASS with identical ranks/scores; FAIL with changed award points; FAIL with changed tie handling; INVALID when a referenced CompetitionEntry is absent or belongs to another competition; approval replacing only expected output while preserving inputs/name/IDs; deterministic diff ordering.
 - [ ] **Step 2: Run `npm run test:run -- src/config/scoring-test-case.test.ts src/config/tournament-config.test.ts` and verify red.**
-- [ ] **Step 3: Implement the pure runner and approval helper.** Compare only semantic expected fields, not trace labels, so harmless wording changes do not invalidate saved tests. Include before/after values in each diff.
-- [ ] **Step 4: Add `scoringTestCases: ScoringTestCase[]` to `TournamentConfigSnapshot`.** Update all fixtures/draft creation to initialize `[]`; validate unique IDs, known competition, non-empty name/rounds, known CompetitionEntry IDs belonging to the same competition, and complete expected participants.
+- [ ] **Step 3: Implement the pure runner and approval helper.** Map test-case `entryId` to scenario `participantId`; compare only semantic expected fields, not trace labels, so harmless wording changes do not invalidate saved tests. Include before/after values in each diff.
+- [ ] **Step 4: Add `scoringTestCases: ScoringTestCase[]` to `TournamentConfigSnapshot`.** Update every snapshot fixture and `createEmptyTournamentDraft()` to initialize `[]`; validate unique IDs, known competition, non-empty name/rounds, known CompetitionEntry IDs belonging to the same competition, unique participant per round, and complete expected participants.
 - [ ] **Step 5: Run focused/full tests and commit `feat: add scoring regression test cases`.**
 
 ### Task 3: Persist test cases and enforce the ConfigVersion regression gate
@@ -149,13 +159,13 @@ interface ApplyConfigMetadata {
 }
 ```
 
-- `ConfigRepository.previewRegression(snapshot)` returns test run results for every saved test case against the draft ScoringProfile.
-- `ConfigRepository.apply` rejects changed expected results unless every failing testCaseId is present in approvals; when approved it updates expected output before storing the new immutable snapshot.
+- `ConfigRepository.previewRegression(snapshot)` returns test run results for every saved test case against the draft ScoringProfile and the matching CompetitionEntry set.
+- `ConfigRepository.apply` rejects `FAIL` or `INVALID` results. `FAIL` may be approved only when every failing testCaseId is supplied; `INVALID` always blocks apply. When approved, expected output is updated before the immutable snapshot is stored.
 
-- [ ] **Step 1: Write failing persistence/gate tests.** Prove v1 stores and reloads test cases; v2 scoring change with all tests PASS applies normally; a failing test rejects without writing v2; approving that test applies v2 and updates only its expected output/approval metadata; partial approval of two failures still rejects; transaction failure rolls back normalized test cases and ConfigVersion.
+- [ ] **Step 1: Write failing persistence/gate tests.** Prove v1 stores and reloads test cases; v2 scoring change with all tests PASS applies normally; a failing test rejects without writing v2; approving that test applies v2 and updates only its expected output/approval metadata; partial approval of two failures still rejects; INVALID cannot be approved; transaction failure rolls back normalized test cases and ConfigVersion.
 - [ ] **Step 2: Verify red with `npm run test:run -- src/db/config-repository.test.ts`.**
-- [ ] **Step 3: Upgrade Dexie to schema v4.** Keep explicit v1/v2/v3 definitions untouched, add v4, expose `scoringTestCases` table, and include it in the atomic configuration transaction.
-- [ ] **Step 4: Implement `previewRegression`.** Resolve each test case to the draft profile with the same `competitionId`; return INVALID when a profile is missing rather than throwing an unstructured error.
+- [ ] **Step 3: Upgrade Dexie to schema v4.** Keep explicit v1/v2/v3 definitions untouched, add v4, expose `scoringTestCases` table, and include it in the atomic configuration transaction and normalized-load fallback.
+- [ ] **Step 4: Implement `previewRegression`.** Resolve each test case to the draft profile and competition entries with the same `competitionId`; return typed INVALID results for missing profile/entry problems.
 - [ ] **Step 5: Enforce approvals inside `apply`.** The repository, not only the UI, is the policy boundary. Missing approvals throw `ScoringRegressionError` carrying the failed run results. Approved changes call `approveScoringTestChange` before the snapshot is stored.
 - [ ] **Step 6: Run focused/full tests, typecheck, build; commit `feat: gate config apply on scoring regressions`.**
 
@@ -196,16 +206,19 @@ interface ScoringSimulatorPanelProps {
 **Files:**
 - Modify: `src/app/TournamentConfigEditor.tsx`
 - Modify: `src/app/TournamentConfigEditor.test.tsx`
+- Modify: `src/app/App.tsx`
 - Modify: `src/app/App.test.tsx`
 
 **Interfaces:**
+- `TournamentConfigEditorProps.repository` becomes `Pick<ConfigRepository, 'loadCurrent' | 'apply' | 'previewRegression'>`.
 - Each competition card mounts `ScoringSimulatorPanel` below its scoring rule section.
 - Before apply, the editor calls `repository.previewRegression(draft)`.
 - If all PASS, apply normally.
-- If any FAIL, show a single review panel listing each test name and semantic before→after diffs. Each failed test has `意図した変更として承認`.
+- If any INVALID, show a blocking configuration error.
+- If any FAIL, show one review panel listing each test name and semantic before→after diffs. Each failed test has `意図した変更として承認`.
 - Apply remains disabled until every failed test has an approval. Applying sends approval metadata to the repository; the returned ConfigVersion contains updated expected values.
 
-- [ ] **Step 1: Extend the editor repository prop to include `previewRegression` and write failing integration tests.** Cover unchanged profile→v1 apply; changed profile→blocked; one failed test approved→apply succeeds and message says the expectation was updated; two failed tests with only one approved→still blocked; editing the profile again clears stale approvals and forces rerun.
+- [ ] **Step 1: Extend the editor/App repository props and write failing integration tests.** Cover unchanged profile→v1 apply; changed profile→blocked; one failed test approved→apply succeeds and message says the expectation was updated; two failed tests with only one approved→still blocked; INVALID remains blocked; editing the profile again clears stale approvals and forces rerun.
 - [ ] **Step 2: Verify red.**
 - [ ] **Step 3: Mount `ScoringSimulatorPanel` using draft-scoped callbacks.** Save/delete mutates only the in-memory draft until ConfigVersion apply.
 - [ ] **Step 4: Add pre-apply regression review state.** Key approvals by `{testCaseId, actual-output-fingerprint}` so an approval cannot accidentally carry over after another scoring edit.
@@ -223,6 +236,7 @@ Phase 4 is ready for merge only when CI proves all of the following:
 - ConfigVersion persistence keeps old expected outputs immutable.
 - A scoring change that alters any saved expected output is rejected by `ConfigRepository.apply` without explicit approval.
 - Every failing test must be individually approved; partial approval cannot bypass the gate.
+- INVALID saved tests cannot be approved and always block apply until corrected.
 - Approval updates expectations in the new ConfigVersion and records operator/time metadata.
 - Existing Phase 1 Result/Revision, Phase 2 QR/ACK, and Phase 3 configuration tests remain green.
 - `npm ci`, all Vitest tests, TypeScript typecheck, and production Vite build succeed.
