@@ -1,5 +1,5 @@
 import type { BatchId, DeviceId, TournamentId } from '../domain/ids'
-import type { ResultRevision } from '../domain/result'
+import type { Result, ResultRevision } from '../domain/result'
 import {
   QR_FRAME_PREFIX,
   QR_PROTOCOL_VERSION,
@@ -10,6 +10,7 @@ import {
 interface CreateTransferBatchInput {
   tournamentId: TournamentId
   sourceDeviceId: DeviceId
+  results: Result[]
   revisions: ResultRevision[]
   createdAt: string
   batchId: string
@@ -65,6 +66,7 @@ export function createTransferBatch(input: CreateTransferBatchInput): TransferBa
     sourceDeviceId: input.sourceDeviceId,
     createdAt: input.createdAt,
     resultCount: input.revisions.length,
+    results: input.results,
     revisions: input.revisions,
   }
 }
@@ -102,10 +104,16 @@ function assertBatchShape(value: unknown): asserts value is TransferBatch {
     typeof batch.sourceDeviceId !== 'string' ||
     typeof batch.createdAt !== 'string' ||
     !Number.isInteger(batch.resultCount) ||
+    !Array.isArray(batch.results) ||
     !Array.isArray(batch.revisions) ||
     batch.resultCount !== batch.revisions.length
   ) {
     throw new Error('invalid transfer batch')
+  }
+
+  const resultIds = new Set(batch.results.map((result) => result.resultId))
+  if (batch.revisions.some((revision) => !resultIds.has(revision.resultId))) {
+    throw new Error('transfer batch is missing result metadata')
   }
 }
 
@@ -120,6 +128,7 @@ export async function encodeBatchFragments(
   if (!Number.isInteger(maxPayloadChars) || maxPayloadChars < 1) {
     throw new Error('maxPayloadChars must be a positive integer')
   }
+  assertBatchShape(batch)
 
   const batchJson = stableStringify(batch)
   const batchChecksum = await sha256Hex(batchJson)
