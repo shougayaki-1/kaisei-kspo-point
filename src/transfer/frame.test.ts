@@ -62,6 +62,14 @@ describe('common QR frame protocol', () => {
     ).rejects.toThrow(/protocol version/i)
   })
 
+  it('rejects unknown frame types before payload semantics', async () => {
+    const encoded = await encodeQrFrames(envelope('RESULT_BATCH', 'type-test', { ok: true }))
+    const frame = await decodeQrFrame(encoded[0])
+    await expect(
+      decodeQrFrame(encodeRawFrame({ ...frame, type: 'UNKNOWN_FRAME' })),
+    ).rejects.toThrow(/frame type/i)
+  })
+
   it('rejects unknown payload kinds before payload semantics', async () => {
     const encoded = await encodeQrFrames(envelope('RESULT_BATCH', 'kind-test', { ok: true }))
     const frame = await decodeQrFrame(encoded[0])
