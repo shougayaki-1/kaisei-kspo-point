@@ -66,9 +66,7 @@ describe('createCourtTransferHistoryServices', () => {
     await db.tournaments.add({
       tournamentId,
       name: '大会',
-      date: '2026-08-19',
-      venue: '会場',
-      status: 'ACTIVE',
+      eventDate: '2026-08-19',
       currentConfigVersion: 12,
     })
     const repository = new TransferRepository(db)
