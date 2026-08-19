@@ -6,6 +6,7 @@ import type {
   TeamId,
   TournamentId,
 } from '../domain/ids'
+import type { ScoringTestRunResult } from '../config/scoring-test-case'
 import type { TournamentConfigSnapshot } from '../config/tournament-config'
 import { createDatabase, type AppDatabase } from './database'
 import { ConfigRepository, ScoringRegressionError } from './config-repository'
@@ -73,6 +74,20 @@ function metadata(createdAt = '2026-08-19T13:00:00+09:00') {
   return { operator: '本部担当', createdAt, changeClass: 'SCORING' as const }
 }
 
+function resultFingerprint(result: ScoringTestRunResult): string {
+  return JSON.stringify({
+    testCaseId: result.testCaseId,
+    actual: [...result.actual]
+      .sort((left, right) => left.entryId.localeCompare(right.entryId))
+      .map((item) => ({
+        entryId: item.entryId,
+        roundRanks: item.roundRanks,
+        roundAwardScores: item.roundAwardScores,
+        aggregateScore: item.aggregateScore,
+      })),
+  })
+}
+
 function makeDb(): AppDatabase {
   const db = createDatabase(`config-scoring-${crypto.randomUUID()}`)
   openDatabases.push(db)
@@ -123,11 +138,13 @@ describe('ConfigRepository scoring regression gate', () => {
 
     const changed = structuredClone(first)
     changed.scoringProfiles[0].awardRule.rankPoints = { 1: 50, 2: 30 }
+    const preview = await repository.previewRegression(changed)
 
     const applied = await repository.apply(changed, {
       ...metadata('2026-08-19T13:20:00+09:00'),
       scoringTestApprovals: [{
         testCaseId: 'test-1',
+        actualFingerprint: resultFingerprint(preview[0]),
         operator: '本部担当',
         approvedAt: '2026-08-19T13:19:00+09:00',
       }],
@@ -156,13 +173,42 @@ describe('ConfigRepository scoring regression gate', () => {
 
     const changed = structuredClone(first)
     changed.scoringProfiles[0].awardRule.rankPoints = { 1: 50, 2: 30 }
+    const preview = await repository.previewRegression(changed)
 
     await expect(repository.apply(changed, {
       ...metadata('2026-08-19T13:30:00+09:00'),
       scoringTestApprovals: [{
         testCaseId: 'test-1',
+        actualFingerprint: resultFingerprint(preview.find((result) => result.testCaseId === 'test-1')!),
         operator: '本部担当',
         approvedAt: '2026-08-19T13:29:00+09:00',
+      }],
+    })).rejects.toBeInstanceOf(ScoringRegressionError)
+
+    expect((await repository.listVersions(first.tournament.tournamentId)).map((item) => item.version))
+      .toEqual([1])
+  })
+
+  it('rejects an approval when the scoring output changed after that approval was granted', async () => {
+    const db = makeDb()
+    const repository = new ConfigRepository(db)
+    const first = snapshot()
+    await repository.apply(first, metadata())
+
+    const reviewed = structuredClone(first)
+    reviewed.scoringProfiles[0].awardRule.rankPoints = { 1: 50, 2: 30 }
+    const reviewedResult = (await repository.previewRegression(reviewed))[0]
+
+    const changedAfterApproval = structuredClone(reviewed)
+    changedAfterApproval.scoringProfiles[0].awardRule.rankPoints = { 1: 60, 2: 40 }
+
+    await expect(repository.apply(changedAfterApproval, {
+      ...metadata('2026-08-19T13:40:00+09:00'),
+      scoringTestApprovals: [{
+        testCaseId: 'test-1',
+        actualFingerprint: resultFingerprint(reviewedResult),
+        operator: '本部担当',
+        approvedAt: '2026-08-19T13:39:00+09:00',
       }],
     })).rejects.toBeInstanceOf(ScoringRegressionError)
 
