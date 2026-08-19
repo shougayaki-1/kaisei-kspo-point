@@ -183,6 +183,7 @@ export function ScoringSimulatorPanel({
                       {team && team.name !== entry.label ? <small>{team.name}</small> : null}
                       <input
                         type="number"
+                        aria-label={`${round.label} ${entry.label}`}
                         value={round.values[entry.entryId] ?? ''}
                         onChange={(event) => setRounds((current) => current.map((item, index) => (
                           index === roundIndex
