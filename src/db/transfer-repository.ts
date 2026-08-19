@@ -1,5 +1,6 @@
 import type { BatchId, RevisionId, TournamentId } from '../domain/ids'
-import { decodeQrFragment } from '../transfer/codec'
+import { stableStringify } from '../transfer/frame'
+import { decodeQrFrame } from '../transfer/frame'
 import { TransferReceiver } from '../transfer/receiver'
 import type { AckBatch, TransferBatch } from '../transfer/types'
 import type { AppDatabase } from './database'
@@ -65,12 +66,12 @@ export class TransferRepository {
   }
 
   async saveReceivedPart(encoded: string, receivedAt: string): Promise<void> {
-    const fragment = await decodeQrFragment(encoded)
+    const fragment = await decodeQrFrame(encoded)
 
     await this.db.transaction('rw', this.db.receivedQrParts, async () => {
       const existing = await this.db.receivedQrParts
         .where('[batchId+partIndex]')
-        .equals([fragment.batchId, fragment.partIndex])
+        .equals([fragment.transferId, fragment.partIndex])
         .first()
 
       if (existing) {
@@ -79,12 +80,12 @@ export class TransferRepository {
       }
 
       const record: ReceivedQrPartRecord = {
-        batchId: fragment.batchId,
+        batchId: fragment.transferId,
         tournamentId: fragment.tournamentId,
         partIndex: fragment.partIndex,
         totalParts: fragment.totalParts,
-        resultCount: fragment.resultCount,
-        batchChecksum: fragment.batchChecksum,
+        resultCount: fragment.itemCount,
+        batchChecksum: fragment.payloadChecksum,
         chunkChecksum: fragment.chunkChecksum,
         encoded,
         receivedAt,
