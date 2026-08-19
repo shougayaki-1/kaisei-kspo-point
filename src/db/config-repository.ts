@@ -2,6 +2,7 @@ import type { TournamentId } from '../domain/ids'
 import {
   approveScoringTestChange,
   runScoringTestCase,
+  scoringTestResultFingerprint,
   type ScoringTestRunResult,
 } from '../config/scoring-test-case'
 import type { TournamentConfigSnapshot } from '../config/tournament-config'
@@ -11,6 +12,7 @@ import type { ConfigChangeClass, ConfigVersionRecord } from './schema'
 
 export interface ScoringTestApproval {
   testCaseId: string
+  actualFingerprint: string
   operator: string
   approvedAt: string
 }
@@ -113,7 +115,10 @@ export class ConfigRepository {
     const approvals = new Map(
       (metadata.scoringTestApprovals ?? []).map((approval) => [approval.testCaseId, approval]),
     )
-    if (failedResults.some((result) => !approvals.has(result.testCaseId))) {
+    if (failedResults.some((result) => {
+      const approval = approvals.get(result.testCaseId)
+      return !approval || approval.actualFingerprint !== scoringTestResultFingerprint(result)
+    })) {
       throw new ScoringRegressionError(regressionResults)
     }
 
