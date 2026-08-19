@@ -66,6 +66,7 @@ describe('CourtTransferHistory', () => {
     fireEvent.click(screen.getAllByRole('button', { name: '再表示' })[0])
 
     await waitFor(() => expect(service.reopen).toHaveBeenCalledTimes(1))
-    expect(screen.getByText(/batch-old/)).toBeInTheDocument()
+    expect(screen.getAllByText(/batch-old/).length).toBeGreaterThanOrEqual(1)
+    expect(service.reopen).toHaveBeenCalledWith('batch-old')
   })
 })
