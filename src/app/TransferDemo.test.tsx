@@ -26,6 +26,7 @@ function services(overrides: Partial<TransferDemoServices> = {}): TransferDemoSe
     listCourtCandidates: vi.fn(async () => [
       { revisionId, label: '玉入れ 第1展開 / revision-1' },
     ]),
+    restoreCourtBatch: vi.fn(async () => null),
     createCourtBatch: vi.fn(async () => ({
       batchId,
       encodedParts: ['part-one', 'part-two', 'part-three'],
@@ -34,6 +35,7 @@ function services(overrides: Partial<TransferDemoServices> = {}): TransferDemoSe
     setCourtPartIndex: vi.fn(async () => undefined),
     applyCourtAck: vi.fn(async () => undefined),
     markCourtBatchSentManually: vi.fn(async () => undefined),
+    restoreHostProgress: vi.fn(async () => []),
     ingestHostFragment: vi.fn(async () => progress()),
     processHostBatch: vi.fn(async () => 'encoded-ack'),
     ...overrides,
@@ -59,13 +61,12 @@ describe('TransferDemo', () => {
   })
 
   it('restores the same outgoing Court QR page after app reload', async () => {
-    const service = Object.assign(services(), {
+    const service = services({
       restoreCourtBatch: vi.fn(async () => ({
         batchId,
         encodedParts: ['part-one', 'part-two', 'part-three'],
         currentPartIndex: 1,
       })),
-      restoreHostProgress: vi.fn(async () => [] as TransferProgress[]),
     })
 
     render(<TransferDemo mode="COURT" deviceId={deviceId} services={service} />)
@@ -92,10 +93,7 @@ describe('TransferDemo', () => {
 
   it('restores persisted Host partial progress after app reload', async () => {
     const restored = progress({ receivedCount: 2, remainingCount: 1, missingPartIndexes: [3] })
-    const service = Object.assign(services(), {
-      restoreCourtBatch: vi.fn(async () => null),
-      restoreHostProgress: vi.fn(async () => [restored]),
-    })
+    const service = services({ restoreHostProgress: vi.fn(async () => [restored]) })
 
     render(<TransferDemo mode="HOST" deviceId={deviceId} services={service} />)
 
