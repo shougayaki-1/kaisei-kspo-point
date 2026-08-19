@@ -27,6 +27,7 @@ export type ConfigChangeClass = 'DISPLAY_ONLY' | 'SCHEDULE' | 'SCORING' | 'INPUT
 
 export interface ConfigVersionRecord {
   id?: number
+  configVersionId: string
   tournamentId: string
   version: number
   createdAt: string
