@@ -221,7 +221,9 @@ export function CourtScoringSession({ services }: { services: CourtScoringSessio
                         onChange={(event) => setValue(entry.entryId, field.key, event.target.value)}
                       >
                         <option value="">選択してください</option>
-                        {(field.options ?? []).map((option) => <option key={option} value={option}>{option}</option>)}
+                        {field.options.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
                       </select>
                     </label>
                   )
