@@ -3,12 +3,19 @@ import type { TournamentId } from '../domain/ids'
 import { getOrCreateDeviceId } from '../device/device-service'
 import { ConfigRepository } from '../db/config-repository'
 import { createDatabase } from '../db/database'
+import { APP_VERSION } from '../pwa/app-version'
+import {
+  UNSUPPORTED_PWA_SNAPSHOT,
+  type PwaRuntime,
+  type PwaRuntimeSnapshot,
+} from '../pwa/runtime'
 import { ConfigUpdatePanel } from './ConfigUpdatePanel'
 import { createConfigUpdateService } from './config-update-service'
 import { CourtScoringSession } from './CourtScoringSession'
 import { createCourtResultService } from './court-result-service'
 import { CourtTransferHistory } from './CourtTransferHistory'
 import { createCourtTransferHistoryServices } from './court-transfer-history-service'
+import { DeviceDiagnostics } from './DeviceDiagnostics'
 import { HostScoringDashboard } from './HostScoringDashboard'
 import { createHostScoringService } from './host-scoring-service'
 import { TournamentConfigEditor } from './TournamentConfigEditor'
@@ -23,17 +30,28 @@ export interface AppProps {
   reload?: () => void
   configRepository?: AppConfigRepository
   operatorName?: string
+  pwaRuntime?: PwaRuntime
 }
 
-const APP_VERSION = '0.1.0'
 const RELOAD_CONFIRMATION = 'アプリを再読み込みします。保存済みの大会データは削除されません。続行しますか？'
 
-export function App({ confirmReload = (message) => window.confirm(message), reload = () => window.location.reload(), configRepository, operatorName = '本部担当' }: AppProps = {}) {
+export function App({
+  confirmReload = (message) => window.confirm(message),
+  reload = () => window.location.reload(),
+  configRepository,
+  operatorName = '本部担当',
+  pwaRuntime,
+}: AppProps = {}) {
   const [mode, setMode] = useState<AppMode>(null)
   const [hostTab, setHostTab] = useState<HostTab>('CONFIG')
   const [deviceId] = useState(() => getOrCreateDeviceId())
   const [activeTournamentId, setActiveTournamentId] = useState<TournamentId | undefined>()
   const [knownConfigVersion, setKnownConfigVersion] = useState<number | null>(null)
+  const [knownConfigVersionId, setKnownConfigVersionId] = useState<string | null>(null)
+  const [storageAvailable, setStorageAvailable] = useState(false)
+  const [pwaSnapshot, setPwaSnapshot] = useState<PwaRuntimeSnapshot>(() =>
+    pwaRuntime?.getSnapshot() ?? { ...UNSUPPORTED_PWA_SNAPSHOT },
+  )
 
   const appDatabase = useMemo(() => createDatabase(), [])
   const browserConfigRepository = useMemo(() => new ConfigRepository(appDatabase), [appDatabase])
@@ -47,24 +65,49 @@ export function App({ confirmReload = (message) => window.confirm(message), relo
     previewRegression: resolvedConfigRepository.previewRegression ? (snapshot) => resolvedConfigRepository.previewRegression!(snapshot) : undefined,
     apply: async (snapshot, metadata) => {
       const result = await resolvedConfigRepository.apply(snapshot, metadata)
-      setActiveTournamentId(result.snapshot.tournament.tournamentId)
+      const tournamentId = result.snapshot.tournament.tournamentId
+      setActiveTournamentId(tournamentId)
       setKnownConfigVersion(result.version)
+      if (!configRepository) {
+        const active = await browserConfigRepository.getActiveVersion(tournamentId)
+        setKnownConfigVersionId(active?.configVersionId ?? null)
+      }
       return result
     },
-  }), [resolvedConfigRepository])
+  }), [browserConfigRepository, configRepository, resolvedConfigRepository])
+
+  useEffect(() => {
+    let cancelled = false
+    appDatabase.open()
+      .then(() => { if (!cancelled) setStorageAvailable(true) })
+      .catch(() => { if (!cancelled) setStorageAvailable(false) })
+    return () => { cancelled = true }
+  }, [appDatabase])
+
+  useEffect(() => {
+    if (!pwaRuntime) {
+      setPwaSnapshot({ ...UNSUPPORTED_PWA_SNAPSHOT })
+      return
+    }
+    setPwaSnapshot(pwaRuntime.getSnapshot())
+    return pwaRuntime.subscribe(setPwaSnapshot)
+  }, [pwaRuntime])
 
   useEffect(() => {
     if (configRepository) return
     let cancelled = false
-    appDatabase.tournaments.toCollection().first().then((tournament) => {
+    appDatabase.tournaments.toCollection().first().then(async (tournament) => {
       if (cancelled || !tournament) return
       setActiveTournamentId(tournament.tournamentId)
       setKnownConfigVersion(tournament.currentConfigVersion)
+      const active = await browserConfigRepository.getActiveVersion(tournament.tournamentId)
+      if (!cancelled) setKnownConfigVersionId(active?.configVersionId ?? null)
     }).catch(() => {})
     return () => { cancelled = true }
-  }, [appDatabase, configRepository])
+  }, [appDatabase, browserConfigRepository, configRepository])
 
   const handleReload = () => { if (confirmReload(RELOAD_CONFIRMATION)) reload() }
+  const handleActivateUpdate = () => { if (pwaRuntime) void pwaRuntime.activateUpdate() }
   const returnToModeSelection = () => { setMode(null); setHostTab('CONFIG') }
 
   let content: ReactNode
@@ -113,6 +156,13 @@ export function App({ confirmReload = (message) => window.confirm(message), relo
 
   return <div className="app-shell">
     <main>{content}</main>
+    <DeviceDiagnostics
+      appVersion={APP_VERSION}
+      activeConfigVersionId={knownConfigVersionId}
+      storageAvailable={storageAvailable}
+      pwa={pwaSnapshot}
+      onActivateUpdate={pwaRuntime ? handleActivateUpdate : undefined}
+    />
     <footer className="status-bar" aria-label="端末状態">
       <span>App {APP_VERSION}</span>
       <span>{knownConfigVersion === null ? 'Config -' : `Config v${knownConfigVersion}`}</span>
