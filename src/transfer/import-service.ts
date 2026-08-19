@@ -19,10 +19,9 @@ export interface ImportTransferResult {
 
 function validResultRevisionPair(
   batch: TransferBatch,
-  result: Result | undefined,
+  result: Result,
   revision: ResultRevision,
 ): boolean {
-  if (!result) return false
   if (result.resultId !== revision.resultId) return false
   if (result.tournamentId !== batch.tournamentId) return false
   if (!Number.isInteger(revision.revisionNumber) || revision.revisionNumber < 1) return false
@@ -52,7 +51,7 @@ async function importRevision(
   resultSnapshot: Result | undefined,
   context: ImportTransferContext,
 ): Promise<AckRevisionResult> {
-  if (!validResultRevisionPair(batch, resultSnapshot, revision)) {
+  if (!resultSnapshot || !validResultRevisionPair(batch, resultSnapshot, revision)) {
     return { revisionId: revision.revisionId, status: 'INVALID_DATA' }
   }
 
