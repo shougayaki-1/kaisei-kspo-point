@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import type { TournamentId } from '../domain/ids'
 import type { TournamentConfigSnapshot } from '../config/tournament-config'
 import {
@@ -34,6 +34,21 @@ function cloneSnapshot(snapshot: TournamentConfigSnapshot): TournamentConfigSnap
   return cloned
 }
 
+function scoringProfilesFingerprint(snapshot: TournamentConfigSnapshot | null): string {
+  if (!snapshot) return '[]'
+  return JSON.stringify(
+    [...snapshot.scoringProfiles].sort((left, right) =>
+      left.scoringProfileId.localeCompare(right.scoringProfileId)),
+  )
+}
+
+function scoringProfilesChanged(
+  current: TournamentConfigSnapshot | null,
+  next: TournamentConfigSnapshot,
+): boolean {
+  return scoringProfilesFingerprint(current) !== scoringProfilesFingerprint(next)
+}
+
 function formatDiffValue(value: number[] | number): string {
   return Array.isArray(value) ? value.join(', ') : String(value)
 }
@@ -44,6 +59,7 @@ export function TournamentConfigEditor({
   operatorName,
 }: TournamentConfigEditorProps) {
   const [currentSnapshot, setCurrentSnapshot] = useState<TournamentConfigSnapshot | null>(null)
+  const appliedSnapshotRef = useRef<TournamentConfigSnapshot | null>(null)
   const [pendingReview, setPendingReview] = useState<PendingRegressionReview | null>(null)
   const [approvedTests, setApprovedTests] = useState<Map<string, string>>(() => new Map())
   const [editorGeneration, setEditorGeneration] = useState(0)
@@ -53,10 +69,17 @@ export function TournamentConfigEditor({
     repository.previewRegression ? repository.previewRegression(snapshot) : []
   )
 
+  const rememberAppliedSnapshot = (snapshot: TournamentConfigSnapshot) => {
+    const normalized = cloneSnapshot(snapshot)
+    appliedSnapshotRef.current = normalized
+    setCurrentSnapshot(normalized)
+    return normalized
+  }
+
   const editorRepository = useMemo<Pick<ConfigRepository, 'loadCurrent' | 'apply'>>(() => ({
     loadCurrent: async (id) => {
       const loaded = await repository.loadCurrent(id)
-      if (loaded) setCurrentSnapshot(cloneSnapshot(loaded))
+      if (loaded) rememberAppliedSnapshot(loaded)
       return loaded
     },
     apply: async (snapshot, metadata) => {
@@ -77,8 +100,7 @@ export function TournamentConfigEditor({
       }
 
       const shouldStageScoringReview = Boolean(repository.previewRegression)
-        && metadata.changeClass === 'SCORING'
-        && normalized.scoringProfiles.length > 0
+        && scoringProfilesChanged(appliedSnapshotRef.current, normalized)
       if (shouldStageScoringReview) {
         setPendingReview({ snapshot: normalized, metadata, results: regressionResults })
         setApprovedTests(new Map())
@@ -86,7 +108,7 @@ export function TournamentConfigEditor({
       }
 
       const applied = await repository.apply(normalized, metadata)
-      setCurrentSnapshot(cloneSnapshot(applied.snapshot))
+      rememberAppliedSnapshot(applied.snapshot)
       setPendingReview(null)
       setApprovedTests(new Map())
       setIntegrationMessage('')
@@ -124,7 +146,7 @@ export function TournamentConfigEditor({
         ...pendingReview.metadata,
         scoringTestApprovals: approvals,
       })
-      setCurrentSnapshot(cloneSnapshot(applied.snapshot))
+      rememberAppliedSnapshot(applied.snapshot)
       setPendingReview(null)
       setApprovedTests(new Map())
       setIntegrationMessage(
@@ -145,7 +167,7 @@ export function TournamentConfigEditor({
         createdAt: new Date().toISOString(),
         changeClass: 'SCORING',
       })
-      setCurrentSnapshot(cloneSnapshot(applied.snapshot))
+      rememberAppliedSnapshot(applied.snapshot)
       setPendingReview(null)
       setApprovedTests(new Map())
       setIntegrationMessage(`Config v${applied.version} に得点テストを保存しました。`)
