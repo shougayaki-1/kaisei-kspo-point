@@ -9,6 +9,7 @@ import type {
   Tournament,
 } from '../domain/tournament'
 import type { InputField, InputSchema } from './input-schema'
+import type { ScoringTestCase } from './scoring-test-case'
 
 export interface TournamentConfigSnapshot {
   tournament: Tournament
@@ -20,6 +21,7 @@ export interface TournamentConfigSnapshot {
   scoringSessions: ScoringSession[]
   inputSchemas: InputSchema[]
   scoringProfiles: ScoringProfile[]
+  scoringTestCases: ScoringTestCase[]
 }
 
 export interface ConfigValidationIssue {
