@@ -1,4 +1,4 @@
-import type { ResultId, RevisionId, ScoringSessionId } from '../domain/ids'
+import type { ResultId, RevisionId, ScoringSessionId, TournamentId } from '../domain/ids'
 import type { Result, ResultRevision } from '../domain/result'
 import {
   type ConflictResolutionRecord,
@@ -85,6 +85,15 @@ export class ResultRepository {
 
   async listResultsForScoringSession(scoringSessionId: ScoringSessionId): Promise<Result[]> {
     const results = await this.db.results.where('scoringSessionId').equals(scoringSessionId).toArray()
+    return this.sortResults(results)
+  }
+
+  async listResultsForTournament(tournamentId: TournamentId): Promise<Result[]> {
+    const results = await this.db.results.where('tournamentId').equals(tournamentId).toArray()
+    return this.sortResults(results)
+  }
+
+  private sortResults(results: Result[]): Result[] {
     return results.sort((left, right) => {
       const time = left.createdAt.localeCompare(right.createdAt)
       if (time !== 0) return time
