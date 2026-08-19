@@ -15,6 +15,13 @@ export interface RankedValue {
   value: number
 }
 
+export class UnsupportedAggregationError extends Error {
+  constructor(rule: ScoringProfile['aggregationRule']) {
+    super(`Unsupported aggregation rule: ${rule}`)
+    this.name = 'UnsupportedAggregationError'
+  }
+}
+
 function pointsForRank(profile: ScoringProfile, rank: number): number {
   const points = profile.awardRule.rankPoints[rank]
   if (points === undefined) {
@@ -117,14 +124,78 @@ export function calculateRankedScores(
   }))
 }
 
+function aggregateScores(
+  scores: number[],
+  profile: ScoringProfile,
+): { score: number; trace: CalculationTraceStep[] } {
+  switch (profile.aggregationRule) {
+    case 'SUM': {
+      const score = scores.reduce((sum, value) => sum + value, 0)
+      return {
+        score,
+        trace: [{
+          code: 'AGGREGATE',
+          label: 'ラウンド得点を合計',
+          expression: scores.length > 0 ? `${scores.join(' + ')} = ${score}` : '0',
+          value: score,
+        }],
+      }
+    }
+    case 'AVERAGE': {
+      const score = scores.length === 0
+        ? 0
+        : scores.reduce((sum, value) => sum + value, 0) / scores.length
+      return {
+        score,
+        trace: [{
+          code: 'AGGREGATE',
+          label: 'ラウンド得点を平均',
+          expression: scores.length > 0
+            ? `(${scores.join(' + ')}) ÷ ${scores.length} = ${score}`
+            : '0',
+          value: score,
+        }],
+      }
+    }
+    case 'FINAL_ONLY': {
+      const score = scores.at(-1) ?? 0
+      return {
+        score,
+        trace: [{
+          code: 'AGGREGATE',
+          label: '最終ラウンド得点を採用',
+          expression: String(score),
+          value: score,
+        }],
+      }
+    }
+    case 'BEST_N': {
+      const bestN = profile.aggregationOptions?.bestN
+      if (!Number.isInteger(bestN) || (bestN ?? 0) < 1) {
+        throw new Error('BEST_N requires a positive integer bestN')
+      }
+      const selected = [...scores].sort((left, right) => right - left).slice(0, bestN)
+      const score = selected.reduce((sum, value) => sum + value, 0)
+      return {
+        score,
+        trace: [{
+          code: 'AGGREGATE',
+          label: `上位${bestN}ラウンドを合計`,
+          expression: `best ${bestN}: ${selected.join(' + ')} = ${score}`,
+          value: score,
+        }],
+      }
+    }
+    case 'WIN_POINTS':
+    case 'CUSTOM':
+      throw new UnsupportedAggregationError(profile.aggregationRule)
+  }
+}
+
 export function calculateScoringScenario<TId extends string>(
   scenario: ScoringScenario<TId>,
   profile: ScoringProfile,
 ): ScoringScenarioResult<TId> {
-  if (profile.aggregationRule !== 'SUM') {
-    throw new Error(`Unsupported aggregation rule: ${profile.aggregationRule}`)
-  }
-
   const participants = new Map<TId, ScoringScenarioParticipantResult<TId>>()
 
   for (const round of scenario.rounds) {
@@ -147,17 +218,12 @@ export function calculateScoringScenario<TId extends string>(
   }
 
   for (const participant of participants.values()) {
-    const scores = participant.rounds.map((round) => round.awardScore)
-    const aggregateScore = scores.reduce((sum, score) => sum + score, 0)
-    participant.aggregateScore = aggregateScore
-    participant.aggregateTrace = [
-      {
-        code: 'AGGREGATE',
-        label: 'ラウンド得点を合計',
-        expression: `${scores.join(' + ')} = ${aggregateScore}`,
-        value: aggregateScore,
-      },
-    ]
+    const aggregate = aggregateScores(
+      participant.rounds.map((round) => round.awardScore),
+      profile,
+    )
+    participant.aggregateScore = aggregate.score
+    participant.aggregateTrace = aggregate.trace
   }
 
   return { participants: [...participants.values()] }
