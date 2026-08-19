@@ -3,6 +3,8 @@ import type { TournamentId } from '../domain/ids'
 import { getOrCreateDeviceId } from '../device/device-service'
 import { ConfigRepository } from '../db/config-repository'
 import { createDatabase } from '../db/database'
+import { CourtTransferHistory } from './CourtTransferHistory'
+import { createCourtTransferHistoryServices } from './court-transfer-history-service'
 import { TournamentConfigEditor } from './TournamentConfigEditor'
 import { TransferDemo } from './TransferDemo'
 
@@ -36,6 +38,10 @@ export function App({
   const appDatabase = useMemo(() => createDatabase(), [])
   const browserConfigRepository = useMemo(() => new ConfigRepository(appDatabase), [appDatabase])
   const resolvedConfigRepository = configRepository ?? browserConfigRepository
+  const courtTransferHistoryServices = useMemo(
+    () => createCourtTransferHistoryServices(appDatabase),
+    [appDatabase],
+  )
   const editorConfigRepository = useMemo<AppConfigRepository>(
     () => ({
       loadCurrent: (tournamentId) => resolvedConfigRepository.loadCurrent(tournamentId),
@@ -136,6 +142,7 @@ export function App({
           <button type="button" onClick={returnToModeSelection}>モード選択へ戻る</button>
         </div>
         <TransferDemo mode="COURT" deviceId={deviceId} />
+        <CourtTransferHistory services={courtTransferHistoryServices} />
       </>
     )
   } else {
