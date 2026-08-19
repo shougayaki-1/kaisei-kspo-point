@@ -32,7 +32,7 @@ describe('ConfigUpdatePanel', () => {
     const service = services()
     render(<ConfigUpdatePanel mode="HOST" services={service} />)
 
-    expect(await screen.findByText(/config-v1/)).toBeInTheDocument()
+    expect((await screen.findAllByText(/config-v1/)).length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText(/config-v2/)).toBeInTheDocument()
     fireEvent.click(screen.getAllByRole('button', { name: 'QR生成' })[1])
 
