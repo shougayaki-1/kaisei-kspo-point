@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import type { TournamentId } from '../domain/ids'
+import type { ExactValue } from '../domain/exact-decimal'
 import type { TournamentConfigSnapshot } from '../config/tournament-config'
 import {
   scoringTestResultFingerprint,
@@ -49,7 +50,7 @@ function scoringProfilesChanged(
   return scoringProfilesFingerprint(current) !== scoringProfilesFingerprint(next)
 }
 
-function formatDiffValue(value: number[] | number): string {
+function formatDiffValue(value: ExactValue[] | ExactValue): string {
   return Array.isArray(value) ? value.join(', ') : String(value)
 }
 
