@@ -1,7 +1,10 @@
 import { useMemo, useState } from 'react'
 import type { TournamentId } from '../domain/ids'
 import type { TournamentConfigSnapshot } from '../config/tournament-config'
-import type { ScoringTestRunResult } from '../config/scoring-test-case'
+import {
+  scoringTestResultFingerprint,
+  type ScoringTestRunResult,
+} from '../config/scoring-test-case'
 import type {
   ApplyConfigMetadata,
   ConfigRepository,
@@ -42,7 +45,7 @@ export function TournamentConfigEditor({
 }: TournamentConfigEditorProps) {
   const [currentSnapshot, setCurrentSnapshot] = useState<TournamentConfigSnapshot | null>(null)
   const [pendingReview, setPendingReview] = useState<PendingRegressionReview | null>(null)
-  const [approvedTestIds, setApprovedTestIds] = useState<Set<string>>(() => new Set())
+  const [approvedTests, setApprovedTests] = useState<Map<string, string>>(() => new Map())
   const [editorGeneration, setEditorGeneration] = useState(0)
   const [integrationMessage, setIntegrationMessage] = useState('')
 
@@ -62,14 +65,14 @@ export function TournamentConfigEditor({
       const invalid = regressionResults.filter((result) => result.status === 'INVALID')
       if (invalid.length > 0) {
         setPendingReview({ snapshot: normalized, metadata, results: regressionResults })
-        setApprovedTestIds(new Set())
+        setApprovedTests(new Map())
         throw new Error('得点計算テストに無効なケースがあります。')
       }
 
       const failed = regressionResults.filter((result) => result.status === 'FAIL')
       if (failed.length > 0) {
         setPendingReview({ snapshot: normalized, metadata, results: regressionResults })
-        setApprovedTestIds(new Set())
+        setApprovedTests(new Map())
         throw new Error('得点計算テストの確認が必要です。')
       }
 
@@ -78,14 +81,14 @@ export function TournamentConfigEditor({
         && normalized.scoringProfiles.length > 0
       if (shouldStageScoringReview) {
         setPendingReview({ snapshot: normalized, metadata, results: regressionResults })
-        setApprovedTestIds(new Set())
+        setApprovedTests(new Map())
         throw new Error('得点ルールを計算テストで確認してください。')
       }
 
       const applied = await repository.apply(normalized, metadata)
       setCurrentSnapshot(cloneSnapshot(applied.snapshot))
       setPendingReview(null)
-      setApprovedTestIds(new Set())
+      setApprovedTests(new Map())
       setIntegrationMessage('')
       return applied
     },
@@ -94,13 +97,13 @@ export function TournamentConfigEditor({
   const failedResults = pendingReview?.results.filter((result) => result.status === 'FAIL') ?? []
   const invalidResults = pendingReview?.results.filter((result) => result.status === 'INVALID') ?? []
   const allFailuresApproved = failedResults.length > 0 && failedResults.every(
-    (result) => approvedTestIds.has(result.testCaseId),
+    (result) => approvedTests.get(result.testCaseId) === scoringTestResultFingerprint(result),
   )
   const simulatorSnapshot = pendingReview?.snapshot ?? currentSnapshot
 
   const returnToEditing = () => {
     setPendingReview(null)
-    setApprovedTestIds(new Set())
+    setApprovedTests(new Map())
     setIntegrationMessage('')
   }
 
@@ -111,6 +114,7 @@ export function TournamentConfigEditor({
     const now = new Date().toISOString()
     const approvals: ScoringTestApproval[] = failedResults.map((result) => ({
       testCaseId: result.testCaseId,
+      actualFingerprint: scoringTestResultFingerprint(result),
       operator: operatorName,
       approvedAt: now,
     }))
@@ -122,7 +126,7 @@ export function TournamentConfigEditor({
       })
       setCurrentSnapshot(cloneSnapshot(applied.snapshot))
       setPendingReview(null)
-      setApprovedTestIds(new Set())
+      setApprovedTests(new Map())
       setIntegrationMessage(
         approvals.length > 0
           ? `Config v${applied.version} を適用しました。意図した得点変更 ${approvals.length}件を承認しました。`
@@ -143,7 +147,7 @@ export function TournamentConfigEditor({
       })
       setCurrentSnapshot(cloneSnapshot(applied.snapshot))
       setPendingReview(null)
-      setApprovedTestIds(new Set())
+      setApprovedTests(new Map())
       setIntegrationMessage(`Config v${applied.version} に得点テストを保存しました。`)
       setEditorGeneration((generation) => generation + 1)
     } catch (error) {
@@ -164,7 +168,7 @@ export function TournamentConfigEditor({
       snapshot: nextSnapshot,
       results,
     })
-    setApprovedTestIds(new Set())
+    setApprovedTests(new Map())
     setIntegrationMessage('未適用の設定に得点テストを反映しました。')
     return true
   }
@@ -202,7 +206,8 @@ export function TournamentConfigEditor({
                   const testCase = pendingReview.snapshot.scoringTestCases.find(
                     (item) => item.testCaseId === result.testCaseId,
                   )
-                  const approved = approvedTestIds.has(result.testCaseId)
+                  const fingerprint = scoringTestResultFingerprint(result)
+                  const approved = approvedTests.get(result.testCaseId) === fingerprint
                   return (
                     <article className="config-card nested" key={result.testCaseId}>
                       <strong>{testCase?.name ?? result.testCaseId}</strong>
@@ -216,10 +221,10 @@ export function TournamentConfigEditor({
                       <button
                         type="button"
                         aria-pressed={approved}
-                        onClick={() => setApprovedTestIds((current) => {
-                          const next = new Set(current)
-                          if (next.has(result.testCaseId)) next.delete(result.testCaseId)
-                          else next.add(result.testCaseId)
+                        onClick={() => setApprovedTests((current) => {
+                          const next = new Map(current)
+                          if (next.get(result.testCaseId) === fingerprint) next.delete(result.testCaseId)
+                          else next.set(result.testCaseId, fingerprint)
                           return next
                         })}
                       >
