@@ -179,11 +179,9 @@ export class TransferRepository {
         for (const revision of outgoing.batch.revisions) {
           const current = await this.db.revisionDeliveries.get(revision.revisionId)
           const delivery: RevisionDeliveryRecord = {
+            ...current,
             revisionId: revision.revisionId,
             batchId,
-            status: 'MANUAL',
-            updatedAt: timestamp,
-            ...current,
             status: 'MANUAL',
             updatedAt: timestamp,
           }
