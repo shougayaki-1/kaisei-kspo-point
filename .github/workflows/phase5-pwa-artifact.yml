@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feat/phase5-pwa-offline-safety-data-controls
+  pull_request:
 
 permissions:
   contents: read
