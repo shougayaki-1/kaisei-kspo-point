@@ -34,6 +34,18 @@ export function App({
   const appDatabase = useMemo(() => createDatabase(), [])
   const browserConfigRepository = useMemo(() => new ConfigRepository(appDatabase), [appDatabase])
   const resolvedConfigRepository = configRepository ?? browserConfigRepository
+  const editorConfigRepository = useMemo<Pick<ConfigRepository, 'loadCurrent' | 'apply'>>(
+    () => ({
+      loadCurrent: (tournamentId) => resolvedConfigRepository.loadCurrent(tournamentId),
+      apply: async (snapshot, metadata) => {
+        const result = await resolvedConfigRepository.apply(snapshot, metadata)
+        setActiveTournamentId(result.snapshot.tournament.tournamentId)
+        setKnownConfigVersion(result.version)
+        return result
+      },
+    }),
+    [resolvedConfigRepository],
+  )
 
   useEffect(() => {
     if (configRepository) return
@@ -99,7 +111,7 @@ export function App({
 
         {hostTab === 'CONFIG' ? (
           <TournamentConfigEditor
-            repository={resolvedConfigRepository}
+            repository={editorConfigRepository}
             tournamentId={activeTournamentId}
             operatorName={operatorName}
           />
