@@ -276,6 +276,17 @@ export function validateTournamentConfig(snapshot: TournamentConfigSnapshot): Co
         profile.scoringProfileId,
       )
     }
+    if (profile.aggregationRule === 'BEST_N') {
+      const bestN = profile.aggregationOptions?.bestN
+      if (!Number.isInteger(bestN) || (bestN ?? 0) < 1) {
+        error(
+          issues,
+          'INVALID_BEST_N',
+          'BEST_N の採用件数は1以上の整数にしてください。',
+          profile.scoringProfileId,
+        )
+      }
+    }
 
     const rankKeys = Object.keys(profile.awardRule.rankPoints)
     if (rankKeys.length === 0) {
