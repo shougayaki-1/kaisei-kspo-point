@@ -29,6 +29,7 @@ describe('tournament draft helpers', () => {
     expect(draft.competitions).toEqual([])
     expect(draft.inputSchemas).toEqual([])
     expect(draft.scoringProfiles).toEqual([])
+    expect(draft.scoringTestCases).toEqual([])
   })
 
   it('adds entities with UUIDs while preserving their references', () => {
