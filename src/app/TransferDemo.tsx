@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { createId, type BatchId, type DeviceId, type RevisionId, type TournamentId } from '../domain/ids'
+import { createId, type BatchId, type DeviceId, type RevisionId } from '../domain/ids'
 import type { ResultRevision } from '../domain/result'
 import { createDatabase } from '../db/database'
 import { ResultRepository } from '../db/result-repository'
@@ -24,10 +24,12 @@ export interface OutgoingBatchView {
 
 export interface TransferDemoServices {
   listCourtCandidates(): Promise<CourtRevisionCandidate[]>
+  restoreCourtBatch(): Promise<OutgoingBatchView | null>
   createCourtBatch(revisionIds: RevisionId[]): Promise<OutgoingBatchView>
   setCourtPartIndex(batchId: BatchId, partIndex: number): Promise<void>
   applyCourtAck(batchId: BatchId, encodedAck: string): Promise<void>
   markCourtBatchSentManually(batchId: BatchId, operator: string): Promise<void>
+  restoreHostProgress(): Promise<TransferProgress[]>
   ingestHostFragment(encoded: string): Promise<TransferProgress>
   processHostBatch(batchId: BatchId): Promise<string>
 }
@@ -82,6 +84,24 @@ function createBrowserTransferServices(deviceId: DeviceId): TransferDemoServices
         })
     },
 
+    async restoreCourtBatch() {
+      const tournament = await db.tournaments.toCollection().first()
+      if (!tournament) return null
+      const rows = await db.transferBatches
+        .where('tournamentId')
+        .equals(tournament.tournamentId)
+        .toArray()
+      const pending = rows
+        .filter((row) => row.status === 'PENDING')
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0]
+      if (!pending) return null
+      return {
+        batchId: pending.batch.batchId,
+        encodedParts: pending.encodedParts,
+        currentPartIndex: pending.currentPartIndex,
+      }
+    },
+
     async createCourtBatch(revisionIds) {
       if (revisionIds.length === 0) throw new Error('送信するRevisionを選択してください')
       const tournament = await requireTournament()
@@ -130,6 +150,13 @@ function createBrowserTransferServices(deviceId: DeviceId): TransferDemoServices
         operator,
         timestamp: new Date().toISOString(),
       })
+    },
+
+    async restoreHostProgress() {
+      const tournament = await db.tournaments.toCollection().first()
+      if (!tournament) return []
+      const receiver = await transferRepository.restoreReceiver(tournament.tournamentId)
+      return receiver.listProgress()
     },
 
     async ingestHostFragment(encoded) {
@@ -183,23 +210,39 @@ export function TransferDemo({
   const [ackInput, setAckInput] = useState('')
   const [manualOperator, setManualOperator] = useState('')
   const [hostInput, setHostInput] = useState('')
-  const [hostProgress, setHostProgress] = useState<TransferProgress | null>(null)
+  const [hostProgresses, setHostProgresses] = useState<TransferProgress[]>([])
   const [hostAck, setHostAck] = useState('')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    if (mode !== 'COURT') return
     let cancelled = false
-    resolvedServices
-      .listCourtCandidates()
-      .then((items) => {
-        if (!cancelled) setCandidates(items)
-      })
-      .catch((cause: unknown) => {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : 'Revision一覧の取得に失敗しました')
-      })
+
+    if (mode === 'COURT') {
+      Promise.all([
+        resolvedServices.listCourtCandidates(),
+        resolvedServices.restoreCourtBatch(),
+      ])
+        .then(([items, restoredBatch]) => {
+          if (cancelled) return
+          setCandidates(items)
+          setOutgoing(restoredBatch)
+        })
+        .catch((cause: unknown) => {
+          if (!cancelled) setError(cause instanceof Error ? cause.message : 'コート転送状態の復元に失敗しました')
+        })
+    } else {
+      resolvedServices
+        .restoreHostProgress()
+        .then((items) => {
+          if (!cancelled) setHostProgresses(items)
+        })
+        .catch((cause: unknown) => {
+          if (!cancelled) setError(cause instanceof Error ? cause.message : '本部読取状態の復元に失敗しました')
+        })
+    }
+
     return () => {
       cancelled = true
     }
@@ -267,18 +310,29 @@ export function TransferDemo({
     })
   }
 
+  const upsertHostProgress = (progress: TransferProgress) => {
+    setHostProgresses((current) => {
+      const index = current.findIndex((item) => item.batchId === progress.batchId)
+      if (index < 0) return [...current, progress]
+      const next = [...current]
+      next[index] = progress
+      return next
+    })
+  }
+
   const ingestHost = () =>
     run(async () => {
       if (!hostInput.trim()) throw new Error('QR文字列を入力してください')
       const progress = await resolvedServices.ingestHostFragment(hostInput.trim())
-      setHostProgress(progress)
+      upsertHostProgress(progress)
       setHostAck('')
     })
 
-  const processHost = () =>
+  const processHost = (batchId: BatchId) =>
     run(async () => {
-      if (!hostProgress?.complete) throw new Error('QRがすべて揃っていません')
-      const encodedAck = await resolvedServices.processHostBatch(hostProgress.batchId)
+      const progress = hostProgresses.find((item) => item.batchId === batchId)
+      if (!progress?.complete) throw new Error('QRがすべて揃っていません')
+      const encodedAck = await resolvedServices.processHostBatch(batchId)
       setHostAck(encodedAck)
       setMessage('結果を取り込み、ACKを生成しました')
     })
@@ -378,21 +432,22 @@ export function TransferDemo({
         読み取る
       </button>
 
-      {hostProgress && (
-        <div className="transfer-card" aria-label="QR読取進捗">
+      {hostProgresses.map((hostProgress) => (
+        <div className="transfer-card" aria-label="QR読取進捗" key={hostProgress.batchId}>
           <strong>{hostProgress.receivedCount} / {hostProgress.totalParts} 読み取り済み</strong>
+          <span>Batch {String(hostProgress.batchId).slice(0, 8)}</span>
           <span>残り {hostProgress.remainingCount}</span>
           <span>
             未読: {hostProgress.missingPartIndexes.length > 0 ? hostProgress.missingPartIndexes.join(', ') : 'なし'}
           </span>
           <span>{hostProgress.complete ? 'すべて揃いました' : '読取継続中'}</span>
           {hostProgress.complete && (
-            <button type="button" onClick={() => void processHost()} disabled={busy}>
+            <button type="button" onClick={() => void processHost(hostProgress.batchId)} disabled={busy}>
               処理してACK生成
             </button>
           )}
         </div>
-      )}
+      ))}
 
       {hostAck && (
         <label>
