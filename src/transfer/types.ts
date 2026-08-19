@@ -1,5 +1,5 @@
 import type { BatchId, DeviceId, RevisionId, TournamentId } from '../domain/ids'
-import type { ResultRevision } from '../domain/result'
+import type { Result, ResultRevision } from '../domain/result'
 
 export const QR_PROTOCOL_VERSION = 1 as const
 export const QR_FRAME_PREFIX = 'KSPO1:' as const
@@ -12,6 +12,7 @@ export interface TransferBatch {
   sourceDeviceId: DeviceId
   createdAt: string
   resultCount: number
+  results: Result[]
   revisions: ResultRevision[]
 }
 
