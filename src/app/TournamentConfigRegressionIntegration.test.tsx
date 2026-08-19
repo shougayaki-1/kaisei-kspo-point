@@ -8,8 +8,11 @@ import type {
   TournamentId,
 } from '../domain/ids'
 import type { TournamentConfigSnapshot } from '../config/tournament-config'
-import { runScoringTestCase } from '../config/scoring-test-case'
-import type { ConfigRepository } from '../db/config-repository'
+import {
+  runScoringTestCase,
+  scoringTestResultFingerprint,
+} from '../config/scoring-test-case'
+import type { ApplyConfigMetadata, ConfigRepository } from '../db/config-repository'
 import { TournamentConfigEditor } from './TournamentConfigEditor'
 
 const tournamentId = 'tournament-1' as TournamentId
@@ -95,14 +98,23 @@ function repository(snapshot: TournamentConfigSnapshot) {
       )
     })
   ))
-  const apply = vi.fn(async (draft: TournamentConfigSnapshot, metadata: { scoringTestApprovals?: Array<{ testCaseId: string }> }) => {
+  const apply = vi.fn(async (draft: TournamentConfigSnapshot, metadata: ApplyConfigMetadata) => {
+    const preview = await previewRegression(draft)
+    for (const result of preview) {
+      if (result.status !== 'FAIL') continue
+      const approval = metadata.scoringTestApprovals?.find(
+        (item) => item.testCaseId === result.testCaseId,
+      )
+      if (!approval || approval.actualFingerprint !== scoringTestResultFingerprint(result)) {
+        throw new Error('stale approval')
+      }
+    }
+
     version += 1
     current = structuredClone(draft)
     current.tournament.currentConfigVersion = version
-    const preview = await previewRegression(current)
     for (const result of preview) {
       if (result.status !== 'FAIL') continue
-      if (!metadata.scoringTestApprovals?.some((approval) => approval.testCaseId === result.testCaseId)) continue
       const test = current.scoringTestCases.find((item) => item.testCaseId === result.testCaseId)
       if (test) test.expected = structuredClone(result.actual)
     }
@@ -154,7 +166,11 @@ describe('TournamentConfigEditor scoring regression integration', () => {
 
     await waitFor(() => expect(repo.apply).toHaveBeenCalledOnce())
     expect(repo.apply.mock.calls[0][1]).toMatchObject({
-      scoringTestApprovals: [expect.objectContaining({ testCaseId: 'test-1', operator: '本部担当' })],
+      scoringTestApprovals: [expect.objectContaining({
+        testCaseId: 'test-1',
+        actualFingerprint: expect.any(String),
+        operator: '本部担当',
+      })],
     })
     expect(await screen.findByText(/Config v2 を適用しました/)).toBeInTheDocument()
   })
