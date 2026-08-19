@@ -14,6 +14,7 @@ import type {
   Tournament,
 } from '../domain/tournament'
 import type { InputField, InputSchema } from './input-schema'
+import { unsupportedScoringProfileMessage } from './scoring-profile'
 import type { ScoringTestCase } from './scoring-test-case'
 
 export interface TournamentConfigSnapshot {
@@ -403,6 +404,17 @@ export function validateTournamentConfig(snapshot: TournamentConfigSnapshot): Co
         profile.scoringProfileId,
       )
     }
+
+    const unsupportedModeMessage = unsupportedScoringProfileMessage(profile)
+    if (unsupportedModeMessage) {
+      error(
+        issues,
+        'UNSUPPORTED_AGGREGATION_RULE',
+        unsupportedModeMessage,
+        profile.scoringProfileId,
+      )
+    }
+
     if (profile.aggregationRule === 'BEST_N') {
       const bestN = profile.aggregationOptions?.bestN
       if (!Number.isInteger(bestN) || (bestN ?? 0) < 1) {
