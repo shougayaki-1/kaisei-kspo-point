@@ -324,13 +324,14 @@ export function createConflictResolution(
   let decision: ConflictResolutionDecision
 
   if (input.choice.kind === 'SELECT_REVISION') {
+    const selectedRevisionId = input.choice.selectedRevisionId
     const selected = candidateHeads.find(
-      (candidate) => candidate.revisionId === input.choice.selectedRevisionId,
+      (candidate) => candidate.revisionId === selectedRevisionId,
     )
     if (!selected) {
       throw new ResultProjectionError(
         'INVALID_SELECTED_REVISION',
-        `Selected revision ${input.choice.selectedRevisionId} is not a current conflict head`,
+        `Selected revision ${selectedRevisionId} is not a current conflict head`,
       )
     }
     rawData = structuredClone(selected.rawData)
