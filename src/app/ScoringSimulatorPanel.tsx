@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createId, type CompetitionEntryId } from '../domain/ids'
+import { canonicalizeDecimalInput } from '../domain/exact-decimal'
 import type { ScoringProfile, ScoringScenarioResult } from '../domain/scoring'
 import { calculateScoringScenario } from '../domain/scoring-engine'
 import type { Competition, CompetitionEntry, Team } from '../domain/tournament'
@@ -33,7 +34,7 @@ function createRound(index: number, entries: CompetitionEntry[]): DraftRound {
   }
 }
 
-function formatDiffValue(value: number[] | number): string {
+function formatDiffValue(value: ScoringTestDiff['expected']): string {
   return Array.isArray(value) ? value.join(', ') : String(value)
 }
 
@@ -80,28 +81,31 @@ export function ScoringSimulatorPanel({
   }>(() => {
     if (entries.length === 0 || rounds.length === 0) return {}
 
-    for (const round of rounds) {
-      for (const entry of entries) {
-        const raw = round.values[entry.entryId]
-        if (raw === undefined || raw.trim() === '') return {}
-        if (!Number.isFinite(Number(raw))) return { error: '入力値を数値で入力してください。' }
-      }
-    }
-
     try {
+      const scenarioRounds = rounds.map((round) => ({
+        roundId: round.roundId,
+        values: entries.map((entry) => {
+          const raw = round.values[entry.entryId]
+          if (raw === undefined || raw.trim() === '') {
+            throw new Error('INCOMPLETE')
+          }
+          return {
+            participantId: entry.entryId,
+            value: canonicalizeDecimalInput(raw),
+          }
+        }),
+      }))
+
       return {
-        result: calculateScoringScenario<CompetitionEntryId>({
-          rounds: rounds.map((round) => ({
-            roundId: round.roundId,
-            values: entries.map((entry) => ({
-              participantId: entry.entryId,
-              value: Number(round.values[entry.entryId]),
-            })),
-          })),
-        }, profile),
+        result: calculateScoringScenario<CompetitionEntryId>({ rounds: scenarioRounds }, profile),
       }
     } catch (error) {
-      return { error: error instanceof Error ? error.message : '計算に失敗しました。' }
+      if (error instanceof Error && error.message === 'INCOMPLETE') return {}
+      return {
+        error: error instanceof Error && error.name === 'InvalidExactValueError'
+          ? '入力値を10進数で入力してください。'
+          : error instanceof Error ? error.message : '計算に失敗しました。',
+      }
     }
   }, [entries, profile, rounds])
 
@@ -124,18 +128,25 @@ export function ScoringSimulatorPanel({
       }]
     })
 
-    onSaveTestCase({
-      testCaseId: createId<string>(),
-      competitionId: competition.competitionId,
-      name: testName.trim(),
-      rounds: rounds.map((round) => ({
+    let savedRounds: ScoringTestCase['rounds']
+    try {
+      savedRounds = rounds.map((round) => ({
         roundId: round.roundId,
         label: round.label,
         values: entries.map((entry) => ({
           entryId: entry.entryId,
-          value: Number(round.values[entry.entryId]),
+          value: canonicalizeDecimalInput(round.values[entry.entryId] ?? ''),
         })),
-      })),
+      }))
+    } catch {
+      return
+    }
+
+    onSaveTestCase({
+      testCaseId: createId<string>(),
+      competitionId: competition.competitionId,
+      name: testName.trim(),
+      rounds: savedRounds,
       expected,
     })
     setTestName('')

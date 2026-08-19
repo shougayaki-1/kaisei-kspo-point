@@ -1,4 +1,5 @@
 import type { CompetitionId } from '../domain/ids'
+import type { ExactValue } from '../domain/exact-decimal'
 
 interface BaseInputField {
   key: string
@@ -8,9 +9,9 @@ interface BaseInputField {
 
 export interface NumberInputField extends BaseInputField {
   type: 'NUMBER'
-  min?: number
-  max?: number
-  step?: number
+  min?: ExactValue
+  max?: ExactValue
+  step?: ExactValue
 }
 
 export interface TimeInputField extends BaseInputField {
@@ -33,9 +34,9 @@ export interface SelectInputField extends BaseInputField {
 
 export interface PenaltyInputField extends BaseInputField {
   type: 'PENALTY'
-  min?: number
-  max?: number
-  step?: number
+  min?: ExactValue
+  max?: ExactValue
+  step?: ExactValue
 }
 
 export interface WinLossInputField extends BaseInputField {

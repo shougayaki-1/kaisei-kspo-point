@@ -1,4 +1,13 @@
 import type { TeamId } from './ids'
+import {
+  averageExactValues,
+  canonicalizeExactValue,
+  compareExactValues,
+  divideExactValue,
+  serializeExactValue,
+  sumExactValues,
+  type ExactValue,
+} from './exact-decimal'
 import type {
   CalculationTraceStep,
   ParticipantScoreResult,
@@ -12,7 +21,7 @@ import type {
 
 export interface RankedValue {
   teamId: TeamId
-  value: number
+  value: ExactValue
 }
 
 export class UnsupportedAggregationError extends Error {
@@ -22,32 +31,33 @@ export class UnsupportedAggregationError extends Error {
   }
 }
 
-function pointsForRank(profile: ScoringProfile, rank: number): number {
+function pointsForRank(profile: ScoringProfile, rank: number): ExactValue {
   const points = profile.awardRule.rankPoints[rank]
   if (points === undefined) {
     throw new Error(`No award points configured for rank ${rank}`)
   }
-  return points
+  return canonicalizeExactValue(points)
 }
 
 function awardForGroup(
   profile: ScoringProfile,
   rank: number,
   groupSize: number,
-): { score: number; trace: CalculationTraceStep[] } {
+): { score: ExactValue; trace: CalculationTraceStep[] } {
   if (groupSize === 1 || profile.tieRule === 'SAME_RANK_SCORE') {
     const score = pointsForRank(profile, rank)
+    const display = serializeExactValue(score)
     return {
       score,
-      trace: [{ code: 'AWARD', label: `${rank}位 → ${score}点`, value: score }],
+      trace: [{ code: 'AWARD', label: `${rank}位 → ${display}点`, value: score }],
     }
   }
 
   const occupiedPoints = Array.from({ length: groupSize }, (_, offset) =>
     pointsForRank(profile, rank + offset),
   )
-  const score = occupiedPoints.reduce((sum, points) => sum + points, 0) / groupSize
-  const expression = `(${occupiedPoints.join(' + ')}) ÷ ${groupSize} = ${score}`
+  const score = divideExactValue(sumExactValues(occupiedPoints), groupSize)
+  const expression = `(${occupiedPoints.map(serializeExactValue).join(' + ')}) ÷ ${groupSize} = ${serializeExactValue(score)}`
 
   return {
     score,
@@ -67,8 +77,8 @@ export function calculateRankedParticipants<TId extends string>(
   profile: ScoringProfile,
 ): ParticipantScoreResult<TId>[] {
   const sorted = [...input].sort((left, right) => {
-    const delta = left.value - right.value
-    return profile.rankingRule.direction === 'LOWER_IS_BETTER' ? delta : -delta
+    const comparison = compareExactValues(left.value, right.value)
+    return profile.rankingRule.direction === 'LOWER_IS_BETTER' ? comparison : -comparison
   })
 
   const results: ParticipantScoreResult<TId>[] = []
@@ -79,7 +89,7 @@ export function calculateRankedParticipants<TId extends string>(
     if (!first) break
 
     let end = index + 1
-    while (end < sorted.length && sorted[end]?.value === first.value) {
+    while (end < sorted.length && compareExactValues(sorted[end]!.value, first.value) === 0) {
       end += 1
     }
 
@@ -90,13 +100,18 @@ export function calculateRankedParticipants<TId extends string>(
     for (let position = index; position < end; position += 1) {
       const item = sorted[position]
       if (!item) continue
+      const inputValue = canonicalizeExactValue(item.value)
 
       results.push({
         participantId: item.participantId,
         rank,
         awardScore: award.score,
         trace: [
-          { code: 'INPUT', label: `比較値: ${item.value}`, value: item.value },
+          {
+            code: 'INPUT',
+            label: `比較値: ${serializeExactValue(inputValue)}`,
+            value: inputValue,
+          },
           { code: 'RANK', label: `${rank}位`, value: rank },
           ...award.trace,
         ],
@@ -125,46 +140,46 @@ export function calculateRankedScores(
 }
 
 function aggregateScores(
-  scores: number[],
+  scores: ExactValue[],
   profile: ScoringProfile,
-): { score: number; trace: CalculationTraceStep[] } {
+): { score: ExactValue; trace: CalculationTraceStep[] } {
   switch (profile.aggregationRule) {
     case 'SUM': {
-      const score = scores.reduce((sum, value) => sum + value, 0)
+      const score = sumExactValues(scores)
       return {
         score,
         trace: [{
           code: 'AGGREGATE',
           label: 'ラウンド得点を合計',
-          expression: scores.length > 0 ? `${scores.join(' + ')} = ${score}` : '0',
+          expression: scores.length > 0
+            ? `${scores.map(serializeExactValue).join(' + ')} = ${serializeExactValue(score)}`
+            : '0',
           value: score,
         }],
       }
     }
     case 'AVERAGE': {
-      const score = scores.length === 0
-        ? 0
-        : scores.reduce((sum, value) => sum + value, 0) / scores.length
+      const score = averageExactValues(scores)
       return {
         score,
         trace: [{
           code: 'AGGREGATE',
           label: 'ラウンド得点を平均',
           expression: scores.length > 0
-            ? `(${scores.join(' + ')}) ÷ ${scores.length} = ${score}`
+            ? `(${scores.map(serializeExactValue).join(' + ')}) ÷ ${scores.length} = ${serializeExactValue(score)}`
             : '0',
           value: score,
         }],
       }
     }
     case 'FINAL_ONLY': {
-      const score = scores.at(-1) ?? 0
+      const score = canonicalizeExactValue(scores.at(-1) ?? 0)
       return {
         score,
         trace: [{
           code: 'AGGREGATE',
           label: '最終ラウンド得点を採用',
-          expression: String(score),
+          expression: serializeExactValue(score),
           value: score,
         }],
       }
@@ -174,14 +189,16 @@ function aggregateScores(
       if (!Number.isInteger(bestN) || (bestN ?? 0) < 1) {
         throw new Error('BEST_N requires a positive integer bestN')
       }
-      const selected = [...scores].sort((left, right) => right - left).slice(0, bestN)
-      const score = selected.reduce((sum, value) => sum + value, 0)
+      const selected = [...scores]
+        .sort((left, right) => -compareExactValues(left, right))
+        .slice(0, bestN)
+      const score = sumExactValues(selected)
       return {
         score,
         trace: [{
           code: 'AGGREGATE',
           label: `上位${bestN}ラウンドを合計`,
-          expression: `best ${bestN}: ${selected.join(' + ')} = ${score}`,
+          expression: `best ${bestN}: ${selected.map(serializeExactValue).join(' + ')} = ${serializeExactValue(score)}`,
           value: score,
         }],
       }

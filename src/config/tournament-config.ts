@@ -1,3 +1,8 @@
+import {
+  compareExactValues,
+  isDecimalInputValue,
+  isExactValue,
+} from '../domain/exact-decimal'
 import type { ScoringProfile } from '../domain/scoring'
 import type {
   Competition,
@@ -81,16 +86,27 @@ function validateField(
   checkRequiredText(issues, field.label, '入力項目名', target)
 
   if (field.type === 'NUMBER' || field.type === 'PENALTY') {
-    if (field.min !== undefined && !Number.isFinite(field.min)) {
+    const minValid = field.min === undefined || isDecimalInputValue(field.min)
+    const maxValid = field.max === undefined || isDecimalInputValue(field.max)
+    const stepValid = field.step === undefined || isDecimalInputValue(field.step)
+
+    if (!minValid) {
       error(issues, 'INVALID_NUMBER_LIMIT', `${field.label} の最小値が不正です。`, target)
     }
-    if (field.max !== undefined && !Number.isFinite(field.max)) {
+    if (!maxValid) {
       error(issues, 'INVALID_NUMBER_LIMIT', `${field.label} の最大値が不正です。`, target)
     }
-    if (field.min !== undefined && field.max !== undefined && field.min > field.max) {
+    if (
+      minValid && maxValid &&
+      field.min !== undefined && field.max !== undefined &&
+      compareExactValues(field.min, field.max) > 0
+    ) {
       error(issues, 'INVALID_NUMBER_RANGE', `${field.label} の最小値が最大値を超えています。`, target)
     }
-    if (field.step !== undefined && (!Number.isFinite(field.step) || field.step <= 0)) {
+    if (
+      !stepValid ||
+      (field.step !== undefined && stepValid && compareExactValues(field.step, 0) <= 0)
+    ) {
       error(issues, 'INVALID_NUMBER_STEP', `${field.label} の刻み幅は正の数にしてください。`, target)
     }
   }
@@ -163,11 +179,11 @@ function validateScoringTestCase(
       }
       roundParticipants.add(value.entryId)
       participantIds.add(value.entryId)
-      if (!Number.isFinite(value.value)) {
+      if (!isDecimalInputValue(value.value)) {
         error(
           issues,
           'INVALID_SCORING_TEST_VALUE',
-          `得点テストの入力値が不正です。`,
+          '得点テストの入力値が不正です。小数は10進文字列で保存してください。',
           testCase.testCaseId,
         )
       }
@@ -194,6 +210,18 @@ function validateScoringTestCase(
       )
     }
     expectedIds.add(expected.entryId)
+
+    if (
+      expected.roundAwardScores.some((value) => !isExactValue(value)) ||
+      !isExactValue(expected.aggregateScore)
+    ) {
+      error(
+        issues,
+        'INVALID_SCORING_TEST_EXPECTED_VALUE',
+        '得点テストの期待得点がexact numeric representationではありません。',
+        testCase.testCaseId,
+      )
+    }
   }
 
   const participants = [...participantIds].sort()
@@ -407,9 +435,14 @@ export function validateTournamentConfig(snapshot: TournamentConfigSnapshot): Co
         )
       }
       normalizedRanks.add(rank)
-      const score = (profile.awardRule.rankPoints as Record<string, number>)[rawRank]
-      if (!Number.isFinite(score)) {
-        error(issues, 'INVALID_RANK_SCORE', `順位 ${rank} の得点が不正です。`, profile.scoringProfileId)
+      const score = profile.awardRule.rankPoints[rank]
+      if (!isDecimalInputValue(score)) {
+        error(
+          issues,
+          'INVALID_RANK_SCORE',
+          `順位 ${rank} の得点が不正です。小数は10進文字列で保存してください。`,
+          profile.scoringProfileId,
+        )
       }
     }
   }
