@@ -140,7 +140,7 @@ describe('importTransferBatch', () => {
     expect(await repository.hasRevision(mismatched.revisionId)).toBe(false)
   })
 
-  it('persists a divergent same-parent revision but keeps the previous current revision during conflict', async () => {
+  it('persists a divergent same-parent revision and projects the common confirmed ancestor during conflict', async () => {
     const { repository } = setup()
     const base = revision('rev-base')
     const hostRevision = revision('rev-host', {
@@ -168,7 +168,7 @@ describe('importTransferBatch', () => {
     const revisions = await repository.getRevisions('result-1' as ResultId)
     expect(analyzeRevisionGraph(revisions).status).toBe('CONFLICT')
     expect((await repository.getResult('result-1' as ResultId))?.currentRevisionId).toBe(
-      hostRevision.revisionId,
+      base.revisionId,
     )
   })
 })

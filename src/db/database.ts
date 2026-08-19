@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie'
 import type { Result, ResultRevision } from '../domain/result'
+import type { ConflictResolutionRecord } from '../domain/result-projection'
 import type { ScoringProfile } from '../domain/scoring'
 import type {
   Competition,
@@ -18,6 +19,7 @@ import {
   schemaV2,
   schemaV3,
   schemaV4,
+  schemaV5,
   type AcknowledgementRecord,
   type AppMetaRecord,
   type AuditEventRecord,
@@ -44,6 +46,7 @@ export class AppDatabase extends Dexie {
   configVersions!: Table<ConfigVersionRecord, number>
   results!: Table<Result, string>
   resultRevisions!: Table<ResultRevision, string>
+  conflictResolutions!: Table<ConflictResolutionRecord, string>
   transferBatches!: Table<TransferBatchRecord, string>
   receivedQrParts!: Table<ReceivedQrPartRecord, number>
   acknowledgements!: Table<AcknowledgementRecord, string>
@@ -57,7 +60,8 @@ export class AppDatabase extends Dexie {
     this.version(1).stores(schemaV1)
     this.version(2).stores(schemaV2)
     this.version(3).stores(schemaV3)
-    this.version(DATABASE_SCHEMA_VERSION).stores(schemaV4)
+    this.version(4).stores(schemaV4)
+    this.version(DATABASE_SCHEMA_VERSION).stores(schemaV5)
   }
 }
 

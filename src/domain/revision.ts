@@ -1,5 +1,6 @@
 import { createId, type ResultId, type RevisionId } from './ids'
 import type { InputMode, RawResultData, ResultRevision } from './result'
+import { inspectRevisionGraph } from './revision-graph'
 
 export interface RevisionGraphAnalysis {
   status: 'CLEAN' | 'CONFLICT'
@@ -7,16 +8,10 @@ export interface RevisionGraphAnalysis {
 }
 
 export function analyzeRevisionGraph(revisions: ResultRevision[]): RevisionGraphAnalysis {
-  const revisionIds = new Set(revisions.map((revision) => revision.revisionId))
-  const referencedParents = new Set(
-    revisions.flatMap((revision) => revision.parentRevisionIds),
-  )
-
-  const heads = [...revisionIds].filter((revisionId) => !referencedParents.has(revisionId))
-
+  const graph = inspectRevisionGraph(revisions)
   return {
-    status: heads.length <= 1 ? 'CLEAN' : 'CONFLICT',
-    heads,
+    status: graph.status,
+    heads: graph.heads.map((head) => head.revisionId),
   }
 }
 

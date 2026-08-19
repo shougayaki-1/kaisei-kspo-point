@@ -1,6 +1,7 @@
-import type { DeviceId, RevisionId } from '../domain/ids'
+import type { DeviceId } from '../domain/ids'
 import type { Result, ResultRevision } from '../domain/result'
-import { analyzeRevisionGraph } from '../domain/revision'
+import { ResultProjectionError } from '../domain/result-projection'
+import { RevisionGraphError } from '../domain/revision-graph'
 import type { ResultRepository } from '../db/result-repository'
 import { createAckBatch } from './ack'
 import { stableStringify } from './codec'
@@ -24,6 +25,7 @@ function validResultRevisionPair(
 ): boolean {
   if (result.resultId !== revision.resultId) return false
   if (result.tournamentId !== batch.tournamentId) return false
+  if (revision.source === 'CONFLICT_RESOLUTION') return false
   if (!Number.isInteger(revision.revisionNumber) || revision.revisionNumber < 1) return false
   if (!Number.isInteger(revision.configVersion) || revision.configVersion < 1) return false
   if (!Array.isArray(revision.parentRevisionIds)) return false
@@ -80,21 +82,19 @@ async function importRevision(
     }
   }
 
-  const existingRevisions = existingResult
-    ? await context.repository.getRevisions(revision.resultId)
-    : []
-  const analysis = analyzeRevisionGraph([...existingRevisions, revision])
-
-  let currentRevisionId: RevisionId | null
-  if (!existingResult) {
-    currentRevisionId = revision.revisionId
-  } else if (analysis.status === 'CONFLICT') {
-    currentRevisionId = existingResult.currentRevisionId
-  } else {
-    currentRevisionId = analysis.heads[0] ?? existingResult.currentRevisionId
+  try {
+    await context.repository.importRevision(resultSnapshot, revision)
+  } catch (error) {
+    if (error instanceof RevisionGraphError || error instanceof ResultProjectionError) {
+      return {
+        revisionId: revision.revisionId,
+        status: 'INVALID_DATA',
+        message: error.message,
+      }
+    }
+    throw error
   }
 
-  await context.repository.importRevision(resultSnapshot, revision, currentRevisionId)
   return { revisionId: revision.revisionId, status: 'ACCEPTED' }
 }
 
