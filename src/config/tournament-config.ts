@@ -115,6 +115,102 @@ function validateField(
   }
 }
 
+function validateScoringTestCase(
+  issues: ConfigValidationIssue[],
+  testCase: ScoringTestCase,
+  competitions: Map<string, Competition>,
+  entries: Map<string, CompetitionEntry>,
+): void {
+  checkRequiredText(issues, testCase.name, '得点テスト名', testCase.testCaseId)
+  if (!competitions.has(testCase.competitionId)) {
+    error(
+      issues,
+      'UNKNOWN_SCORING_TEST_COMPETITION',
+      `${testCase.name || testCase.testCaseId} の競技が存在しません。`,
+      testCase.testCaseId,
+    )
+  }
+  if (testCase.rounds.length === 0) {
+    error(
+      issues,
+      'EMPTY_SCORING_TEST_ROUNDS',
+      `${testCase.name || testCase.testCaseId} にテストラウンドがありません。`,
+      testCase.testCaseId,
+    )
+  }
+
+  const participantIds = new Set<string>()
+  for (const round of testCase.rounds) {
+    checkRequiredText(issues, round.label, '得点テストのラウンド名', testCase.testCaseId)
+    const roundParticipants = new Set<string>()
+    for (const value of round.values) {
+      const entry = entries.get(value.entryId)
+      if (!entry || entry.competitionId !== testCase.competitionId) {
+        error(
+          issues,
+          'UNKNOWN_SCORING_TEST_ENTRY',
+          `得点テストの CompetitionEntry ${value.entryId} が存在しないか競技が一致しません。`,
+          testCase.testCaseId,
+        )
+      }
+      if (roundParticipants.has(value.entryId)) {
+        error(
+          issues,
+          'DUPLICATE_SCORING_TEST_ENTRY',
+          `得点テストの同一ラウンドで ${value.entryId} が重複しています。`,
+          testCase.testCaseId,
+        )
+      }
+      roundParticipants.add(value.entryId)
+      participantIds.add(value.entryId)
+      if (!Number.isFinite(value.value)) {
+        error(
+          issues,
+          'INVALID_SCORING_TEST_VALUE',
+          `得点テストの入力値が不正です。`,
+          testCase.testCaseId,
+        )
+      }
+    }
+  }
+
+  const expectedIds = new Set<string>()
+  for (const expected of testCase.expected) {
+    const entry = entries.get(expected.entryId)
+    if (!entry || entry.competitionId !== testCase.competitionId) {
+      error(
+        issues,
+        'UNKNOWN_SCORING_TEST_ENTRY',
+        `得点テスト期待値の CompetitionEntry ${expected.entryId} が存在しないか競技が一致しません。`,
+        testCase.testCaseId,
+      )
+    }
+    if (expectedIds.has(expected.entryId)) {
+      error(
+        issues,
+        'DUPLICATE_SCORING_TEST_EXPECTED_ENTRY',
+        `得点テスト期待値で ${expected.entryId} が重複しています。`,
+        testCase.testCaseId,
+      )
+    }
+    expectedIds.add(expected.entryId)
+  }
+
+  const participants = [...participantIds].sort()
+  const expectedParticipants = [...expectedIds].sort()
+  if (
+    participants.length !== expectedParticipants.length ||
+    participants.some((entryId, index) => entryId !== expectedParticipants[index])
+  ) {
+    error(
+      issues,
+      'SCORING_TEST_EXPECTED_PARTICIPANTS',
+      `${testCase.name || testCase.testCaseId} の入力参加単位と期待値の参加単位が一致しません。`,
+      testCase.testCaseId,
+    )
+  }
+}
+
 export function validateTournamentConfig(snapshot: TournamentConfigSnapshot): ConfigValidationIssue[] {
   const issues: ConfigValidationIssue[] = []
   const tournamentId = snapshot.tournament.tournamentId
@@ -135,6 +231,7 @@ export function validateTournamentConfig(snapshot: TournamentConfigSnapshot): Co
   checkDuplicateIds(issues, snapshot.scoringSessions, (item) => item.scoringSessionId)
   checkDuplicateIds(issues, snapshot.inputSchemas, (item) => item.inputSchemaId)
   checkDuplicateIds(issues, snapshot.scoringProfiles, (item) => item.scoringProfileId)
+  checkDuplicateIds(issues, snapshot.scoringTestCases, (item) => item.testCaseId)
 
   const teams = new Map(snapshot.teams.map((item) => [item.teamId, item]))
   const competitions = new Map(snapshot.competitions.map((item) => [item.competitionId, item]))
@@ -315,6 +412,10 @@ export function validateTournamentConfig(snapshot: TournamentConfigSnapshot): Co
         error(issues, 'INVALID_RANK_SCORE', `順位 ${rank} の得点が不正です。`, profile.scoringProfileId)
       }
     }
+  }
+
+  for (const testCase of snapshot.scoringTestCases) {
+    validateScoringTestCase(issues, testCase, competitions, entries)
   }
 
   return issues
