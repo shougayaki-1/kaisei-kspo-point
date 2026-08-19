@@ -26,7 +26,7 @@ function services() {
     listSessionResults: vi.fn().mockResolvedValue([{ result: savedResult, revisions, projection: { effectiveRevision: revisions[1], candidateHeads: [revisions[1]], resolutionHistory: [], conflictState: { status: 'NONE', resolved: false, candidateHeadRevisionIds: [], commonConfirmedAncestorRevisionId: null } } }]),
     saveResult: vi.fn().mockResolvedValue({ result: savedResult, revision: revisions[0] }),
     correctResult: vi.fn().mockResolvedValue({ result: savedResult, revision: revisions[1] }),
-    getResultHistory: vi.fn().mockResolvedValue({ result: savedResult, revisions, projection: { effectiveRevision: revisions[1], candidateHeads: [revisions[1]], resolutionHistory: [], conflictState: { status: 'NONE', resolved: false, candidateHeadRevisionIds: [], commonConfirmedAncestorRevisionId: null } }),
+    getResultHistory: vi.fn().mockResolvedValue({ result: savedResult, revisions, projection: { effectiveRevision: revisions[1], candidateHeads: [revisions[1]], resolutionHistory: [], conflictState: { status: 'NONE', resolved: false, candidateHeadRevisionIds: [], commonConfirmedAncestorRevisionId: null } } }),
   }
 }
 
