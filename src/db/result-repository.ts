@@ -1,4 +1,4 @@
-import type { ResultId, RevisionId } from '../domain/ids'
+import type { ResultId, RevisionId, ScoringSessionId } from '../domain/ids'
 import type { Result, ResultRevision } from '../domain/result'
 import {
   type ConflictResolutionRecord,
@@ -13,18 +13,14 @@ export class ResultRepository {
 
   private assertResolutionMetadataPath(revision: ResultRevision): void {
     if (revision.source === 'CONFLICT_RESOLUTION') {
-      throw new Error(
-        'CONFLICT_RESOLUTION revisions require resolution metadata; use saveConflictResolution',
-      )
+      throw new Error('CONFLICT_RESOLUTION revisions require resolution metadata; use saveConflictResolution')
     }
   }
 
   private async putRevisionImmutable(revision: ResultRevision): Promise<void> {
     const existing = await this.db.resultRevisions.get(revision.revisionId)
     if (existing) {
-      if (!areResultRevisionsEquivalent(existing, revision)) {
-        throw new Error(`revision ID collision: ${revision.revisionId}`)
-      }
+      if (!areResultRevisionsEquivalent(existing, revision)) throw new Error(`revision ID collision: ${revision.revisionId}`)
       return
     }
     await this.db.resultRevisions.add(revision)
@@ -33,9 +29,7 @@ export class ResultRepository {
   private async putResolutionImmutable(resolution: ConflictResolutionRecord): Promise<void> {
     const existing = await this.db.conflictResolutions.get(resolution.resolutionId)
     if (existing) {
-      if (JSON.stringify(existing) !== JSON.stringify(resolution)) {
-        throw new Error(`resolution ID collision: ${resolution.resolutionId}`)
-      }
+      if (JSON.stringify(existing) !== JSON.stringify(resolution)) throw new Error(`resolution ID collision: ${resolution.resolutionId}`)
       return
     }
     await this.db.conflictResolutions.add(resolution)
@@ -48,99 +42,54 @@ export class ResultRepository {
   }
 
   async saveResultWithRevision(result: Result, revision: ResultRevision): Promise<void> {
-    if (result.resultId !== revision.resultId) {
-      throw new Error('Result and revision IDs do not match')
-    }
+    if (result.resultId !== revision.resultId) throw new Error('Result and revision IDs do not match')
     this.assertResolutionMetadataPath(revision)
-
-    await this.db.transaction(
-      'rw',
-      this.db.results,
-      this.db.resultRevisions,
-      this.db.conflictResolutions,
-      async () => {
-        await this.putRevisionImmutable(revision)
-        const projection = await this.projectStoredResult(result.resultId)
-        await this.db.results.put({
-          ...result,
-          currentRevisionId: projection.effectiveRevision?.revisionId ?? null,
-        })
-      },
-    )
+    await this.db.transaction('rw', this.db.results, this.db.resultRevisions, this.db.conflictResolutions, async () => {
+      await this.putRevisionImmutable(revision)
+      const projection = await this.projectStoredResult(result.resultId)
+      await this.db.results.put({ ...result, currentRevisionId: projection.effectiveRevision?.revisionId ?? null })
+    })
   }
 
-  async importRevision(
-    resultSnapshot: Result,
-    revision: ResultRevision,
-    _legacyCurrentRevisionId?: RevisionId | null,
-  ): Promise<ResultProjection> {
-    if (resultSnapshot.resultId !== revision.resultId) {
-      throw new Error('Result and revision IDs do not match')
-    }
+  async importRevision(resultSnapshot: Result, revision: ResultRevision, _legacyCurrentRevisionId?: RevisionId | null): Promise<ResultProjection> {
+    if (resultSnapshot.resultId !== revision.resultId) throw new Error('Result and revision IDs do not match')
     this.assertResolutionMetadataPath(revision)
-
-    return this.db.transaction(
-      'rw',
-      this.db.results,
-      this.db.resultRevisions,
-      this.db.conflictResolutions,
-      async () => {
-        const existing = await this.db.results.get(resultSnapshot.resultId)
-        await this.putRevisionImmutable(revision)
-        const projection = await this.projectStoredResult(resultSnapshot.resultId)
-        const storedResult = existing ?? resultSnapshot
-        await this.db.results.put({
-          ...storedResult,
-          currentRevisionId: projection.effectiveRevision?.revisionId ?? null,
-        })
-        return projection
-      },
-    )
+    return this.db.transaction('rw', this.db.results, this.db.resultRevisions, this.db.conflictResolutions, async () => {
+      const existing = await this.db.results.get(resultSnapshot.resultId)
+      await this.putRevisionImmutable(revision)
+      const projection = await this.projectStoredResult(resultSnapshot.resultId)
+      const storedResult = existing ?? resultSnapshot
+      await this.db.results.put({ ...storedResult, currentRevisionId: projection.effectiveRevision?.revisionId ?? null })
+      return projection
+    })
   }
 
-  async saveConflictResolution(
-    revision: ResultRevision,
-    resolution: ConflictResolutionRecord,
-  ): Promise<ResultProjection> {
-    if (
-      revision.resultId !== resolution.resultId ||
-      revision.revisionId !== resolution.effectiveRevisionId ||
-      revision.source !== 'CONFLICT_RESOLUTION'
-    ) {
+  async saveConflictResolution(revision: ResultRevision, resolution: ConflictResolutionRecord): Promise<ResultProjection> {
+    if (revision.resultId !== resolution.resultId || revision.revisionId !== resolution.effectiveRevisionId || revision.source !== 'CONFLICT_RESOLUTION') {
       throw new Error('Conflict resolution metadata does not match its revision')
     }
-
-    return this.db.transaction(
-      'rw',
-      this.db.results,
-      this.db.resultRevisions,
-      this.db.conflictResolutions,
-      async () => {
-        const result = await this.db.results.get(revision.resultId)
-        if (!result) throw new Error(`Result ${revision.resultId} does not exist`)
-
-        await this.putRevisionImmutable(revision)
-        await this.putResolutionImmutable(resolution)
-        const projection = await this.projectStoredResult(revision.resultId)
-        await this.db.results.put({
-          ...result,
-          currentRevisionId: projection.effectiveRevision?.revisionId ?? null,
-        })
-        return projection
-      },
-    )
+    return this.db.transaction('rw', this.db.results, this.db.resultRevisions, this.db.conflictResolutions, async () => {
+      const result = await this.db.results.get(revision.resultId)
+      if (!result) throw new Error(`Result ${revision.resultId} does not exist`)
+      await this.putRevisionImmutable(revision)
+      await this.putResolutionImmutable(resolution)
+      const projection = await this.projectStoredResult(revision.resultId)
+      await this.db.results.put({ ...result, currentRevisionId: projection.effectiveRevision?.revisionId ?? null })
+      return projection
+    })
   }
 
-  async hasRevision(revisionId: RevisionId): Promise<boolean> {
-    return (await this.db.resultRevisions.get(revisionId)) !== undefined
-  }
+  async hasRevision(revisionId: RevisionId): Promise<boolean> { return (await this.db.resultRevisions.get(revisionId)) !== undefined }
+  async getRevision(revisionId: RevisionId): Promise<ResultRevision | undefined> { return this.db.resultRevisions.get(revisionId) }
+  async getResult(resultId: ResultId): Promise<Result | undefined> { return this.db.results.get(resultId) }
 
-  async getRevision(revisionId: RevisionId): Promise<ResultRevision | undefined> {
-    return this.db.resultRevisions.get(revisionId)
-  }
-
-  async getResult(resultId: ResultId): Promise<Result | undefined> {
-    return this.db.results.get(resultId)
+  async listResultsForScoringSession(scoringSessionId: ScoringSessionId): Promise<Result[]> {
+    const results = await this.db.results.where('scoringSessionId').equals(scoringSessionId).toArray()
+    return results.sort((left, right) => {
+      const time = left.createdAt.localeCompare(right.createdAt)
+      if (time !== 0) return time
+      return left.resultId < right.resultId ? -1 : left.resultId > right.resultId ? 1 : 0
+    })
   }
 
   async getRevisions(resultId: ResultId): Promise<ResultRevision[]> {
@@ -154,9 +103,7 @@ export class ResultRepository {
 
   async getConflictResolutions(resultId: ResultId): Promise<ConflictResolutionRecord[]> {
     const resolutions = await this.db.conflictResolutions.where('resultId').equals(resultId).toArray()
-    return resolutions.sort((left, right) =>
-      left.resolutionId < right.resolutionId ? -1 : left.resolutionId > right.resolutionId ? 1 : 0,
-    )
+    return resolutions.sort((left, right) => left.resolutionId < right.resolutionId ? -1 : left.resolutionId > right.resolutionId ? 1 : 0)
   }
 
   async getProjection(resultId: ResultId): Promise<ResultProjection | undefined> {
@@ -167,10 +114,7 @@ export class ResultRepository {
 
   async getCurrentRevision(resultId: ResultId): Promise<ResultRevision | undefined> {
     const result = await this.getResult(resultId)
-    if (!result?.currentRevisionId) {
-      return undefined
-    }
-
+    if (!result?.currentRevisionId) return undefined
     return this.db.resultRevisions.get(result.currentRevisionId)
   }
 }
