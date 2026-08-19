@@ -154,7 +154,7 @@ export class ConfigRepository {
     const errors = validationIssues.filter((issue) => issue.severity === 'ERROR')
     if (errors.length > 0) {
       throw new Error(
-        `configuration validation failed: ${errors.map((issue) => issue.code).join(', ')}`,
+        `configuration validation failed: ${errors.map((issue) => `${issue.code}: ${issue.message}`).join('; ')}`,
       )
     }
 
