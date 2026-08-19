@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import type { DeviceId, TournamentId } from '../domain/ids'
-import type { ResultRevision } from '../domain/result'
+import type {
+  CompetitionId,
+  DeviceId,
+  ResultId,
+  ScoringSessionId,
+  TournamentId,
+} from '../domain/ids'
+import type { Result, ResultRevision } from '../domain/result'
 import {
   assembleTransferBatch,
   createTransferBatch,
@@ -26,6 +32,22 @@ function revision(id: string, rawData: ResultRevision['rawData']): ResultRevisio
   }
 }
 
+function resultFor(item: ResultRevision): Result {
+  return {
+    resultId: item.resultId,
+    tournamentId,
+    competitionId: 'competition-1' as CompetitionId,
+    scoringSessionId: 'session-1' as ScoringSessionId,
+    currentRevisionId: item.revisionId,
+    createdAt: '2026-08-19T09:59:00+09:00',
+    createdByDeviceId: sourceDeviceId,
+  }
+}
+
+function withResults(revisions: ResultRevision[]) {
+  return { results: revisions.map(resultFor), revisions }
+}
+
 function encodeFragmentObject(value: unknown): string {
   const bytes = new TextEncoder().encode(JSON.stringify(value))
   let binary = ''
@@ -40,7 +62,7 @@ describe('QR transfer codec', () => {
     const batch = createTransferBatch({
       tournamentId,
       sourceDeviceId,
-      revisions,
+      ...withResults(revisions),
       createdAt: '2026-08-19T10:01:00+09:00',
       batchId: 'batch-1',
     })
@@ -66,13 +88,14 @@ describe('QR transfer codec', () => {
   })
 
   it('splits large payloads into ordered multipart fragments and reassembles them', async () => {
+    const revisions = [
+      revision('rev-1', { note: 'あ'.repeat(400) }),
+      revision('rev-2', { count: 41 }),
+    ]
     const batch = createTransferBatch({
       tournamentId,
       sourceDeviceId,
-      revisions: [
-        revision('rev-1', { note: 'あ'.repeat(400) }),
-        revision('rev-2', { count: 41 }),
-      ],
+      ...withResults(revisions),
       createdAt: '2026-08-19T10:02:00+09:00',
       batchId: 'batch-2',
     })
@@ -91,10 +114,11 @@ describe('QR transfer codec', () => {
   })
 
   it('rejects a fragment when its payload no longer matches chunkChecksum', async () => {
+    const revisions = [revision('rev-1', { count: 73 })]
     const batch = createTransferBatch({
       tournamentId,
       sourceDeviceId,
-      revisions: [revision('rev-1', { count: 73 })],
+      ...withResults(revisions),
       createdAt: '2026-08-19T10:03:00+09:00',
       batchId: 'batch-3',
     })
@@ -106,10 +130,11 @@ describe('QR transfer codec', () => {
   })
 
   it('rejects reconstructed data when the batch checksum is wrong', async () => {
+    const revisions = [revision('rev-1', { count: 73 })]
     const batch = createTransferBatch({
       tournamentId,
       sourceDeviceId,
-      revisions: [revision('rev-1', { count: 73 })],
+      ...withResults(revisions),
       createdAt: '2026-08-19T10:04:00+09:00',
       batchId: 'batch-4',
     })
@@ -128,13 +153,17 @@ describe('QR transfer codec', () => {
       createdAt: '2026-08-19T10:05:00+09:00',
       batchId: 'batch-stable',
     }
+    const firstRevision = revision('rev-1', { alpha: 1, beta: 2 })
+    const secondRevision = revision('rev-1', { beta: 2, alpha: 1 })
     const first = createTransferBatch({
       ...common,
-      revisions: [revision('rev-1', { alpha: 1, beta: 2 })],
+      results: [resultFor(firstRevision)],
+      revisions: [firstRevision],
     })
     const second = createTransferBatch({
       ...common,
-      revisions: [revision('rev-1', { beta: 2, alpha: 1 })],
+      results: [resultFor(secondRevision)],
+      revisions: [secondRevision],
     })
 
     const firstEncoded = await encodeBatchFragments(first, 10_000)
