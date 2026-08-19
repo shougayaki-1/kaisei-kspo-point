@@ -47,7 +47,10 @@ function clone<T>(value: T): T {
 
 function normalizeDecimalValue(value: ExactValue): ExactValue {
   try {
-    return canonicalizeDecimalInput(value)
+    const normalized = canonicalizeDecimalInput(value)
+    return typeof value === 'string' && typeof normalized === 'number'
+      ? String(normalized)
+      : normalized
   } catch {
     return value
   }
