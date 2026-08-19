@@ -2,6 +2,7 @@ import type { TournamentId } from '../domain/ids'
 import {
   canonicalizeDecimalInput,
   canonicalizeExactValue,
+  canonicalizeLegacyNumber,
   type ExactValue,
 } from '../domain/exact-decimal'
 import {
@@ -47,6 +48,9 @@ function clone<T>(value: T): T {
 
 function normalizeDecimalValue(value: ExactValue): ExactValue {
   try {
+    if (typeof value === 'number' && !Number.isSafeInteger(value)) {
+      return canonicalizeLegacyNumber(value)
+    }
     const normalized = canonicalizeDecimalInput(value)
     return typeof value === 'string' && typeof normalized === 'number'
       ? String(normalized)
@@ -58,6 +62,9 @@ function normalizeDecimalValue(value: ExactValue): ExactValue {
 
 function normalizeExactValue(value: ExactValue): ExactValue {
   try {
+    if (typeof value === 'number' && !Number.isSafeInteger(value)) {
+      return canonicalizeLegacyNumber(value)
+    }
     return canonicalizeExactValue(value)
   } catch {
     return value
