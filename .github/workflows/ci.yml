@@ -22,7 +22,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Run tests
-        run: npm run test:run -- src/config/scoring-capability.test.ts
+        run: npm run test:run
       - name: Typecheck
         run: npm run typecheck
       - name: Build
