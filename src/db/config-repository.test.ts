@@ -89,6 +89,7 @@ function snapshotFor(prefix: string, name = `${prefix}大会`): TournamentConfig
         aggregationRule: 'SUM',
       },
     ],
+    scoringTestCases: [],
   }
 }
 
