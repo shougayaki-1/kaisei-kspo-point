@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type {
   CompetitionEntryId,
@@ -157,6 +157,34 @@ describe('TournamentConfigEditor scoring regression integration', () => {
       scoringTestApprovals: [expect.objectContaining({ testCaseId: 'test-1', operator: '本部担当' })],
     })
     expect(await screen.findByText(/Config v2 を適用しました/)).toBeInTheDocument()
+  })
+
+  it('stages a scoring change with no saved cases so the new rule can be simulated before apply', async () => {
+    const snapshot = configuredSnapshot()
+    snapshot.scoringTestCases = []
+    const repo = repository(snapshot)
+    render(
+      <TournamentConfigEditor
+        repository={repo}
+        tournamentId={tournamentId}
+        operatorName="本部担当"
+      />,
+    )
+
+    await screen.findByText('Config v1')
+    fireEvent.change(screen.getByLabelText('得点 1'), { target: { value: '50' } })
+    fireEvent.click(screen.getByRole('button', { name: '設定を適用' }))
+
+    expect(await screen.findByText('得点ルールを計算テストで確認してください。')).toBeInTheDocument()
+    expect(repo.apply).not.toHaveBeenCalled()
+
+    const simulator = screen.getByLabelText('玉入れ 得点計算テスト')
+    fireEvent.change(within(simulator).getByLabelText('第1ラウンド 1組①'), { target: { value: '100' } })
+    fireEvent.change(within(simulator).getByLabelText('第1ラウンド 2組①'), { target: { value: '80' } })
+    expect(within(simulator).getByTestId('sim-result-entry-1')).toHaveTextContent('50点')
+
+    fireEvent.click(screen.getByRole('button', { name: 'この設定を適用' }))
+    await waitFor(() => expect(repo.apply).toHaveBeenCalledOnce())
   })
 
   it('locks the editable draft during review and can return without carrying an approval forward', async () => {
