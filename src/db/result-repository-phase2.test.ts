@@ -115,7 +115,7 @@ describe('ResultRepository Phase 2 revision projection', () => {
     expect((await repository.getResult(resultId))?.currentRevisionId).toBe(a.revisionId)
   })
 
-  it('requires append-only resolution metadata for CONFLICT_RESOLUTION revisions', async () => {
+  it('requires append-only resolution metadata for locally saved CONFLICT_RESOLUTION revisions', async () => {
     const { repository } = open(`phase2-resolution-guard-${crypto.randomUUID()}`)
     const a = revision('a')
     const b = revision('b', ['a'], { revisionNumber: 2, rawData: { value: 20 } })
@@ -143,6 +143,33 @@ describe('ResultRepository Phase 2 revision projection', () => {
     const projection = await repository.getProjection(resultId)
     expect(projection?.conflictState.status).toBe('UNRESOLVED')
     expect(projection?.effectiveRevision?.revisionId).toBe(a.revisionId)
+  })
+
+  it('rejects imported CONFLICT_RESOLUTION revisions when no resolution metadata protocol is present', async () => {
+    const { repository } = open(`phase2-resolution-import-guard-${crypto.randomUUID()}`)
+    const a = revision('a')
+    const b = revision('b', ['a'], { revisionNumber: 2 })
+    const c = revision('c', ['a'], { revisionNumber: 2 })
+
+    await repository.importRevision(result(a.revisionId), a)
+    await repository.importRevision(result(b.revisionId), b)
+    await repository.importRevision(result(c.revisionId), c)
+
+    const importedResolution = revision('imported-resolution', ['b', 'c'], {
+      revisionNumber: 3,
+      source: 'CONFLICT_RESOLUTION',
+      operator: '別本部',
+    })
+
+    await expect(
+      repository.importRevision(
+        result(importedResolution.revisionId),
+        importedResolution,
+      ),
+    ).rejects.toThrow(/saveConflictResolution|resolution metadata/i)
+
+    expect(await repository.hasRevision(importedResolution.revisionId)).toBe(false)
+    expect((await repository.getProjection(resultId))?.conflictState.status).toBe('UNRESOLVED')
   })
 
   it('persists explicit resolution history append-only across reload', async () => {
