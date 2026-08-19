@@ -156,8 +156,9 @@ describe('TournamentConfigEditor scoring regression integration', () => {
     fireEvent.change(screen.getByLabelText('得点 2'), { target: { value: '30' } })
     fireEvent.click(screen.getByRole('button', { name: '設定を適用' }))
 
-    expect(await screen.findByText('得点計算テストの確認が必要です。')).toBeInTheDocument()
-    expect(screen.getByText('通常順位')).toBeInTheDocument()
+    const review = await screen.findByLabelText('得点変更レビュー')
+    expect(within(review).getByText('得点計算テストの確認が必要です。')).toBeInTheDocument()
+    expect(within(review).getByText('通常順位')).toBeInTheDocument()
     expect(screen.getAllByText(/30 → 50/).length).toBeGreaterThan(0)
     expect(repo.apply).not.toHaveBeenCalled()
 
@@ -191,7 +192,8 @@ describe('TournamentConfigEditor scoring regression integration', () => {
     fireEvent.change(screen.getByLabelText('得点 1'), { target: { value: '50' } })
     fireEvent.click(screen.getByRole('button', { name: '設定を適用' }))
 
-    expect(await screen.findByText('得点ルールを計算テストで確認してください。')).toBeInTheDocument()
+    const review = await screen.findByLabelText('得点変更レビュー')
+    expect(within(review).getByText('得点ルールを計算テストで確認してください。')).toBeInTheDocument()
     expect(repo.apply).not.toHaveBeenCalled()
 
     const simulator = screen.getByLabelText('玉入れ 得点計算テスト')
@@ -220,7 +222,8 @@ describe('TournamentConfigEditor scoring regression integration', () => {
     fireEvent.change(screen.getByLabelText('得点 1'), { target: { value: '50' } })
     fireEvent.click(screen.getByRole('button', { name: '設定を適用' }))
 
-    expect(await screen.findByText('得点ルールを計算テストで確認してください。')).toBeInTheDocument()
+    const review = await screen.findByLabelText('得点変更レビュー')
+    expect(within(review).getByText('得点ルールを計算テストで確認してください。')).toBeInTheDocument()
     expect(repo.apply).not.toHaveBeenCalled()
   })
 
@@ -236,7 +239,9 @@ describe('TournamentConfigEditor scoring regression integration', () => {
     await screen.findByText('Config v1')
     fireEvent.change(screen.getByLabelText('得点 1'), { target: { value: '50' } })
     fireEvent.click(screen.getByRole('button', { name: '設定を適用' }))
-    await screen.findByText('得点計算テストの確認が必要です。')
+
+    const review = await screen.findByLabelText('得点変更レビュー')
+    expect(within(review).getByText('得点計算テストの確認が必要です。')).toBeInTheDocument()
 
     expect(screen.queryByRole('spinbutton', { name: '得点 1' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '設定を見直す' }))
