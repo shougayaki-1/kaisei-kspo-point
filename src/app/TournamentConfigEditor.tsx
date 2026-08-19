@@ -88,6 +88,12 @@ export function TournamentConfigEditor({
     (result) => approvedTestIds.has(result.testCaseId),
   )
 
+  const returnToEditing = () => {
+    setPendingReview(null)
+    setApprovedTestIds(new Set())
+    setIntegrationMessage('')
+  }
+
   const approveAndApply = async () => {
     if (!pendingReview || invalidResults.length > 0 || !allFailuresApproved) return
 
@@ -134,12 +140,14 @@ export function TournamentConfigEditor({
 
   return (
     <>
-      <TournamentConfigEditorBase
-        key={editorGeneration}
-        repository={editorRepository}
-        tournamentId={currentSnapshot?.tournament.tournamentId ?? tournamentId}
-        operatorName={operatorName}
-      />
+      <div hidden={Boolean(pendingReview)}>
+        <TournamentConfigEditorBase
+          key={editorGeneration}
+          repository={editorRepository}
+          tournamentId={currentSnapshot?.tournament.tournamentId ?? tournamentId}
+          operatorName={operatorName}
+        />
+      </div>
 
       {pendingReview && (
         <section className="config-panel regression-review" aria-label="得点変更レビュー">
@@ -152,6 +160,7 @@ export function TournamentConfigEditor({
                   <li key={result.testCaseId}>{result.message ?? result.testCaseId}</li>
                 ))}
               </ul>
+              <button type="button" onClick={returnToEditing}>設定を見直す</button>
             </>
           ) : (
             <>
@@ -188,13 +197,16 @@ export function TournamentConfigEditor({
                   )
                 })}
               </div>
-              <button
-                type="button"
-                disabled={!allFailuresApproved}
-                onClick={approveAndApply}
-              >
-                承認して設定を適用
-              </button>
+              <div className="review-actions">
+                <button type="button" onClick={returnToEditing}>設定を見直す</button>
+                <button
+                  type="button"
+                  disabled={!allFailuresApproved}
+                  onClick={approveAndApply}
+                >
+                  承認して設定を適用
+                </button>
+              </div>
             </>
           )}
         </section>
