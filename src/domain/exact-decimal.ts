@@ -131,7 +131,12 @@ export function canonicalizeDecimalInput(value: ExactValue): ExactValue {
   if (value.includes('/')) {
     throw new InvalidExactValueError(value, 'Configured/input decimal values must use decimal text')
   }
-  return rationalToValue(parseDecimal(value.trim()))
+  const text = value.trim()
+  const parsed = parseDecimal(text)
+  if (text.includes('.') && parsed.denominator === 1n) {
+    return serializeRational(parsed)
+  }
+  return rationalToValue(parsed)
 }
 
 export function serializeExactValue(value: ExactValue): string {
