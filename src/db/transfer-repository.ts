@@ -1,6 +1,5 @@
 import type { BatchId, RevisionId, TournamentId } from '../domain/ids'
-import { stableStringify } from '../transfer/frame'
-import { decodeQrFrame } from '../transfer/frame'
+import { decodeQrFrame, stableStringify } from '../transfer/frame'
 import { TransferReceiver } from '../transfer/receiver'
 import type { AckBatch, TransferBatch } from '../transfer/types'
 import type { AppDatabase } from './database'
@@ -24,17 +23,26 @@ export class TransferRepository {
       this.db.revisionDeliveries,
       async () => {
         const existingBatch = await this.db.transferBatches.get(batch.batchId)
+        if (existingBatch) {
+          if (stableStringify(existingBatch.batch) !== stableStringify(batch)) {
+            throw new Error(`immutable TransferBatch collision for batchId ${batch.batchId}`)
+          }
+          if (stableStringify(existingBatch.encodedParts) !== stableStringify(encodedParts)) {
+            throw new Error(`immutable TransferBatch fragment collision for batchId ${batch.batchId}`)
+          }
+          return
+        }
+
         const record: TransferBatchRecord = {
           batchId: batch.batchId,
           tournamentId: batch.tournamentId,
-          status: existingBatch?.status ?? 'PENDING',
+          status: 'PENDING',
           createdAt: batch.createdAt,
           batch,
-          encodedParts,
-          currentPartIndex: existingBatch?.currentPartIndex ?? 0,
+          encodedParts: [...encodedParts],
+          currentPartIndex: 0,
         }
-        if (record.currentPartIndex >= encodedParts.length) record.currentPartIndex = 0
-        await this.db.transferBatches.put(record)
+        await this.db.transferBatches.add(record)
 
         for (const revision of batch.revisions) {
           const existingDelivery = await this.db.revisionDeliveries.get(revision.revisionId)
@@ -45,7 +53,7 @@ export class TransferRepository {
               status: 'PENDING',
               updatedAt: batch.createdAt,
             }
-            await this.db.revisionDeliveries.put(delivery)
+            await this.db.revisionDeliveries.add(delivery)
           }
         }
       },
@@ -54,6 +62,15 @@ export class TransferRepository {
 
   async getOutgoingBatch(batchId: BatchId): Promise<TransferBatchRecord | undefined> {
     return this.db.transferBatches.get(batchId)
+  }
+
+  async listOutgoingBatches(tournamentId: TournamentId): Promise<TransferBatchRecord[]> {
+    const rows = await this.db.transferBatches.where('tournamentId').equals(tournamentId).toArray()
+    return rows.sort((left, right) => {
+      const createdAt = left.createdAt.localeCompare(right.createdAt)
+      if (createdAt !== 0) return createdAt
+      return left.batchId < right.batchId ? -1 : left.batchId > right.batchId ? 1 : 0
+    })
   }
 
   async setOutgoingPartIndex(batchId: BatchId, partIndex: number): Promise<void> {
