@@ -5,6 +5,8 @@ import { ConfigRepository } from '../db/config-repository'
 import { createDatabase } from '../db/database'
 import { ConfigUpdatePanel } from './ConfigUpdatePanel'
 import { createConfigUpdateService } from './config-update-service'
+import { CourtScoringSession } from './CourtScoringSession'
+import { createCourtResultService } from './court-result-service'
 import { CourtTransferHistory } from './CourtTransferHistory'
 import { createCourtTransferHistoryServices } from './court-transfer-history-service'
 import { TournamentConfigEditor } from './TournamentConfigEditor'
@@ -41,6 +43,10 @@ export function App({
   const browserConfigRepository = useMemo(() => new ConfigRepository(appDatabase), [appDatabase])
   const resolvedConfigRepository = configRepository ?? browserConfigRepository
   const configUpdateServices = useMemo(() => createConfigUpdateService(appDatabase), [appDatabase])
+  const courtResultServices = useMemo(
+    () => createCourtResultService(appDatabase, { deviceId }),
+    [appDatabase, deviceId],
+  )
   const courtTransferHistoryServices = useMemo(
     () => createCourtTransferHistoryServices(appDatabase),
     [appDatabase],
@@ -147,6 +153,7 @@ export function App({
           </div>
           <button type="button" onClick={returnToModeSelection}>モード選択へ戻る</button>
         </div>
+        <CourtScoringSession services={courtResultServices} />
         <ConfigUpdatePanel mode="COURT" services={configUpdateServices} />
         <TransferDemo mode="COURT" deviceId={deviceId} />
         <CourtTransferHistory services={courtTransferHistoryServices} />
