@@ -25,6 +25,7 @@ function validResultRevisionPair(
 ): boolean {
   if (result.resultId !== revision.resultId) return false
   if (result.tournamentId !== batch.tournamentId) return false
+  if (revision.source === 'CONFLICT_RESOLUTION') return false
   if (!Number.isInteger(revision.revisionNumber) || revision.revisionNumber < 1) return false
   if (!Number.isInteger(revision.configVersion) || revision.configVersion < 1) return false
   if (!Array.isArray(revision.parentRevisionIds)) return false
