@@ -1,12 +1,25 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { ConfigRepository } from '../db/config-repository'
 import { App } from './App'
 
 function configRepository(): Pick<ConfigRepository, 'loadCurrent' | 'apply'> {
+  let version = 0
   return {
     loadCurrent: vi.fn(async () => undefined),
-    apply: vi.fn(async (snapshot) => ({ version: 1, snapshot })),
+    apply: vi.fn(async (snapshot) => {
+      version += 1
+      return {
+        version,
+        snapshot: {
+          ...structuredClone(snapshot),
+          tournament: {
+            ...snapshot.tournament,
+            currentConfigVersion: version,
+          },
+        },
+      }
+    }),
   }
 }
 
@@ -46,6 +59,17 @@ describe('App', () => {
 
     expect(screen.getByRole('heading', { name: '結果QR転送' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '大会設定' })).not.toBeInTheDocument()
+  })
+
+  it('updates the status bar when a ConfigVersion is applied', async () => {
+    render(<App configRepository={configRepository()} />)
+    fireEvent.click(screen.getByRole('button', { name: '本部モード' }))
+    fireEvent.change(screen.getByLabelText('新規大会名'), { target: { value: '開成運動交流祭' } })
+    fireEvent.click(screen.getByRole('button', { name: '新しい大会を作成' }))
+    fireEvent.click(screen.getByRole('button', { name: '設定を適用' }))
+
+    const statusBar = screen.getByLabelText('端末状態')
+    expect(await within(statusBar).findByText('Config v1')).toBeInTheDocument()
   })
 
   it('reloads only after confirmation', () => {
