@@ -1,21 +1,17 @@
 import type { BatchId, DeviceId, TournamentId } from '../domain/ids'
 import type { TransferRepository } from '../db/transfer-repository'
-import { sha256Hex, stableStringify } from './codec'
 import {
-  QR_FRAME_PREFIX,
+  assembleQrFrames,
+  decodeQrFrame,
+  encodeQrFrames,
+} from './frame'
+import {
   QR_PROTOCOL_VERSION,
   type AckBatch,
   type AckRevisionResult,
   type AckRevisionStatus,
   type TransferBatch,
 } from './types'
-
-interface AckQrFrame {
-  protocolVersion: typeof QR_PROTOCOL_VERSION
-  type: 'ACK_FRAME'
-  checksum: string
-  payload: string
-}
 
 const ACK_STATUSES = new Set<AckRevisionStatus>([
   'ACCEPTED',
@@ -24,26 +20,6 @@ const ACK_STATUSES = new Set<AckRevisionStatus>([
   'CONFIG_MISMATCH',
   'INVALID_DATA',
 ])
-
-function bytesToBase64Url(bytes: Uint8Array): string {
-  let binary = ''
-  for (const byte of bytes) binary += String.fromCharCode(byte)
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
-}
-
-function base64UrlToBytes(value: string): Uint8Array {
-  const padded = value.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (value.length % 4)) % 4)
-  const binary = atob(padded)
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0))
-}
-
-function encodeText(value: string): string {
-  return bytesToBase64Url(new TextEncoder().encode(value))
-}
-
-function decodeText(value: string): string {
-  return new TextDecoder().decode(base64UrlToBytes(value))
-}
 
 function assertAckShape(value: unknown): asserts value is AckBatch {
   if (value === null || typeof value !== 'object') throw new Error('invalid ACK batch')
@@ -74,19 +50,6 @@ function assertAckShape(value: unknown): asserts value is AckBatch {
   }
 }
 
-function assertAckFrameShape(value: unknown): asserts value is AckQrFrame {
-  if (value === null || typeof value !== 'object') throw new Error('invalid ACK frame')
-  const frame = value as Partial<AckQrFrame>
-  if (
-    frame.protocolVersion !== QR_PROTOCOL_VERSION ||
-    frame.type !== 'ACK_FRAME' ||
-    typeof frame.checksum !== 'string' ||
-    typeof frame.payload !== 'string'
-  ) {
-    throw new Error('invalid ACK frame')
-  }
-}
-
 export function createAckBatch(
   batch: TransferBatch,
   hostDeviceId: DeviceId,
@@ -105,47 +68,46 @@ export function createAckBatch(
   }
 }
 
-export async function encodeAck(ack: AckBatch): Promise<string> {
+export async function encodeAckFragments(
+  ack: AckBatch,
+  maxPayloadChars = 700,
+): Promise<string[]> {
   assertAckShape(ack)
-  const ackJson = stableStringify(ack)
-  const frame: AckQrFrame = {
-    protocolVersion: QR_PROTOCOL_VERSION,
-    type: 'ACK_FRAME',
-    checksum: await sha256Hex(ackJson),
-    payload: encodeText(ackJson),
+  return encodeQrFrames(
+    {
+      payloadKind: 'ACK_BATCH',
+      tournamentId: ack.tournamentId,
+      transferId: ack.batchId,
+      itemCount: ack.results.length,
+      payload: ack,
+    },
+    maxPayloadChars,
+  )
+}
+
+export async function decodeAckFragments(encoded: string[]): Promise<AckBatch> {
+  const frames = await Promise.all(encoded.map(decodeQrFrame))
+  const envelope = await assembleQrFrames<AckBatch>(frames)
+  if (envelope.payloadKind !== 'ACK_BATCH') throw new Error('QR payload is not an ACK batch')
+  assertAckShape(envelope.payload)
+  if (
+    envelope.payload.tournamentId !== envelope.tournamentId ||
+    envelope.payload.batchId !== envelope.transferId ||
+    envelope.payload.results.length !== envelope.itemCount
+  ) {
+    throw new Error('ACK metadata mismatch')
   }
-  return `${QR_FRAME_PREFIX}${encodeText(stableStringify(frame))}`
+  return envelope.payload
+}
+
+export async function encodeAck(ack: AckBatch): Promise<string> {
+  const encoded = await encodeAckFragments(ack, Number.MAX_SAFE_INTEGER)
+  if (encoded.length !== 1) throw new Error('ACK did not fit in one compatibility frame')
+  return encoded[0]
 }
 
 export async function decodeAck(encoded: string): Promise<AckBatch> {
-  if (!encoded.startsWith(QR_FRAME_PREFIX)) throw new Error('invalid QR frame prefix')
-
-  let parsedFrame: unknown
-  try {
-    parsedFrame = JSON.parse(decodeText(encoded.slice(QR_FRAME_PREFIX.length)))
-  } catch {
-    throw new Error('invalid ACK frame encoding')
-  }
-  assertAckFrameShape(parsedFrame)
-
-  let ackJson: string
-  try {
-    ackJson = decodeText(parsedFrame.payload)
-  } catch {
-    throw new Error('invalid ACK payload encoding')
-  }
-  if ((await sha256Hex(ackJson)) !== parsedFrame.checksum) {
-    throw new Error('ACK checksum mismatch')
-  }
-
-  let parsedAck: unknown
-  try {
-    parsedAck = JSON.parse(ackJson)
-  } catch {
-    throw new Error('invalid ACK JSON')
-  }
-  assertAckShape(parsedAck)
-  return parsedAck
+  return decodeAckFragments([encoded])
 }
 
 export interface ApplyAckContext {

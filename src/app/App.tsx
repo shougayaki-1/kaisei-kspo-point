@@ -3,6 +3,10 @@ import type { TournamentId } from '../domain/ids'
 import { getOrCreateDeviceId } from '../device/device-service'
 import { ConfigRepository } from '../db/config-repository'
 import { createDatabase } from '../db/database'
+import { ConfigUpdatePanel } from './ConfigUpdatePanel'
+import { createConfigUpdateService } from './config-update-service'
+import { CourtTransferHistory } from './CourtTransferHistory'
+import { createCourtTransferHistoryServices } from './court-transfer-history-service'
 import { TournamentConfigEditor } from './TournamentConfigEditor'
 import { TransferDemo } from './TransferDemo'
 
@@ -36,6 +40,11 @@ export function App({
   const appDatabase = useMemo(() => createDatabase(), [])
   const browserConfigRepository = useMemo(() => new ConfigRepository(appDatabase), [appDatabase])
   const resolvedConfigRepository = configRepository ?? browserConfigRepository
+  const configUpdateServices = useMemo(() => createConfigUpdateService(appDatabase), [appDatabase])
+  const courtTransferHistoryServices = useMemo(
+    () => createCourtTransferHistoryServices(appDatabase),
+    [appDatabase],
+  )
   const editorConfigRepository = useMemo<AppConfigRepository>(
     () => ({
       loadCurrent: (tournamentId) => resolvedConfigRepository.loadCurrent(tournamentId),
@@ -115,11 +124,14 @@ export function App({
         </nav>
 
         {hostTab === 'CONFIG' ? (
-          <TournamentConfigEditor
-            repository={editorConfigRepository}
-            tournamentId={activeTournamentId}
-            operatorName={operatorName}
-          />
+          <>
+            <TournamentConfigEditor
+              repository={editorConfigRepository}
+              tournamentId={activeTournamentId}
+              operatorName={operatorName}
+            />
+            <ConfigUpdatePanel mode="HOST" services={configUpdateServices} />
+          </>
         ) : (
           <TransferDemo mode="HOST" deviceId={deviceId} />
         )}
@@ -135,7 +147,9 @@ export function App({
           </div>
           <button type="button" onClick={returnToModeSelection}>モード選択へ戻る</button>
         </div>
+        <ConfigUpdatePanel mode="COURT" services={configUpdateServices} />
         <TransferDemo mode="COURT" deviceId={deviceId} />
+        <CourtTransferHistory services={courtTransferHistoryServices} />
       </>
     )
   } else {

@@ -57,7 +57,7 @@ function encodeFragmentObject(value: unknown): string {
 }
 
 describe('QR transfer codec', () => {
-  it('round-trips a one-part batch with required metadata', async () => {
+  it('round-trips a one-part Result batch with the common frame metadata', async () => {
     const revisions = [revision('rev-1', { count: 73 })]
     const batch = createTransferBatch({
       tournamentId,
@@ -73,15 +73,16 @@ describe('QR transfer codec', () => {
     const fragment = await decodeQrFragment(encoded[0])
     expect(fragment).toMatchObject({
       protocolVersion: 1,
-      type: 'TRANSFER_FRAGMENT',
+      type: 'QR_FRAME',
+      payloadKind: 'RESULT_BATCH',
       tournamentId,
-      batchId: 'batch-1',
+      transferId: 'batch-1',
       partIndex: 1,
       totalParts: 1,
-      resultCount: 1,
+      itemCount: 1,
     })
     expect(fragment.chunkChecksum).toMatch(/^[0-9a-f]{64}$/)
-    expect(fragment.batchChecksum).toMatch(/^[0-9a-f]{64}$/)
+    expect(fragment.payloadChecksum).toMatch(/^[0-9a-f]{64}$/)
 
     const restored = await assembleTransferBatch([fragment])
     expect(restored).toEqual(batch)
@@ -113,7 +114,7 @@ describe('QR transfer codec', () => {
     expect(restored).toEqual(batch)
   })
 
-  it('rejects a fragment when its payload no longer matches chunkChecksum', async () => {
+  it('rejects a fragment when its data no longer matches chunkChecksum', async () => {
     const revisions = [revision('rev-1', { count: 73 })]
     const batch = createTransferBatch({
       tournamentId,
@@ -124,12 +125,12 @@ describe('QR transfer codec', () => {
     })
     const [encoded] = await encodeBatchFragments(batch, 10_000)
     const valid = await decodeQrFragment(encoded)
-    const tampered = encodeFragmentObject({ ...valid, payload: `${valid.payload}A` })
+    const tampered = encodeFragmentObject({ ...valid, data: `${valid.data}A` })
 
     await expect(decodeQrFragment(tampered)).rejects.toThrow('chunk checksum')
   })
 
-  it('rejects reconstructed data when the batch checksum is wrong', async () => {
+  it('rejects reconstructed data when the payload checksum is wrong', async () => {
     const revisions = [revision('rev-1', { count: 73 })]
     const batch = createTransferBatch({
       tournamentId,
@@ -142,8 +143,8 @@ describe('QR transfer codec', () => {
     const valid = await decodeQrFragment(encoded)
 
     await expect(
-      assembleTransferBatch([{ ...valid, batchChecksum: '0'.repeat(64) }]),
-    ).rejects.toThrow('batch checksum')
+      assembleTransferBatch([{ ...valid, payloadChecksum: '0'.repeat(64) }]),
+    ).rejects.toThrow('payload checksum')
   })
 
   it('uses deterministic serialization for equivalent rawData key order', async () => {

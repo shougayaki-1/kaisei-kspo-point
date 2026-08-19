@@ -166,7 +166,7 @@ function createBrowserTransferServices(deviceId: DeviceId): TransferDemoServices
 
       await transferRepository.saveReceivedPart(encoded, new Date().toISOString())
       const receiver = await transferRepository.restoreReceiver(tournament.tournamentId)
-      const progress = receiver.getProgress(fragment.batchId)
+      const progress = receiver.getProgress(fragment.transferId)
       if (!progress) throw new Error('読取状態を復元できません')
       return progress
     },
