@@ -40,6 +40,17 @@ function raw(a: string, b: string) { return { inputSchemaId: 'schema-number', in
 function result(resultId: string, sessionId: ScoringSessionId, current: string): Result { return { resultId: resultId as ResultId, tournamentId: ids.tournament, competitionId: ids.competition, scoringSessionId: sessionId, currentRevisionId: current as RevisionId, createdAt: '2026-08-19T10:10:00+09:00', createdByDeviceId: 'court-device' as DeviceId } }
 function revision(resultId: string, revisionId: string, number: number, parents: string[], a: string, b: string, createdAt = '2026-08-19T10:10:00+09:00'): ResultRevision { return { revisionId: revisionId as RevisionId, resultId: resultId as ResultId, revisionNumber: number, parentRevisionIds: parents as RevisionId[], source: 'COURT', operator: 'Court', inputMode: 'NUMBER', rawData: raw(a, b), configVersion: 1, createdAt } }
 async function saveLinear(database: AppDatabase) { const repository = new ResultRepository(database); const r1 = result('result-r1', ids.session1, 'r1-child'); const base = revision('result-r1', 'r1-base', 1, [], '1', '2'); const child = revision('result-r1', 'r1-child', 2, ['r1-base'], '3', '2'); await repository.saveResultWithRevision(r1, base); await repository.saveResultWithRevision(r1, child); const r2 = result('result-r2', ids.session2, 'r2-base'); const second = revision('result-r2', 'r2-base', 1, [], '1', '4'); await repository.saveResultWithRevision(r2, second); return { repository, r1, base, child, r2, second } }
+async function saveConflict(database: AppDatabase) {
+  const repository = new ResultRepository(database)
+  const stored = result('result-conflict', ids.session1, 'common-base')
+  const base = revision('result-conflict', 'common-base', 1, [], '1', '2')
+  const left = revision('result-conflict', 'left', 2, ['common-base'], '10', '1')
+  const right = revision('result-conflict', 'right', 2, ['common-base'], '1', '10')
+  await repository.saveResultWithRevision(stored, base)
+  await repository.saveResultWithRevision(stored, left)
+  await repository.saveResultWithRevision(stored, right)
+  return { repository, stored, base, left, right }
+}
 
 describe('Host authoritative scoring service', () => {
   it('uses Task 4 projection and the shared Scoring Engine with Calculation Trace', async () => {
@@ -56,9 +67,31 @@ describe('Host authoritative scoring service', () => {
     expect(projection.conflictState.status).toBe('UNRESOLVED'); expect(projection.effectiveRevisionId).toBe('common-base'); expect(projection.candidateHeadRevisionIds).toEqual(['branch-a', 'branch-b']); expect(projection.commonConfirmedAncestorRevisionId).toBe('common-base'); expect(state.events[0]!.engineResult.participants.find((item) => item.participantId === ids.entryB)!.rounds[0]!.rank).toBe(1)
   })
   it('changes projection only through explicit SELECT_REVISION resolution and retains losing history', async () => {
-    const database = db(); await seedConfig(database); const repository = new ResultRepository(database); const stored = result('result-conflict', ids.session1, 'common-base'); const base = revision('result-conflict', 'common-base', 1, [], '1', '2'); const left = revision('result-conflict', 'left', 2, ['common-base'], '10', '1'); const right = revision('result-conflict', 'right', 2, ['common-base'], '1', '10'); await repository.saveResultWithRevision(stored, base); await repository.saveResultWithRevision(stored, left); await repository.saveResultWithRevision(stored, right); const service = createHostScoringService(database)
+    const database = db(); await seedConfig(database); const { repository, stored, left, right } = await saveConflict(database); const service = createHostScoringService(database)
     await service.resolveConflict({ resultId: stored.resultId, operator: 'Host operator', createdAt: '2026-08-19T14:00:00+09:00', choice: { kind: 'SELECT_REVISION', selectedRevisionId: left.revisionId } })
     const selected = await service.loadAuthoritativeState(); const projection = selected.projections.find((item) => item.resultId === stored.resultId)!; expect(projection.conflictState.status).toBe('RESOLVED'); expect(projection.resolutionHistory).toHaveLength(1); expect(projection.resolutionHistory[0]?.selectedCandidateRevisionId).toBe(left.revisionId); expect(await repository.hasRevision(right.revisionId)).toBe(true); expect((await repository.getRevisions(stored.resultId)).length).toBe(4)
+  })
+  it('persists explicit MERGE through the Phase 2 append-only resolution boundary with every candidate as a parent', async () => {
+    const database = db(); await seedConfig(database); const { repository, stored, left, right } = await saveConflict(database); const service = createHostScoringService(database)
+    await service.resolveConflict({
+      resultId: stored.resultId,
+      operator: 'Host merge',
+      createdAt: '2026-08-19T14:30:00+09:00',
+      choice: {
+        kind: 'MERGE',
+        rawData: raw('6', '6'),
+        inputMode: 'NUMBER',
+        configVersion: 1,
+      },
+    })
+    const projection = (await service.loadAuthoritativeState()).projections.find((item) => item.resultId === stored.resultId)!
+    expect(projection.conflictState.status).toBe('RESOLVED')
+    expect(projection.resolutionHistory).toHaveLength(1)
+    expect(projection.resolutionHistory[0]?.decision).toBe('MERGE')
+    const resolutionRevision = projection.revisions.find((item) => item.revisionId === projection.effectiveRevisionId)!
+    expect(new Set(resolutionRevision.parentRevisionIds)).toEqual(new Set([left.revisionId, right.revisionId]))
+    expect(await repository.hasRevision(left.revisionId)).toBe(true)
+    expect(await repository.hasRevision(right.revisionId)).toBe(true)
   })
   it('does not double-add exact duplicate/resend revisions and is stable across reload/query order', async () => {
     const name = `host-reload-${crypto.randomUUID()}`; const firstDb = db(name); await seedConfig(firstDb); const { repository, r1, child } = await saveLinear(firstDb); await repository.saveResultWithRevision(r1, structuredClone(child)); const first = await createHostScoringService(firstDb).loadAuthoritativeState(); const firstSerialized = JSON.stringify(first.standings); expect(await firstDb.resultRevisions.where('resultId').equals(r1.resultId).count()).toBe(2); firstDb.close(); const secondDb = db(name); const second = await createHostScoringService(secondDb).loadAuthoritativeState(); expect(JSON.stringify(second.standings)).toBe(firstSerialized)
