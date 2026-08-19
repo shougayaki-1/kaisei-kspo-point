@@ -149,4 +149,17 @@ describe('Phase 2 transfer import projection regression', () => {
     expect(await repository.hasRevision(orphan.revisionId)).toBe(false)
     expect(await repository.getResult(resultId)).toBeUndefined()
   })
+
+  it('rejects transferred conflict-resolution revisions without resolution metadata', async () => {
+    const { repository } = setup()
+    const resolution = revision('foreign-resolution', [], {
+      source: 'CONFLICT_RESOLUTION',
+      operator: '別本部',
+    })
+
+    const imported = await importOne(repository, resolution)
+
+    expect(imported.ack.results[0]?.status).toBe('INVALID_DATA')
+    expect(await repository.hasRevision(resolution.revisionId)).toBe(false)
+  })
 })
