@@ -35,6 +35,7 @@ export function createEmptyTournamentDraft(
     scoringSessions: [],
     inputSchemas: [],
     scoringProfiles: [],
+    scoringTestCases: [],
   }
 }
 
