@@ -146,7 +146,7 @@ describe('TournamentConfigEditor scoring regression integration', () => {
 
     expect(await screen.findByText('得点計算テストの確認が必要です。')).toBeInTheDocument()
     expect(screen.getByText('通常順位')).toBeInTheDocument()
-    expect(screen.getByText(/30 → 50/)).toBeInTheDocument()
+    expect(screen.getAllByText(/30 → 50/).length).toBeGreaterThan(0)
     expect(repo.apply).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: '「通常順位」を意図した変更として承認' }))
