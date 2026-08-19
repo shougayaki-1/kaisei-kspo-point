@@ -1,4 +1,4 @@
-import type { ResultId } from '../domain/ids'
+import type { ResultId, RevisionId } from '../domain/ids'
 import type { Result, ResultRevision } from '../domain/result'
 import type { AppDatabase } from './database'
 
@@ -14,6 +14,36 @@ export class ResultRepository {
       await this.db.resultRevisions.put(revision)
       await this.db.results.put(result)
     })
+  }
+
+  async importRevision(
+    resultSnapshot: Result,
+    revision: ResultRevision,
+    currentRevisionId: RevisionId | null,
+  ): Promise<void> {
+    if (resultSnapshot.resultId !== revision.resultId) {
+      throw new Error('Result and revision IDs do not match')
+    }
+
+    await this.db.transaction('rw', this.db.results, this.db.resultRevisions, async () => {
+      const existing = await this.db.results.get(resultSnapshot.resultId)
+      await this.db.resultRevisions.put(revision)
+      if (existing) {
+        if (currentRevisionId !== existing.currentRevisionId) {
+          await this.db.results.put({ ...existing, currentRevisionId })
+        }
+      } else {
+        await this.db.results.put({ ...resultSnapshot, currentRevisionId })
+      }
+    })
+  }
+
+  async hasRevision(revisionId: RevisionId): Promise<boolean> {
+    return (await this.db.resultRevisions.get(revisionId)) !== undefined
+  }
+
+  async getRevision(revisionId: RevisionId): Promise<ResultRevision | undefined> {
+    return this.db.resultRevisions.get(revisionId)
   }
 
   async getResult(resultId: ResultId): Promise<Result | undefined> {
