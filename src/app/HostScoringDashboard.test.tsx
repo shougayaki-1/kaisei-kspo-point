@@ -38,7 +38,7 @@ describe('HostScoringDashboard', () => {
     render(<HostScoringDashboard service={service} />)
     expect(await screen.findByText(/config-v2/)).toBeInTheDocument()
     expect(screen.getByText('Configured Event')).toBeInTheDocument()
-    expect(screen.getByText('Configured Red')).toBeInTheDocument()
+    expect(screen.getByText(/Configured Red/)).toBeInTheDocument()
     expect(screen.getByText(/UNRESOLVED/)).toBeInTheDocument()
     expect(screen.getByText(/left/)).toBeInTheDocument()
     expect(screen.getByText(/right/)).toBeInTheDocument()
