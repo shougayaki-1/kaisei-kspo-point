@@ -203,6 +203,27 @@ describe('TournamentConfigEditor scoring regression integration', () => {
     await waitFor(() => expect(repo.apply).toHaveBeenCalledOnce())
   })
 
+  it('detects an actual scoring-profile change even when the operator labels it DISPLAY_ONLY', async () => {
+    const snapshot = configuredSnapshot()
+    snapshot.scoringTestCases = []
+    const repo = repository(snapshot)
+    render(
+      <TournamentConfigEditor
+        repository={repo}
+        tournamentId={tournamentId}
+        operatorName="本部担当"
+      />,
+    )
+
+    await screen.findByText('Config v1')
+    fireEvent.change(screen.getByLabelText('変更区分'), { target: { value: 'DISPLAY_ONLY' } })
+    fireEvent.change(screen.getByLabelText('得点 1'), { target: { value: '50' } })
+    fireEvent.click(screen.getByRole('button', { name: '設定を適用' }))
+
+    expect(await screen.findByText('得点ルールを計算テストで確認してください。')).toBeInTheDocument()
+    expect(repo.apply).not.toHaveBeenCalled()
+  })
+
   it('locks the editable draft during review and can return without carrying an approval forward', async () => {
     render(
       <TournamentConfigEditor
