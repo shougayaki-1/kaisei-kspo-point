@@ -93,6 +93,30 @@ describe('TournamentConfigEditor', () => {
     expect(screen.getByLabelText('入力範囲 1')).toHaveValue('WHOLE_SLOT')
   })
 
+  it('removes competition-owned draft rows together after confirmation', async () => {
+    const repo = repository()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(<TournamentConfigEditor repository={repo} operatorName="本部担当" />)
+    createTournament()
+    fireEvent.click(screen.getByRole('button', { name: '競技を追加' }))
+    fireEvent.click(screen.getByRole('button', { name: '展開を追加' }))
+    fireEvent.click(screen.getByRole('button', { name: 'コート実施を追加' }))
+    fireEvent.click(screen.getByRole('button', { name: '入力セッションを追加' }))
+
+    fireEvent.click(screen.getByRole('button', { name: '競技を削除' }))
+    fireEvent.click(screen.getByRole('button', { name: '設定を適用' }))
+
+    await waitFor(() => expect(repo.apply).toHaveBeenCalledOnce())
+    const applied = repo.apply.mock.calls[0][0]
+    expect(applied.competitions).toEqual([])
+    expect(applied.competitionEntries).toEqual([])
+    expect(applied.scheduleSlots).toEqual([])
+    expect(applied.courtRuns).toEqual([])
+    expect(applied.scoringSessions).toEqual([])
+    expect(applied.inputSchemas).toEqual([])
+    expect(applied.scoringProfiles).toEqual([])
+  })
+
   it('shows validation errors and does not apply an incomplete scoring rule', () => {
     const repo = repository()
     render(<TournamentConfigEditor repository={repo} operatorName="本部担当" />)
