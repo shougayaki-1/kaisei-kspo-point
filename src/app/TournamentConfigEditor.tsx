@@ -73,6 +73,15 @@ export function TournamentConfigEditor({
         throw new Error('得点計算テストの確認が必要です。')
       }
 
+      const shouldStageScoringReview = Boolean(repository.previewRegression)
+        && metadata.changeClass === 'SCORING'
+        && normalized.scoringProfiles.length > 0
+      if (shouldStageScoringReview) {
+        setPendingReview({ snapshot: normalized, metadata, results: regressionResults })
+        setApprovedTestIds(new Set())
+        throw new Error('得点ルールを計算テストで確認してください。')
+      }
+
       const applied = await repository.apply(normalized, metadata)
       setCurrentSnapshot(cloneSnapshot(applied.snapshot))
       setPendingReview(null)
@@ -87,6 +96,7 @@ export function TournamentConfigEditor({
   const allFailuresApproved = failedResults.length > 0 && failedResults.every(
     (result) => approvedTestIds.has(result.testCaseId),
   )
+  const simulatorSnapshot = pendingReview?.snapshot ?? currentSnapshot
 
   const returnToEditing = () => {
     setPendingReview(null)
@@ -94,8 +104,9 @@ export function TournamentConfigEditor({
     setIntegrationMessage('')
   }
 
-  const approveAndApply = async () => {
-    if (!pendingReview || invalidResults.length > 0 || !allFailuresApproved) return
+  const applyReviewedConfig = async () => {
+    if (!pendingReview || invalidResults.length > 0) return
+    if (failedResults.length > 0 && !allFailuresApproved) return
 
     const now = new Date().toISOString()
     const approvals: ScoringTestApproval[] = failedResults.map((result) => ({
@@ -113,7 +124,9 @@ export function TournamentConfigEditor({
       setPendingReview(null)
       setApprovedTestIds(new Set())
       setIntegrationMessage(
-        `Config v${applied.version} を適用しました。意図した得点変更 ${approvals.length}件を承認しました。`,
+        approvals.length > 0
+          ? `Config v${applied.version} を適用しました。意図した得点変更 ${approvals.length}件を承認しました。`
+          : `Config v${applied.version} を適用しました。`,
       )
       setEditorGeneration((generation) => generation + 1)
     } catch (error) {
@@ -136,6 +149,24 @@ export function TournamentConfigEditor({
     } catch (error) {
       setIntegrationMessage(error instanceof Error ? error.message : '得点テストの保存に失敗しました。')
     }
+  }
+
+  const updatePendingReviewSnapshot = async (
+    update: (snapshot: TournamentConfigSnapshot) => void,
+  ) => {
+    if (!pendingReview) return false
+
+    const nextSnapshot = cloneSnapshot(pendingReview.snapshot)
+    update(nextSnapshot)
+    const results = await previewRegression(nextSnapshot)
+    setPendingReview({
+      ...pendingReview,
+      snapshot: nextSnapshot,
+      results,
+    })
+    setApprovedTestIds(new Set())
+    setIntegrationMessage('未適用の設定に得点テストを反映しました。')
+    return true
   }
 
   return (
@@ -162,8 +193,9 @@ export function TournamentConfigEditor({
               </ul>
               <button type="button" onClick={returnToEditing}>設定を見直す</button>
             </>
-          ) : (
+          ) : failedResults.length > 0 ? (
             <>
+              <p>得点計算テストの確認が必要です。</p>
               <p>保存済みテストの期待値が変化しました。意図した変更だけを個別に承認してください。</p>
               <div className="config-stack">
                 {failedResults.map((result) => {
@@ -173,7 +205,7 @@ export function TournamentConfigEditor({
                   const approved = approvedTestIds.has(result.testCaseId)
                   return (
                     <article className="config-card nested" key={result.testCaseId}>
-                      <strong>テスト「{testCase?.name ?? result.testCaseId}」</strong>
+                      <strong>{testCase?.name ?? result.testCaseId}</strong>
                       <ul>
                         {result.diffs.map((diff, index) => (
                           <li key={`${diff.entryId}:${diff.field}:${index}`}>
@@ -202,25 +234,34 @@ export function TournamentConfigEditor({
                 <button
                   type="button"
                   disabled={!allFailuresApproved}
-                  onClick={approveAndApply}
+                  onClick={applyReviewedConfig}
                 >
                   承認して設定を適用
                 </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p>得点ルールを計算テストで確認してください。</p>
+              <p>下のシミュレーターは、まだ適用していない変更後の得点ルールで計算します。</p>
+              <div className="review-actions">
+                <button type="button" onClick={returnToEditing}>設定を見直す</button>
+                <button type="button" onClick={applyReviewedConfig}>この設定を適用</button>
               </div>
             </>
           )}
         </section>
       )}
 
-      {currentSnapshot && currentSnapshot.competitions.map((competition) => {
-        const profile = currentSnapshot.scoringProfiles.find(
+      {simulatorSnapshot && simulatorSnapshot.competitions.map((competition) => {
+        const profile = simulatorSnapshot.scoringProfiles.find(
           (item) => item.competitionId === competition.competitionId,
         )
         if (!profile) return null
-        const entries = currentSnapshot.competitionEntries.filter(
+        const entries = simulatorSnapshot.competitionEntries.filter(
           (entry) => entry.competitionId === competition.competitionId,
         )
-        const testCases = currentSnapshot.scoringTestCases.filter(
+        const testCases = simulatorSnapshot.scoringTestCases.filter(
           (testCase) => testCase.competitionId === competition.competitionId,
         )
 
@@ -229,16 +270,34 @@ export function TournamentConfigEditor({
             <ScoringSimulatorPanel
               competition={competition}
               entries={entries}
-              teams={currentSnapshot.teams}
+              teams={simulatorSnapshot.teams}
               profile={profile}
               testCases={testCases}
               onSaveTestCase={(testCase) => {
-                const next = cloneSnapshot(currentSnapshot)
+                if (pendingReview) {
+                  void updatePendingReviewSnapshot((next) => {
+                    next.scoringTestCases.push(testCase)
+                  })
+                  return
+                }
+                const next = cloneSnapshot(simulatorSnapshot)
                 next.scoringTestCases.push(testCase)
                 void persistSimulatorSnapshot(next)
               }}
               onDeleteTestCase={(testCaseId) => {
-                const next = cloneSnapshot(currentSnapshot)
+                if (pendingReview) {
+                  if (failedResults.some((result) => result.testCaseId === testCaseId)) {
+                    setIntegrationMessage('結果が変化しているテストはレビュー中に削除できません。設定を見直してから削除してください。')
+                    return
+                  }
+                  void updatePendingReviewSnapshot((next) => {
+                    next.scoringTestCases = next.scoringTestCases.filter(
+                      (testCase) => testCase.testCaseId !== testCaseId,
+                    )
+                  })
+                  return
+                }
+                const next = cloneSnapshot(simulatorSnapshot)
                 next.scoringTestCases = next.scoringTestCases.filter(
                   (testCase) => testCase.testCaseId !== testCaseId,
                 )
