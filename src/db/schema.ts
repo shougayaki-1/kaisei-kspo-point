@@ -1,5 +1,6 @@
 import type { RevisionId } from '../domain/ids'
 import type { Result, ResultRevision } from '../domain/result'
+import type { ConflictResolutionRecord } from '../domain/result-projection'
 import type { ScoringProfile } from '../domain/scoring'
 import type {
   Competition,
@@ -15,7 +16,7 @@ import type { ScoringTestCase } from '../config/scoring-test-case'
 import type { TournamentConfigSnapshot } from '../config/tournament-config'
 import type { AckBatch, TransferBatch } from '../transfer/types'
 
-export const DATABASE_SCHEMA_VERSION = 4
+export const DATABASE_SCHEMA_VERSION = 5
 
 export interface AppMetaRecord {
   key: string
@@ -108,6 +109,7 @@ export type DatabaseRecordTypes = {
   configVersions: ConfigVersionRecord
   results: Result
   resultRevisions: ResultRevision
+  conflictResolutions: ConflictResolutionRecord
   transferBatches: TransferBatchRecord
   receivedQrParts: ReceivedQrPartRecord
   acknowledgements: AcknowledgementRecord
@@ -152,4 +154,9 @@ export const schemaV3 = {
 export const schemaV4 = {
   ...schemaV3,
   scoringTestCases: 'testCaseId,competitionId',
+} as const
+
+export const schemaV5 = {
+  ...schemaV4,
+  conflictResolutions: 'resolutionId,resultId,effectiveRevisionId',
 } as const
