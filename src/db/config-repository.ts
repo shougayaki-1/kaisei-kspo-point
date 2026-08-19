@@ -1,13 +1,25 @@
 import type { TournamentId } from '../domain/ids'
+import {
+  approveScoringTestChange,
+  runScoringTestCase,
+  type ScoringTestRunResult,
+} from '../config/scoring-test-case'
 import type { TournamentConfigSnapshot } from '../config/tournament-config'
 import { validateTournamentConfig } from '../config/tournament-config'
 import type { AppDatabase } from './database'
 import type { ConfigChangeClass, ConfigVersionRecord } from './schema'
 
+export interface ScoringTestApproval {
+  testCaseId: string
+  operator: string
+  approvedAt: string
+}
+
 export interface ApplyConfigMetadata {
   operator: string
   createdAt: string
   changeClass: ConfigChangeClass
+  scoringTestApprovals?: ScoringTestApproval[]
 }
 
 export interface AppliedConfigVersion {
@@ -15,8 +27,21 @@ export interface AppliedConfigVersion {
   snapshot: TournamentConfigSnapshot
 }
 
+export class ScoringRegressionError extends Error {
+  constructor(public readonly results: ScoringTestRunResult[]) {
+    super('scoring regression approval required')
+    this.name = 'ScoringRegressionError'
+  }
+}
+
 function clone<T>(value: T): T {
   return structuredClone(value)
+}
+
+function normalizeSnapshot(snapshot: TournamentConfigSnapshot): TournamentConfigSnapshot {
+  const normalized = clone(snapshot)
+  normalized.scoringTestCases ??= []
+  return normalized
 }
 
 export class ConfigRepository {
@@ -27,22 +52,50 @@ export class ConfigRepository {
       .where('tournamentId')
       .equals(tournamentId)
       .sortBy('version')
-    return clone(records)
+    return records.map((record) => ({
+      ...clone(record),
+      snapshot: normalizeSnapshot(record.snapshot),
+    }))
   }
 
   async loadCurrent(tournamentId: TournamentId): Promise<TournamentConfigSnapshot | undefined> {
     const versions = await this.listVersions(tournamentId)
     const latest = versions.at(-1)
-    if (latest) return clone(latest.snapshot)
+    if (latest) return normalizeSnapshot(latest.snapshot)
 
     return this.loadFromNormalizedTables(tournamentId)
+  }
+
+  async previewRegression(snapshot: TournamentConfigSnapshot): Promise<ScoringTestRunResult[]> {
+    const normalized = normalizeSnapshot(snapshot)
+
+    return normalized.scoringTestCases.map((testCase) => {
+      const profile = normalized.scoringProfiles.find(
+        (item) => item.competitionId === testCase.competitionId,
+      )
+      if (!profile) {
+        return {
+          testCaseId: testCase.testCaseId,
+          status: 'INVALID' as const,
+          actual: [],
+          diffs: [],
+          message: `ScoringProfile が競技 ${testCase.competitionId} に設定されていません。`,
+        }
+      }
+
+      const entries = normalized.competitionEntries.filter(
+        (entry) => entry.competitionId === testCase.competitionId,
+      )
+      return runScoringTestCase(testCase, profile, entries)
+    })
   }
 
   async apply(
     snapshot: TournamentConfigSnapshot,
     metadata: ApplyConfigMetadata,
   ): Promise<AppliedConfigVersion> {
-    const validationIssues = validateTournamentConfig(snapshot)
+    const normalizedInput = normalizeSnapshot(snapshot)
+    const validationIssues = validateTournamentConfig(normalizedInput)
     const errors = validationIssues.filter((issue) => issue.severity === 'ERROR')
     if (errors.length > 0) {
       throw new Error(
@@ -50,7 +103,41 @@ export class ConfigRepository {
       )
     }
 
-    const tournamentId = snapshot.tournament.tournamentId
+    const regressionResults = await this.previewRegression(normalizedInput)
+    const invalidResults = regressionResults.filter((result) => result.status === 'INVALID')
+    if (invalidResults.length > 0) {
+      throw new ScoringRegressionError(regressionResults)
+    }
+
+    const failedResults = regressionResults.filter((result) => result.status === 'FAIL')
+    const approvals = new Map(
+      (metadata.scoringTestApprovals ?? []).map((approval) => [approval.testCaseId, approval]),
+    )
+    if (failedResults.some((result) => !approvals.has(result.testCaseId))) {
+      throw new ScoringRegressionError(regressionResults)
+    }
+
+    const appliedSnapshot = normalizeSnapshot(normalizedInput)
+    for (const result of failedResults) {
+      const approval = approvals.get(result.testCaseId)
+      if (!approval) continue
+      const index = appliedSnapshot.scoringTestCases.findIndex(
+        (testCase) => testCase.testCaseId === result.testCaseId,
+      )
+      if (index < 0) {
+        throw new ScoringRegressionError(regressionResults)
+      }
+      appliedSnapshot.scoringTestCases[index] = approveScoringTestChange(
+        appliedSnapshot.scoringTestCases[index],
+        result,
+        {
+          operator: approval.operator,
+          approvedAt: approval.approvedAt,
+        },
+      )
+    }
+
+    const tournamentId = appliedSnapshot.tournament.tournamentId
     const tables = [
       this.db.tournaments,
       this.db.teams,
@@ -61,6 +148,7 @@ export class ConfigRepository {
       this.db.scoringSessions,
       this.db.inputSchemas,
       this.db.scoringProfiles,
+      this.db.scoringTestCases,
       this.db.configVersions,
     ]
 
@@ -72,7 +160,6 @@ export class ConfigRepository {
       const nextVersion =
         existingVersions.reduce((maximum, record) => Math.max(maximum, record.version), 0) + 1
 
-      const appliedSnapshot = clone(snapshot)
       appliedSnapshot.tournament.currentConfigVersion = nextVersion
 
       const existingCompetitions = await this.db.competitions
@@ -113,6 +200,10 @@ export class ConfigRepository {
           .where('competitionId')
           .anyOf(existingCompetitionIds)
           .delete()
+        await this.db.scoringTestCases
+          .where('competitionId')
+          .anyOf(existingCompetitionIds)
+          .delete()
       }
       if (existingSlotIds.length > 0) {
         await this.db.courtRuns.where('slotId').anyOf(existingSlotIds).delete()
@@ -141,6 +232,9 @@ export class ConfigRepository {
       }
       if (appliedSnapshot.scoringProfiles.length > 0) {
         await this.db.scoringProfiles.bulkPut(appliedSnapshot.scoringProfiles)
+      }
+      if (appliedSnapshot.scoringTestCases.length > 0) {
+        await this.db.scoringTestCases.bulkPut(appliedSnapshot.scoringTestCases)
       }
 
       const versionRecord: ConfigVersionRecord = {
@@ -193,6 +287,10 @@ export class ConfigRepository {
       competitionIds.length > 0
         ? await this.db.scoringProfiles.where('competitionId').anyOf(competitionIds).toArray()
         : []
+    const scoringTestCases =
+      competitionIds.length > 0
+        ? await this.db.scoringTestCases.where('competitionId').anyOf(competitionIds).toArray()
+        : []
 
     const slotIds = scheduleSlots.map((item) => item.slotId)
     const courtRuns =
@@ -210,7 +308,7 @@ export class ConfigRepository {
       scoringSessions,
       inputSchemas,
       scoringProfiles,
-      scoringTestCases: [],
+      scoringTestCases,
     })
   }
 }
