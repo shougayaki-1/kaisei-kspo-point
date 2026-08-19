@@ -58,6 +58,22 @@ describe('TransferDemo', () => {
     expect(service.setCourtPartIndex).toHaveBeenCalledWith(batchId, 1)
   })
 
+  it('restores the same outgoing Court QR page after app reload', async () => {
+    const service = Object.assign(services(), {
+      restoreCourtBatch: vi.fn(async () => ({
+        batchId,
+        encodedParts: ['part-one', 'part-two', 'part-three'],
+        currentPartIndex: 1,
+      })),
+      restoreHostProgress: vi.fn(async () => [] as TransferProgress[]),
+    })
+
+    render(<TransferDemo mode="COURT" deviceId={deviceId} services={service} />)
+
+    expect(await screen.findByText('2 / 3')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('part-two')).toBeInTheDocument()
+  })
+
   it('shows Host remaining and missing part counts returned after an ingest', async () => {
     const service = services({
       ingestHostFragment: vi.fn(async () =>
@@ -71,6 +87,19 @@ describe('TransferDemo', () => {
 
     expect(await screen.findByText('2 / 3 読み取り済み')).toBeInTheDocument()
     expect(screen.getByText('残り 1')).toBeInTheDocument()
+    expect(screen.getByText('未読: 3')).toBeInTheDocument()
+  })
+
+  it('restores persisted Host partial progress after app reload', async () => {
+    const restored = progress({ receivedCount: 2, remainingCount: 1, missingPartIndexes: [3] })
+    const service = Object.assign(services(), {
+      restoreCourtBatch: vi.fn(async () => null),
+      restoreHostProgress: vi.fn(async () => [restored]),
+    })
+
+    render(<TransferDemo mode="HOST" deviceId={deviceId} services={service} />)
+
+    expect(await screen.findByText('2 / 3 読み取り済み')).toBeInTheDocument()
     expect(screen.getByText('未読: 3')).toBeInTheDocument()
   })
 
