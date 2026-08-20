@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { HostScoringState } from './host-scoring-service'
 import { HostScoringDashboard } from './HostScoringDashboard'
@@ -54,6 +54,7 @@ function authoritativeState(): HostScoringState {
 }
 
 afterEach(() => {
+  vi.useRealTimers()
   Object.defineProperty(window.navigator, 'onLine', { configurable: true, value: true })
 })
 
@@ -99,6 +100,34 @@ describe('DisplayDashboard', () => {
     render(<DisplayDashboard service={service} />)
     expect(await screen.findByText('1位 Configured Red: 7.5')).toBeInTheDocument()
     expect(frozen).toEqual(before)
+    expect(service.loadAuthoritativeState).toHaveBeenCalledTimes(2)
+  })
+
+  it('refreshes the same Host-authoritative projection without remounting', async () => {
+    vi.useFakeTimers()
+    const initial = authoritativeState()
+    const updated = structuredClone(initial)
+    updated.standings = [{
+      teamId: 'team-b' as never,
+      teamName: 'Configured Blue',
+      rank: 1,
+      totalScore: '8',
+      eventScores: [],
+    }]
+    const service = {
+      loadAuthoritativeState: vi.fn()
+        .mockResolvedValueOnce(initial)
+        .mockResolvedValueOnce(updated),
+    }
+
+    render(<DisplayDashboard service={service} refreshIntervalMs={1000} />)
+    await act(async () => { await Promise.resolve() })
+    expect(screen.getByText('1位 Configured Red: 7.5')).toBeInTheDocument()
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+
+    expect(screen.getByText('1位 Configured Blue: 8')).toBeInTheDocument()
+    expect(screen.queryByText('1位 Configured Red: 7.5')).not.toBeInTheDocument()
     expect(service.loadAuthoritativeState).toHaveBeenCalledTimes(2)
   })
 })
