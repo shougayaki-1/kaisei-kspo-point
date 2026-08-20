@@ -180,7 +180,10 @@ describe('Config Update service', () => {
     const courtRepository = new ConfigRepository(courtDb)
     const courtService = createConfigUpdateService(courtDb)
     for (const frame of v1Export.frames) await courtService.ingestFrame(frame, '2026-08-19T10:30:00+09:00')
-    await courtService.activate(hostV1!.configVersionId!)
+    await courtService.activate(hostV1!.configVersionId!, {
+      operator: 'Court担当',
+      activatedAt: '2026-08-19T10:31:00+09:00',
+    })
     const activeV1 = await courtRepository.loadCurrent(originalDraft.tournament.tournamentId)
     expect(activeV1?.tournament.name).toBe('shared大会')
 
@@ -192,7 +195,15 @@ describe('Config Update service', () => {
     expect(versionsBeforeActivation.map((record) => record.version)).toEqual([1, 2])
     expect(versionsBeforeActivation[0].snapshot.tournament.name).toBe('shared大会')
 
-    await courtService.activate(hostV2!.configVersionId!)
+    const activated = await courtService.activate(hostV2!.configVersionId!, {
+      operator: 'Court担当',
+      activatedAt: '2026-08-19T10:41:00+09:00',
+    })
+    expect(activated).toEqual({
+      configVersionId: hostV2!.configVersionId,
+      version: 2,
+      tournamentId: originalDraft.tournament.tournamentId,
+    })
     expect((await courtRepository.loadCurrent(originalDraft.tournament.tournamentId))?.tournament.name).toBe('変更後')
     expect((await courtRepository.listVersions(originalDraft.tournament.tournamentId))[0].snapshot.tournament.name).toBe('shared大会')
   })
@@ -223,7 +234,10 @@ describe('Config Update service', () => {
     })).rejects.toThrow(/collision|immutable|ConfigVersion/i)
 
     await expect(
-      repository.activateVersion('fixed-config-id', 'different-tournament' as TournamentId),
+      repository.activateVersion('fixed-config-id', 'different-tournament' as TournamentId, {
+        operator: '本部担当',
+        activatedAt: '2026-08-20T12:00:00.000Z',
+      }),
     ).rejects.toThrow(/compatible|tournament|mismatch/i)
   })
 
@@ -243,7 +257,10 @@ describe('Config Update service', () => {
     })
 
     const service = createConfigUpdateService(hostDb)
-    await expect(service.activate('beta-imported-v1')).rejects.toThrow(/tournament|integrity/i)
+    await expect(service.activate('beta-imported-v1', {
+      operator: 'Court担当',
+      activatedAt: '2026-08-19T11:10:00+09:00',
+    })).rejects.toThrow(/tournament|integrity/i)
     expect((await repository.getActiveVersion(alpha.snapshot.tournament.tournamentId))?.configVersionId)
       .toBe((await repository.listVersions(alpha.snapshot.tournament.tournamentId))[0]?.configVersionId)
     expect(await hostDb.tournaments.toArray()).toEqual([alpha.snapshot.tournament])
@@ -275,7 +292,47 @@ describe('Config Update service', () => {
     })
 
     const service = createConfigUpdateService(courtDb)
-    await expect(service.activate('beta-imported-v1')).rejects.toThrow(/multiple tournaments|integrity/i)
+    await expect(service.activate('beta-imported-v1', {
+      operator: 'Court担当',
+      activatedAt: '2026-08-19T11:10:00+09:00',
+    })).rejects.toThrow(/multiple tournaments|integrity/i)
     expect(await courtDb.tournaments.count()).toBe(0)
+  })
+
+  it('records explicit activation actor and time separately from ConfigVersion creation metadata', async () => {
+    const courtDb = db(`config-court-audit-${crypto.randomUUID()}`)
+    const repository = new ConfigRepository(courtDb)
+    const candidate = snapshotFor('audit')
+    const configVersionId = 'audit-config-v1'
+    await repository.importVersion({
+      configVersionId,
+      tournamentId: candidate.tournament.tournamentId,
+      version: 1,
+      createdAt: '2026-08-20T09:00:00.000Z',
+      operator: 'Host作成担当',
+      changeClass: 'SCORING',
+      snapshot: { ...candidate, tournament: { ...candidate.tournament, currentConfigVersion: 1 } },
+    })
+
+    await repository.activateVersionForHost(configVersionId, {
+      operator: 'Court担当',
+      activatedAt: '2026-08-20T12:34:00.000Z',
+      deviceId: 'court-device-1',
+    })
+
+    const event = (await courtDb.auditEvents.toArray()).at(-1)
+    expect(event).toMatchObject({
+      type: 'CONFIG_UPDATED',
+      timestamp: '2026-08-20T12:34:00.000Z',
+      targetId: configVersionId,
+      metadata: {
+        action: 'EXPLICIT_ACTIVATION',
+        operator: 'Court担当',
+        activatedAt: '2026-08-20T12:34:00.000Z',
+        deviceId: 'court-device-1',
+        configCreatedAt: '2026-08-20T09:00:00.000Z',
+        configCreatedBy: 'Host作成担当',
+      },
+    })
   })
 })

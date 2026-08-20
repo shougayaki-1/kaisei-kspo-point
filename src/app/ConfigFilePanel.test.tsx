@@ -27,7 +27,10 @@ describe('ConfigFilePanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '取り込んだConfigVersionを有効化' }))
     expect(await screen.findByText(/有効化しました/)).toBeInTheDocument()
-    expect(services.activate).toHaveBeenCalledWith('config-v1')
+    expect(services.activate).toHaveBeenCalledWith('config-v1', expect.objectContaining({
+      operator: '本部担当',
+      activatedAt: expect.any(String),
+    }))
   })
 
   it('exports the currently active immutable ConfigVersion as a data file document', async () => {

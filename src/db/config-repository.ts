@@ -37,6 +37,12 @@ export interface ApplyConfigMetadata {
   scoringTestApprovals?: ScoringTestApproval[]
 }
 
+export interface ConfigActivationMetadata {
+  operator: string
+  activatedAt: string
+  deviceId?: string
+}
+
 export interface AppliedConfigVersion {
   version: number
   snapshot: TournamentConfigSnapshot
@@ -274,6 +280,7 @@ export class ConfigRepository {
   async activateVersion(
     configVersionId: string,
     expectedTournamentId: TournamentId,
+    activation: ConfigActivationMetadata,
   ): Promise<AppliedConfigVersion> {
     const record = await this.getVersionById(configVersionId)
     if (!record) throw new Error(`ConfigVersion ${configVersionId} does not exist`)
@@ -285,6 +292,9 @@ export class ConfigRepository {
     if (snapshot.tournament.tournamentId !== expectedTournamentId) {
       throw new Error('ConfigVersion snapshot is not compatible with this tournament')
     }
+    if (!activation.operator.trim() || Number.isNaN(Date.parse(activation.activatedAt))) {
+      throw new Error('ConfigVersion activation metadata is invalid')
+    }
     snapshot.tournament.currentConfigVersion = record.version
 
     const tables = [...this.normalizedConfigTables(), this.db.auditEvents]
@@ -293,11 +303,15 @@ export class ConfigRepository {
       const auditEvent: AuditEventRecord = {
         eventId: createId<string>(),
         type: 'CONFIG_UPDATED',
-        timestamp: record.createdAt,
+        timestamp: activation.activatedAt,
         targetId: record.configVersionId,
         metadata: {
           action: 'EXPLICIT_ACTIVATION',
-          operator: record.operator,
+          operator: activation.operator,
+          activatedAt: activation.activatedAt,
+          deviceId: activation.deviceId,
+          configCreatedAt: record.createdAt,
+          configCreatedBy: record.operator,
           version: record.version,
           tournamentId: record.tournamentId,
         },
@@ -307,7 +321,10 @@ export class ConfigRepository {
     })
   }
 
-  async activateVersionForHost(configVersionId: string): Promise<AppliedConfigVersion> {
+  async activateVersionForHost(
+    configVersionId: string,
+    activation: ConfigActivationMetadata,
+  ): Promise<AppliedConfigVersion> {
     const record = await this.getVersionById(configVersionId)
     if (!record) throw new Error(`ConfigVersion ${configVersionId} does not exist`)
     const hostTournament = await this.getHostTournament()
@@ -320,7 +337,11 @@ export class ConfigRepository {
         throw new Error('Host tournament integrity error: imported ConfigVersions belong to multiple tournaments')
       }
     }
-    return this.activateVersion(configVersionId, (hostTournament?.tournamentId ?? record.tournamentId) as TournamentId)
+    return this.activateVersion(
+      configVersionId,
+      (hostTournament?.tournamentId ?? record.tournamentId) as TournamentId,
+      activation,
+    )
   }
 
   async apply(

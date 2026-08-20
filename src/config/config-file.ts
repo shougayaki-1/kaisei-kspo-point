@@ -1,5 +1,5 @@
 import type { ConfigVersionRecord } from '../db/schema'
-import type { AppliedConfigVersion, ConfigRepository } from '../db/config-repository'
+import type { AppliedConfigVersion, ConfigActivationMetadata, ConfigRepository } from '../db/config-repository'
 import {
   scoringTestApprovalFingerprint,
   type ScoringTestRunResult,
@@ -99,6 +99,7 @@ export async function importTournamentConfigFile(
 export async function activateImportedConfigFile(
   repository: ConfigFileRepository,
   configVersionId: string,
+  activation: ConfigActivationMetadata,
 ): Promise<AppliedConfigVersion> {
   const record = await repository.getVersionById(configVersionId)
   if (!record) throw new Error(`ConfigVersion ${configVersionId} does not exist`)
@@ -122,6 +123,15 @@ export async function activateImportedConfigFile(
   }
 
   const results: ScoringTestRunResult[] = await repository.previewRegression(record.snapshot)
+  const expectedTestCaseIds = new Set(record.snapshot.scoringTestCases.map((testCase) => testCase.testCaseId))
+  const returnedTestCaseIds = new Set(results.map((result) => result.testCaseId))
+  const completeResultSet =
+    results.length === expectedTestCaseIds.size &&
+    returnedTestCaseIds.size === expectedTestCaseIds.size &&
+    [...expectedTestCaseIds].every((testCaseId) => returnedTestCaseIds.has(testCaseId))
+  if (!completeResultSet) {
+    throw new Error('scoring regression gate did not return exactly one result for every ScoringTestCase')
+  }
   const blocked = results.filter((result) => result.status !== 'PASS')
   if (blocked.length > 0) {
     throw new Error(`scoring regression gate failed: ${blocked.map((result) => `${result.testCaseId}:${result.status}`).join(', ')}`)
@@ -155,5 +165,5 @@ export async function activateImportedConfigFile(
     }
   }
 
-  return repository.activateVersionForHost(configVersionId)
+  return repository.activateVersionForHost(configVersionId, activation)
 }

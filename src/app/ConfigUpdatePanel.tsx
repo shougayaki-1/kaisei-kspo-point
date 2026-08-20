@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
+import type { ConfigActivationMetadata } from '../db/config-repository'
 import type { TournamentId } from '../domain/ids'
+import type { ConfigUpdateActivationResult } from './config-update-service'
 
 export type ConfigUpdatePanelMode = 'HOST' | 'COURT'
 
@@ -20,19 +22,25 @@ export interface ConfigUpdatePanelServices {
     importedConfigVersionId?: string
     tournamentId?: TournamentId
   }>
-  activate(configVersionId: string): Promise<void>
+  activate(configVersionId: string, activation: ConfigActivationMetadata): Promise<ConfigUpdateActivationResult>
 }
 
 export interface ConfigUpdatePanelProps {
   mode: ConfigUpdatePanelMode
   services: ConfigUpdatePanelServices
+  operatorName?: string
+  deviceId?: string
   now?: () => string
+  onActivated?: (result: ConfigUpdateActivationResult) => void
 }
 
 export function ConfigUpdatePanel({
   mode,
   services,
+  operatorName = '本部担当',
+  deviceId,
   now = () => new Date().toISOString(),
+  onActivated,
 }: ConfigUpdatePanelProps) {
   const [status, setStatus] = useState<ConfigUpdatePanelStatus | null>(null)
   const [frames, setFrames] = useState<string[]>([])
@@ -101,7 +109,12 @@ export function ConfigUpdatePanel({
     }
     setError('')
     try {
-      await services.activate(importedId)
+      const result = await services.activate(importedId, {
+        operator: operatorName,
+        activatedAt: now(),
+        deviceId,
+      })
+      onActivated?.(result)
       setMessage(`ConfigVersion ${importedId} を有効化しました。`)
       await reloadStatus()
     } catch (cause) {

@@ -2,8 +2,9 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { ConfigRepository } from '../db/config-repository'
 import type { PwaRuntime, PwaRuntimeSnapshot } from '../pwa/runtime'
-import { App } from './App'
+import { App, loadHostBootstrapState } from './App'
 import type { ConfigVersionRecord } from '../db/schema'
+import type { ConfigUpdatePanelServices } from './ConfigUpdatePanel'
 
 function configRepository(): Pick<ConfigRepository, 'loadCurrent' | 'apply'> {
   let version = 0
@@ -45,6 +46,23 @@ function configRepositoryWithActiveVersion(): Pick<ConfigRepository, 'loadCurren
   }
 }
 
+function configUpdateServices(): ConfigUpdatePanelServices {
+  let activeConfigVersionId: string | null = null
+  return {
+    loadStatus: vi.fn(async () => ({
+      tournamentId: activeConfigVersionId ? 'tournament-1' as never : null,
+      activeConfigVersionId,
+      versions: activeConfigVersionId ? [{ configVersionId: activeConfigVersionId, version: 2 }] : [],
+    })),
+    exportVersion: vi.fn(async () => ({ configVersionId: 'config-v2', frames: ['frame'] })),
+    ingestFrame: vi.fn(async () => ({ complete: true, importedConfigVersionId: 'config-v2', tournamentId: 'tournament-1' as never })),
+    activate: vi.fn(async () => {
+      activeConfigVersionId = 'config-v2'
+      return { configVersionId: 'config-v2', version: 2, tournamentId: 'tournament-1' as never }
+    }),
+  }
+}
+
 function waitingPwaRuntime(): PwaRuntime {
   return {
     start: vi.fn(),
@@ -61,6 +79,17 @@ function waitingPwaRuntime(): PwaRuntime {
 }
 
 describe('App', () => {
+  it('uses fail-closed Host bootstrap lookup instead of selecting an arbitrary Tournament', async () => {
+    const getActiveVersion = vi.fn()
+    const repository = {
+      getHostTournament: vi.fn(async () => { throw new Error('Host tournament integrity error: multiple tournaments') }),
+      getActiveVersion,
+    }
+
+    await expect(loadHostBootstrapState(repository)).rejects.toThrow(/multiple tournaments/i)
+    expect(getActiveVersion).not.toHaveBeenCalled()
+  })
+
   it('offers host, court, and display modes with local version status', () => {
     render(<App />)
 
@@ -130,6 +159,21 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: '新しい大会を作成' }))
     fireEvent.click(screen.getByRole('button', { name: '設定を適用' }))
 
+    expect(await screen.findByRole('alert')).toHaveTextContent(/release SHA|埋め込まれた/i)
+    expect(screen.queryByRole('heading', { name: 'データ管理' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'バックアップ/復元へ' }))
+    expect(await screen.findByRole('heading', { name: '本部バックアップ・復元' })).toBeInTheDocument()
+  })
+
+  it('synchronizes App config diagnostics after Court Config Update activation', async () => {
+    render(<App configUpdateServices={configUpdateServices()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'コートモード' }))
+    fireEvent.change(screen.getByLabelText('Config Update QR文字列'), { target: { value: 'frame' } })
+    fireEvent.click(screen.getByRole('button', { name: '読み取る' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'このConfigVersionを有効化' }))
+
+    expect(await screen.findByText('Config v2')).toBeInTheDocument()
+    expect(screen.getByText('config-v2')).toBeInTheDocument()
     expect(await screen.findByRole('alert')).toHaveTextContent(/release SHA|埋め込まれた/i)
   })
 

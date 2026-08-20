@@ -1,5 +1,6 @@
 import type { TournamentId } from '../domain/ids'
 import { ConfigRepository } from '../db/config-repository'
+import type { ConfigActivationMetadata } from '../db/config-repository'
 import type { AppDatabase } from '../db/database'
 import { TransferRepository } from '../db/transfer-repository'
 import {
@@ -26,6 +27,12 @@ export interface ConfigUpdateIngestResult {
   complete: boolean
   importedConfigVersionId?: string
   tournamentId?: TournamentId
+}
+
+export interface ConfigUpdateActivationResult {
+  configVersionId: string
+  version: number
+  tournamentId: TournamentId
 }
 
 export function createConfigUpdateService(db: AppDatabase) {
@@ -118,8 +125,13 @@ export function createConfigUpdateService(db: AppDatabase) {
       return receiver.getProgress(transferId)
     },
 
-    async activate(configVersionId: string): Promise<void> {
-      await configRepository.activateVersionForHost(configVersionId)
+    async activate(configVersionId: string, activation: ConfigActivationMetadata): Promise<ConfigUpdateActivationResult> {
+      const applied = await configRepository.activateVersionForHost(configVersionId, activation)
+      return {
+        configVersionId,
+        version: applied.version,
+        tournamentId: applied.snapshot.tournament.tournamentId,
+      }
     },
   }
 }

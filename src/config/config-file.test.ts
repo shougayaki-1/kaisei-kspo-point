@@ -144,12 +144,36 @@ describe('tournament config file', () => {
       activateVersionForHost: vi.fn(async () => ({ version: 1, snapshot: imported.snapshot })),
     } satisfies ConfigFileRepository
 
-    await expect(activateImportedConfigFile(repository, 'config-v1')).rejects.toThrow(/regression/i)
+    await expect(activateImportedConfigFile(repository, 'config-v1', {
+      operator: '本部担当',
+      activatedAt: '2026-08-20T12:00:00.000Z',
+    })).rejects.toThrow(/regression/i)
     expect(repository.activateVersionForHost).not.toHaveBeenCalled()
 
-    repository.previewRegression.mockResolvedValue([])
-    await activateImportedConfigFile(repository, 'config-v1')
-    expect(repository.activateVersionForHost).toHaveBeenCalledWith('config-v1')
+    repository.previewRegression.mockResolvedValue([{ testCaseId: 'case-1', status: 'PASS', actual: [], diffs: [] } as never])
+    await activateImportedConfigFile(repository, 'config-v1', {
+      operator: '本部担当',
+      activatedAt: '2026-08-20T12:00:00.000Z',
+    })
+    expect(repository.activateVersionForHost).toHaveBeenCalledWith('config-v1', expect.objectContaining({ operator: '本部担当' }))
+  })
+
+  it('blocks explicit activation when regression results do not cover every ScoringTestCase exactly once', async () => {
+    const imported = record()
+    const repository = {
+      importVersion: vi.fn(),
+      getHostTournament: vi.fn(async () => undefined),
+      getActiveVersion: vi.fn(async () => undefined),
+      getVersionById: vi.fn(async () => imported),
+      previewRegression: vi.fn(async () => []),
+      activateVersionForHost: vi.fn(async () => ({ version: 1, snapshot: imported.snapshot })),
+    } satisfies ConfigFileRepository
+
+    await expect(activateImportedConfigFile(repository, imported.configVersionId, {
+      operator: '本部担当',
+      activatedAt: '2026-08-20T12:00:00.000Z',
+    })).rejects.toThrow(/regression|result|coverage/i)
+    expect(repository.activateVersionForHost).not.toHaveBeenCalled()
   })
 
   it('rejects a ConfigVersion from another tournament without mutating the active host state', async () => {
@@ -166,11 +190,14 @@ describe('tournament config file', () => {
       getHostTournament: vi.fn(async () => activeTournament),
       getActiveVersion: vi.fn(async () => undefined),
       getVersionById: vi.fn(async () => imported),
-      previewRegression: vi.fn(async () => []),
+      previewRegression: vi.fn(async () => [{ testCaseId: 'case-1', status: 'PASS', actual: [], diffs: [] } as never]),
       activateVersionForHost: vi.fn(),
     } satisfies ConfigFileRepository
 
-    await expect(activateImportedConfigFile(repository, imported.configVersionId)).rejects.toThrow(/tournament/i)
+    await expect(activateImportedConfigFile(repository, imported.configVersionId, {
+      operator: '本部担当',
+      activatedAt: '2026-08-20T12:00:00.000Z',
+    })).rejects.toThrow(/tournament/i)
     expect(repository.activateVersionForHost).not.toHaveBeenCalled()
   })
 
@@ -186,7 +213,10 @@ describe('tournament config file', () => {
       activateVersionForHost: vi.fn(),
     } satisfies ConfigFileRepository
 
-    await expect(activateImportedConfigFile(repository, imported.configVersionId)).rejects.toThrow(/regression test/i)
+    await expect(activateImportedConfigFile(repository, imported.configVersionId, {
+      operator: '本部担当',
+      activatedAt: '2026-08-20T12:00:00.000Z',
+    })).rejects.toThrow(/regression test/i)
     expect(repository.activateVersionForHost).not.toHaveBeenCalled()
   })
 
@@ -206,11 +236,14 @@ describe('tournament config file', () => {
       })),
       getActiveVersion: vi.fn(async () => active),
       getVersionById: vi.fn(async () => imported),
-      previewRegression: vi.fn(async () => []),
+      previewRegression: vi.fn(async () => [{ testCaseId: 'case-1', status: 'PASS', actual: [], diffs: [] } as never]),
       activateVersionForHost: vi.fn(),
     } satisfies ConfigFileRepository
 
-    await expect(activateImportedConfigFile(repository, imported.configVersionId)).rejects.toThrow(/test case|approval/i)
+    await expect(activateImportedConfigFile(repository, imported.configVersionId, {
+      operator: '本部担当',
+      activatedAt: '2026-08-20T12:00:00.000Z',
+    })).rejects.toThrow(/test case|approval/i)
     expect(repository.activateVersionForHost).not.toHaveBeenCalled()
   })
 
@@ -262,7 +295,10 @@ describe('tournament config file', () => {
       activateVersionForHost: vi.fn(async () => ({ version: imported.version, snapshot: imported.snapshot })),
     } satisfies ConfigFileRepository
 
-    await expect(activateImportedConfigFile(repository, imported.configVersionId)).resolves.toMatchObject({ version: 2 })
-    expect(repository.activateVersionForHost).toHaveBeenCalledWith(imported.configVersionId)
+    await expect(activateImportedConfigFile(repository, imported.configVersionId, {
+      operator: '本部担当',
+      activatedAt: '2026-08-20T00:10:00.000Z',
+    })).resolves.toMatchObject({ version: 2 })
+    expect(repository.activateVersionForHost).toHaveBeenCalledWith(imported.configVersionId, expect.objectContaining({ operator: '本部担当' }))
   })
 })

@@ -1,18 +1,24 @@
 import { useState } from 'react'
-import type { AppliedConfigVersion } from '../db/config-repository'
+import type { AppliedConfigVersion, ConfigActivationMetadata } from '../db/config-repository'
 import type { ConfigVersionRecord } from '../db/schema'
 
 export interface ConfigFilePanelServices {
   importJson(json: string): Promise<ConfigVersionRecord>
-  activate(configVersionId: string): Promise<AppliedConfigVersion>
+  activate(configVersionId: string, activation: ConfigActivationMetadata): Promise<AppliedConfigVersion>
   exportActive(): Promise<string>
 }
 
 export function ConfigFilePanel({
   services,
+  operatorName = '本部担当',
+  deviceId,
+  now = () => new Date().toISOString(),
   onActivated,
 }: {
   services: ConfigFilePanelServices
+  operatorName?: string
+  deviceId?: string
+  now?: () => string
   onActivated?: (record: { tournamentId: string; configVersionId: string; version: number }) => void
 }) {
   const [input, setInput] = useState('')
@@ -37,7 +43,11 @@ export function ConfigFilePanel({
     if (!imported) return
     setError('')
     try {
-      const result = await services.activate(imported.configVersionId)
+      const result = await services.activate(imported.configVersionId, {
+        operator: operatorName,
+        activatedAt: now(),
+        deviceId,
+      })
       setStatus(`ConfigVersion ${imported.configVersionId} を有効化しました。`)
       onActivated?.({ tournamentId: imported.tournamentId, configVersionId: imported.configVersionId, version: result.version })
     } catch (cause) {

@@ -43,7 +43,13 @@ describe('ConfigUpdatePanel', () => {
 
   it('shows Court current ConfigVersion ID and requires an explicit activation action', async () => {
     const service = services()
-    render(<ConfigUpdatePanel mode="COURT" services={service} />)
+    const onActivated = vi.fn()
+    service.activate = vi.fn().mockResolvedValue({
+      configVersionId: 'config-v2',
+      version: 2,
+      tournamentId,
+    })
+    render(<ConfigUpdatePanel mode="COURT" services={service} onActivated={onActivated} />)
 
     expect(await screen.findByText(/config-v1/)).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Config Update QR文字列'), {
@@ -55,6 +61,14 @@ describe('ConfigUpdatePanel', () => {
     expect(service.activate).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'このConfigVersionを有効化' }))
 
-    await waitFor(() => expect(service.activate).toHaveBeenCalledWith('config-v2'))
+    await waitFor(() => expect(service.activate).toHaveBeenCalledWith('config-v2', expect.objectContaining({
+      operator: '本部担当',
+      activatedAt: expect.any(String),
+    })))
+    await waitFor(() => expect(onActivated).toHaveBeenCalledWith({
+      configVersionId: 'config-v2',
+      version: 2,
+      tournamentId,
+    }))
   })
 })

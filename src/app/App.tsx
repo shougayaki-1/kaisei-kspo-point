@@ -16,7 +16,8 @@ import {
 import { ConfigFilePanel } from './ConfigFilePanel'
 import { createConfigFilePanelServices } from './config-file-panel-service'
 import { ConfigUpdatePanel } from './ConfigUpdatePanel'
-import { createConfigUpdateService } from './config-update-service'
+import { createConfigUpdateService, type ConfigUpdateActivationResult } from './config-update-service'
+import type { ConfigUpdatePanelServices } from './ConfigUpdatePanel'
 import { CourtScoringSession } from './CourtScoringSession'
 import { createCourtResultService } from './court-result-service'
 import { CourtTransferHistory } from './CourtTransferHistory'
@@ -34,6 +35,15 @@ type AppMode = 'HOST' | 'COURT' | 'DISPLAY' | null
 type HostTab = 'SCORING' | 'CONFIG' | 'QR' | 'BACKUP'
 type AppConfigRepository = Pick<ConfigRepository, 'loadCurrent' | 'apply'> & Partial<Pick<ConfigRepository, 'getActiveVersion' | 'previewRegression'>>
 
+export async function loadHostBootstrapState(
+  repository: Pick<ConfigRepository, 'getHostTournament' | 'getActiveVersion'>,
+) {
+  const tournament = await repository.getHostTournament()
+  if (!tournament) return undefined
+  const active = await repository.getActiveVersion(tournament.tournamentId)
+  return { tournament, active }
+}
+
 export interface AppProps {
   confirmReload?: (message: string) => boolean
   reload?: () => void
@@ -42,6 +52,7 @@ export interface AppProps {
   pwaRuntime?: PwaRuntime
   resetPersistentData?: () => Promise<void> | void
   hostBackupServices?: HostBackupPanelServices
+  configUpdateServices?: ConfigUpdatePanelServices
 }
 
 const RELOAD_CONFIRMATION = 'アプリを再読み込みします。保存済みの大会データは削除されません。続行しますか？'
@@ -54,6 +65,7 @@ export function App({
   pwaRuntime,
   resetPersistentData,
   hostBackupServices,
+  configUpdateServices: injectedConfigUpdateServices,
 }: AppProps = {}) {
   const [mode, setMode] = useState<AppMode>(null)
   const [hostTab, setHostTab] = useState<HostTab>('CONFIG')
@@ -74,7 +86,8 @@ export function App({
   const browserConfigRepository = useMemo(() => new ConfigRepository(appDatabase), [appDatabase])
   const resolvedConfigRepository = configRepository ?? browserConfigRepository
   const configFileServices = useMemo(() => createConfigFilePanelServices(appDatabase), [appDatabase])
-  const configUpdateServices = useMemo(() => createConfigUpdateService(appDatabase), [appDatabase])
+  const browserConfigUpdateServices = useMemo(() => createConfigUpdateService(appDatabase), [appDatabase])
+  const configUpdateServices = injectedConfigUpdateServices ?? browserConfigUpdateServices
   const courtResultServices = useMemo(() => createCourtResultService(appDatabase, { deviceId }), [appDatabase, deviceId])
   const courtTransferHistoryServices = useMemo(() => createCourtTransferHistoryServices(appDatabase), [appDatabase])
   const hostScoringServices = useMemo(() => createHostScoringService(appDatabase), [appDatabase])
@@ -122,12 +135,11 @@ export function App({
   useEffect(() => {
     if (configRepository) return
     let cancelled = false
-    appDatabase.tournaments.toCollection().first().then(async (tournament) => {
-      if (cancelled || !tournament) return
-      setActiveTournamentId(tournament.tournamentId)
-      setKnownConfigVersion(tournament.currentConfigVersion)
-      const active = await browserConfigRepository.getActiveVersion(tournament.tournamentId)
-      if (!cancelled) setKnownConfigVersionId(active?.configVersionId ?? null)
+    loadHostBootstrapState(browserConfigRepository).then((state) => {
+      if (cancelled || !state) return
+      setActiveTournamentId(state.tournament.tournamentId)
+      setKnownConfigVersion(state.tournament.currentConfigVersion)
+      setKnownConfigVersionId(state.active?.configVersionId ?? null)
     }).catch(() => {})
     return () => { cancelled = true }
   }, [appDatabase, browserConfigRepository, configRepository])
@@ -154,9 +166,15 @@ export function App({
     setKnownConfigVersion(result.version)
     setKnownConfigVersionId(result.configVersionId)
   }
+  const handleConfigUpdateActivated = (result: ConfigUpdateActivationResult) => {
+    setActiveTournamentId(result.tournamentId)
+    setKnownConfigVersion(result.version)
+    setKnownConfigVersionId(result.configVersionId)
+  }
   const returnToModeSelection = () => { setMode(null); setHostTab('CONFIG') }
+  const releaseGateActive = Boolean(releaseGate.error && knownConfigVersionId)
   const releaseGateBlocksMode = Boolean(
-    releaseGate.error && knownConfigVersionId && !(mode === 'HOST' && hostTab === 'BACKUP'),
+    releaseGateActive && !(mode === 'HOST' && hostTab === 'BACKUP'),
   )
 
   let content: ReactNode
@@ -165,6 +183,9 @@ export function App({
       <h1>リリース識別子を検証できません</h1>
       <p>有効なConfigVersionに対して、ビルドへ埋め込まれたrelease SHAを検証できないため、イベント操作を停止しています。</p>
       <p>{releaseGate.error}</p>
+      <button type="button" onClick={() => { setMode('HOST'); setHostTab('BACKUP') }}>
+        バックアップ/復元へ
+      </button>
     </section>
   } else if (mode === 'HOST') {
     content = <>
@@ -183,8 +204,8 @@ export function App({
       ) : hostTab === 'CONFIG' ? (
         <>
           <TournamentConfigEditor repository={editorConfigRepository} tournamentId={activeTournamentId} operatorName={operatorName} />
-          <ConfigFilePanel services={configFileServices} onActivated={handleConfigFileActivated} />
-          <ConfigUpdatePanel mode="HOST" services={configUpdateServices} />
+          <ConfigFilePanel services={configFileServices} operatorName={operatorName} deviceId={deviceId} onActivated={handleConfigFileActivated} />
+          <ConfigUpdatePanel mode="HOST" services={configUpdateServices} operatorName={operatorName} deviceId={deviceId} onActivated={handleConfigUpdateActivated} />
         </>
       ) : hostTab === 'QR' ? (
         <TransferDemo mode="HOST" deviceId={deviceId} />
@@ -199,7 +220,7 @@ export function App({
         <button type="button" onClick={returnToModeSelection}>モード選択へ戻る</button>
       </div>
       <CourtScoringSession services={courtResultServices} />
-      <ConfigUpdatePanel mode="COURT" services={configUpdateServices} />
+      <ConfigUpdatePanel mode="COURT" services={configUpdateServices} operatorName={operatorName} deviceId={deviceId} onActivated={handleConfigUpdateActivated} />
       <TransferDemo mode="COURT" deviceId={deviceId} />
       <CourtTransferHistory services={courtTransferHistoryServices} />
     </>
@@ -233,7 +254,7 @@ export function App({
       pwa={pwaSnapshot}
       onActivateUpdate={pwaRuntime && mode !== 'DISPLAY' ? handleActivateUpdate : undefined}
     />
-    {mode !== 'DISPLAY' ? <DataManagementPanel onReset={handleResetPersistentData} /> : null}
+    {mode !== 'DISPLAY' && !releaseGateActive ? <DataManagementPanel onReset={handleResetPersistentData} /> : null}
     <footer className="status-bar" aria-label="端末状態">
       <span>App {APP_VERSION}</span>
       <span>{knownConfigVersion === null ? 'Config -' : `Config v${knownConfigVersion}`}</span>
