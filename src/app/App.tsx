@@ -8,6 +8,8 @@ import { createHostBackup } from '../backup/backup-service'
 import { prepareHostRestore, restorePreparedHostBackup } from '../backup/restore-service'
 import { APP_VERSION } from '../pwa/app-version'
 import { UNSUPPORTED_PWA_SNAPSHOT, type PwaRuntime, type PwaRuntimeSnapshot } from '../pwa/runtime'
+import { ConfigFilePanel } from './ConfigFilePanel'
+import { createConfigFilePanelServices } from './config-file-panel-service'
 import { ConfigUpdatePanel } from './ConfigUpdatePanel'
 import { createConfigUpdateService } from './config-update-service'
 import { CourtScoringSession } from './CourtScoringSession'
@@ -52,6 +54,7 @@ export function App({ confirmReload = (message) => window.confirm(message), relo
   const appDatabase = useMemo(() => createDatabase(), [])
   const browserConfigRepository = useMemo(() => new ConfigRepository(appDatabase), [appDatabase])
   const resolvedConfigRepository = configRepository ?? browserConfigRepository
+  const configFileServices = useMemo(() => createConfigFilePanelServices(appDatabase), [appDatabase])
   const configUpdateServices = useMemo(() => createConfigUpdateService(appDatabase), [appDatabase])
   const courtResultServices = useMemo(() => createCourtResultService(appDatabase, { deviceId }), [appDatabase, deviceId])
   const courtTransferHistoryServices = useMemo(() => createCourtTransferHistoryServices(appDatabase), [appDatabase])
@@ -82,11 +85,12 @@ export function App({ confirmReload = (message) => window.confirm(message), relo
   const handleActivateUpdate = () => { if (pwaRuntime) void pwaRuntime.activateUpdate() }
   const handleResetPersistentData = async () => { if (resetPersistentData) await resetPersistentData(); else await resetAllPersistentData(appDatabase); setActiveTournamentId(undefined); setKnownConfigVersion(null); setKnownConfigVersionId(null) }
   const handleHostRestored = (result: { tournamentId: string; activeConfigVersionId: string; activeConfigVersion: number }) => { setActiveTournamentId(result.tournamentId as TournamentId); setKnownConfigVersion(result.activeConfigVersion); setKnownConfigVersionId(result.activeConfigVersionId) }
+  const handleConfigFileActivated = (result: { tournamentId: string; configVersionId: string; version: number }) => { setActiveTournamentId(result.tournamentId as TournamentId); setKnownConfigVersion(result.version); setKnownConfigVersionId(result.configVersionId) }
   const returnToModeSelection = () => { setMode(null); setHostTab('CONFIG') }
 
   let content: ReactNode
   if (mode === 'HOST') {
-    content = <><div className="mode-header"><div><h1>本部モード</h1><p>大会全体の集計・設定を管理します。</p></div><button type="button" onClick={returnToModeSelection}>モード選択へ戻る</button></div><nav className="host-tabs" aria-label="本部機能"><button type="button" aria-pressed={hostTab === 'SCORING'} onClick={() => setHostTab('SCORING')}>得点・順位</button><button type="button" aria-pressed={hostTab === 'CONFIG'} onClick={() => setHostTab('CONFIG')}>大会設定</button><button type="button" aria-pressed={hostTab === 'QR'} onClick={() => setHostTab('QR')}>QR受信</button><button type="button" aria-pressed={hostTab === 'BACKUP'} onClick={() => setHostTab('BACKUP')}>バックアップ</button></nav>{hostTab === 'SCORING' ? <HostScoringDashboard service={hostScoringServices} /> : hostTab === 'CONFIG' ? <><TournamentConfigEditor repository={editorConfigRepository} tournamentId={activeTournamentId} operatorName={operatorName} /><ConfigUpdatePanel mode="HOST" services={configUpdateServices} /></> : hostTab === 'QR' ? <TransferDemo mode="HOST" deviceId={deviceId} /> : <HostBackupPanel services={resolvedHostBackupServices} onRestored={handleHostRestored} />}</>
+    content = <><div className="mode-header"><div><h1>本部モード</h1><p>大会全体の集計・設定を管理します。</p></div><button type="button" onClick={returnToModeSelection}>モード選択へ戻る</button></div><nav className="host-tabs" aria-label="本部機能"><button type="button" aria-pressed={hostTab === 'SCORING'} onClick={() => setHostTab('SCORING')}>得点・順位</button><button type="button" aria-pressed={hostTab === 'CONFIG'} onClick={() => setHostTab('CONFIG')}>大会設定</button><button type="button" aria-pressed={hostTab === 'QR'} onClick={() => setHostTab('QR')}>QR受信</button><button type="button" aria-pressed={hostTab === 'BACKUP'} onClick={() => setHostTab('BACKUP')}>バックアップ</button></nav>{hostTab === 'SCORING' ? <HostScoringDashboard service={hostScoringServices} /> : hostTab === 'CONFIG' ? <><TournamentConfigEditor repository={editorConfigRepository} tournamentId={activeTournamentId} operatorName={operatorName} /><ConfigFilePanel services={configFileServices} onActivated={handleConfigFileActivated} /><ConfigUpdatePanel mode="HOST" services={configUpdateServices} /></> : hostTab === 'QR' ? <TransferDemo mode="HOST" deviceId={deviceId} /> : <HostBackupPanel services={resolvedHostBackupServices} onRestored={handleHostRestored} />}</>
   } else if (mode === 'COURT') {
     content = <><div className="mode-header"><div><h1>コートモード</h1><p>競技結果を端末内に記録します。</p></div><button type="button" onClick={returnToModeSelection}>モード選択へ戻る</button></div><CourtScoringSession services={courtResultServices} /><ConfigUpdatePanel mode="COURT" services={configUpdateServices} /><TransferDemo mode="COURT" deviceId={deviceId} /><CourtTransferHistory services={courtTransferHistoryServices} /></>
   } else if (mode === 'DISPLAY') {
