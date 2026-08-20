@@ -8,6 +8,7 @@ import {
   sumExactValues,
   type ExactValue,
 } from './exact-decimal'
+import { calculateKingDodgeballRound, deriveComparisonValue } from './current-year-scoring'
 import type {
   CalculationTraceStep,
   ParticipantScoreResult,
@@ -32,6 +33,9 @@ export class UnsupportedAggregationError extends Error {
 }
 
 function pointsForRank(profile: ScoringProfile, rank: number): ExactValue {
+  if (profile.awardRule.type !== 'RANK_POINTS') {
+    throw new UnsupportedAggregationError(profile.aggregationRule)
+  }
   const points = profile.awardRule.rankPoints[rank]
   if (points === undefined) {
     throw new Error(`No award points configured for rank ${rank}`)
@@ -106,7 +110,9 @@ export function calculateRankedParticipants<TId extends string>(
         participantId: item.participantId,
         rank,
         awardScore: award.score,
+        comparisonValue: inputValue,
         trace: [
+          ...(item.trace ?? []),
           {
             code: 'INPUT',
             label: `比較値: ${serializeExactValue(inputValue)}`,
@@ -204,6 +210,23 @@ function aggregateScores(
       }
     }
     case 'WIN_POINTS':
+      if (profile.scoringRule?.type !== 'KING_DODGEBALL') {
+        throw new UnsupportedAggregationError(profile.aggregationRule)
+      }
+      {
+        const score = sumExactValues(scores)
+        return {
+          score,
+          trace: [{
+            code: 'AGGREGATE',
+            label: '試合ポイントを合計',
+            expression: scores.length > 0
+              ? `${scores.map(serializeExactValue).join(' + ')} = ${serializeExactValue(score)}`
+              : '0',
+            value: score,
+          }],
+        }
+      }
     case 'CUSTOM':
       throw new UnsupportedAggregationError(profile.aggregationRule)
   }
@@ -214,9 +237,31 @@ export function calculateScoringScenario<TId extends string>(
   profile: ScoringProfile,
 ): ScoringScenarioResult<TId> {
   const participants = new Map<TId, ScoringScenarioParticipantResult<TId>>()
+  const scoringRule = profile.scoringRule
 
   for (const round of scenario.rounds) {
-    const ranked = calculateRankedParticipants(round.values, profile)
+    let ranked: ParticipantScoreResult<TId>[]
+    if (scoringRule?.type === 'KING_DODGEBALL') {
+      if (!round.rawValues) throw new Error('KING_DODGEBALL requires rawValues for every round')
+      ranked = calculateKingDodgeballRound(round.rawValues, scoringRule)
+    } else if (round.rawValues) {
+      if (!scoringRule) {
+        throw new Error('Raw scoring input requires a numeric derived scoringRule')
+      }
+      const derived = round.rawValues.map((item) => {
+        const result = deriveComparisonValue(item.fields, scoringRule)
+        return {
+          participantId: item.participantId,
+          value: result.value,
+          trace: result.trace,
+        }
+      })
+      ranked = calculateRankedParticipants(derived, profile)
+    } else if (round.values) {
+      ranked = calculateRankedParticipants(round.values, profile)
+    } else {
+      throw new Error('Scoring round requires values or rawValues')
+    }
     for (const result of ranked) {
       const existing = participants.get(result.participantId) ?? {
         participantId: result.participantId,
@@ -229,6 +274,8 @@ export function calculateScoringScenario<TId extends string>(
         rank: result.rank,
         awardScore: result.awardScore,
         trace: result.trace,
+        ...(result.comparisonValue !== undefined ? { comparisonValue: result.comparisonValue } : {}),
+        ...(result.outcome ? { outcome: result.outcome } : {}),
       })
       participants.set(result.participantId, existing)
     }

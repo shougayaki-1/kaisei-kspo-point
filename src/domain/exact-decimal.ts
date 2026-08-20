@@ -194,6 +194,15 @@ export function addExactValues(left: ExactValue, right: ExactValue): ExactValue 
   ))
 }
 
+export function multiplyExactValues(left: ExactValue, right: ExactValue): ExactValue {
+  const a = parseExact(left)
+  const b = parseExact(right)
+  return rationalToValue(normalize(
+    a.numerator * b.numerator,
+    a.denominator * b.denominator,
+  ))
+}
+
 export function sumExactValues(values: ExactValue[]): ExactValue {
   let total: Rational = { numerator: 0n, denominator: 1n }
   for (const value of values) {

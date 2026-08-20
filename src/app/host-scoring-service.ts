@@ -22,6 +22,7 @@ import {
 import { calculateScoringScenario } from '../domain/scoring-engine'
 import type {
   CalculationTraceStep,
+  RawParticipantValue,
   ScoringProfile,
   ScoringScenarioParticipantResult,
   ScoringScenarioResult,
@@ -145,16 +146,32 @@ function extractComparisonValues(
     throw new Error(`Result revision ${revision.revisionId} is incompatible with active InputSchema`)
   }
   const field = comparisonField(schema, revision.inputMode)
-  const entries = readRawEntries(revision.rawData)
+  const entries = extractRawValues(revision, schema, allowedEntryIds)
   const values = new Map<CompetitionEntryId, ExactValue>()
+  for (const [entryId, row] of entries) {
+    const raw = row[field.key]
+    if (typeof raw !== 'string' && typeof raw !== 'number') {
+      throw new Error(`Comparison field ${field.key} for ${entryId} is missing or non-numeric`)
+    }
+    values.set(entryId, canonicalizeDecimalInput(raw))
+  }
+  return values
+}
+
+function extractRawValues(
+  revision: ResultRevision,
+  schema: InputSchema,
+  allowedEntryIds: Set<CompetitionEntryId>,
+): Map<CompetitionEntryId, Record<string, RawValue>> {
+  if (revision.rawData.inputSchemaId !== schema.inputSchemaId || revision.rawData.inputSchemaVersion !== schema.version) {
+    throw new Error(`Result revision ${revision.revisionId} is incompatible with active InputSchema`)
+  }
+  const entries = readRawEntries(revision.rawData)
+  const values = new Map<CompetitionEntryId, Record<string, RawValue>>()
   for (const [entryIdText, row] of Object.entries(entries)) {
     const entryId = entryIdText as CompetitionEntryId
     if (!allowedEntryIds.has(entryId)) throw new Error(`Unknown CompetitionEntry ${entryIdText} in Result rawData`)
-    const raw = row[field.key]
-    if (typeof raw !== 'string' && typeof raw !== 'number') {
-      throw new Error(`Comparison field ${field.key} for ${entryIdText} is missing or non-numeric`)
-    }
-    values.set(entryId, canonicalizeDecimalInput(raw))
+    values.set(entryId, structuredClone(row))
   }
   return values
 }
@@ -275,24 +292,43 @@ export function createHostScoringService(db: AppDatabase) {
       )
       const rounds: Array<{
         roundId: string
-        values: Array<{ participantId: CompetitionEntryId; value: ExactValue }>
+        values?: Array<{ participantId: CompetitionEntryId; value: ExactValue }>
+        rawValues?: RawParticipantValue<CompetitionEntryId>[]
       }> = []
 
       for (const session of sessions) {
         const allowed = sessionAllowedEntries(snapshot, session)
         const merged = new Map<CompetitionEntryId, ExactValue>()
+        const mergedRaw = new Map<CompetitionEntryId, Record<string, RawValue>>()
         for (const result of resultBySession.get(session.scoringSessionId) ?? []) {
           const revision = effective.get(result.resultId)
           if (!revision) continue
-          const values = extractComparisonValues(revision, schema, allowed)
-          for (const [entryId, value] of values) {
-            if (merged.has(entryId)) {
-              throw new Error(`Duplicate authoritative Result for CompetitionEntry ${entryId} in ScoringSession ${session.scoringSessionId}`)
+          if (profile.scoringRule) {
+            const rawValues = extractRawValues(revision, schema, allowed)
+            for (const [entryId, value] of rawValues) {
+              if (mergedRaw.has(entryId)) {
+                throw new Error(`Duplicate authoritative Result for CompetitionEntry ${entryId} in ScoringSession ${session.scoringSessionId}`)
+              }
+              mergedRaw.set(entryId, value)
             }
-            merged.set(entryId, value)
+          } else {
+            const values = extractComparisonValues(revision, schema, allowed)
+            for (const [entryId, value] of values) {
+              if (merged.has(entryId)) {
+                throw new Error(`Duplicate authoritative Result for CompetitionEntry ${entryId} in ScoringSession ${session.scoringSessionId}`)
+              }
+              merged.set(entryId, value)
+            }
           }
         }
-        if (merged.size > 0) {
+        if (profile.scoringRule && mergedRaw.size > 0) {
+          rounds.push({
+            roundId: session.scoringSessionId,
+            rawValues: [...mergedRaw.entries()]
+              .sort(([left], [right]) => compareId(left, right))
+              .map(([participantId, fields]) => ({ participantId, fields })),
+          })
+        } else if (merged.size > 0) {
           rounds.push({
             roundId: session.scoringSessionId,
             values: [...merged.entries()]
@@ -368,12 +404,14 @@ export function createHostScoringService(db: AppDatabase) {
       if (!session || session.competitionId !== result.competitionId) {
         throw new Error('Conflict resolution Result is incompatible with active ConfigVersion')
       }
+      const profile = await activeProfile(active.snapshot, result.competitionId)
       const schema = activeInputSchema(active.snapshot, result.competitionId)
-      extractComparisonValues(
-        created.revision,
-        schema,
-        sessionAllowedEntries(active.snapshot, session),
-      )
+      const allowed = sessionAllowedEntries(active.snapshot, session)
+      if (profile.scoringRule) {
+        extractRawValues(created.revision, schema, allowed)
+      } else {
+        extractComparisonValues(created.revision, schema, allowed)
+      }
       await resultRepository.saveConflictResolution(created.revision, created.resolution)
     },
   }

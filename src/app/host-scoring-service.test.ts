@@ -47,6 +47,33 @@ function config(rankPoints: Record<number, number | string> = { 1: 10, 2: 5 }): 
 } }
 async function seedConfig(database: AppDatabase, rankPoints?: Record<number, number | string>) { const repository = new ConfigRepository(database); await repository.apply(config(rankPoints), { operator: 'Host', createdAt: '2026-08-19T10:00:00+09:00', changeClass: 'SCORING' }); return repository.getActiveVersion(ids.tournament) }
 function raw(a: string, b: string) { return { inputSchemaId: 'schema-number', inputSchemaVersion: 1, entries: { [ids.entryA]: { score: a }, [ids.entryB]: { score: b } } } }
+function derivedConfig(): TournamentConfigSnapshot {
+  const snapshot = config({ 1: 10, 2: 0 })
+  snapshot.inputSchemas[0]!.fields = [
+    { key: 'normalRopes', label: '通常綱', type: 'NUMBER', required: true },
+    { key: 'longRope', label: '30m綱', type: 'BOOLEAN', required: true },
+  ]
+  snapshot.scoringProfiles[0]!.scoringRule = {
+    type: 'WEIGHTED_SUM',
+    terms: [
+      { fieldKey: 'normalRopes', weight: 1 },
+      { fieldKey: 'longRope', weight: 5 },
+    ],
+  }
+  snapshot.scoringTestCases[0]!.rounds = [{
+    roundId: 'derived-test-round',
+    label: '第1セット',
+    rawValues: [
+      { entryId: ids.entryA, fields: { normalRopes: 7, longRope: true } },
+      { entryId: ids.entryB, fields: { normalRopes: 5, longRope: false } },
+    ],
+  }]
+  snapshot.scoringTestCases[0]!.expected = [
+    { entryId: ids.entryA, roundRanks: [1], roundAwardScores: [10], aggregateScore: 10 },
+    { entryId: ids.entryB, roundRanks: [2], roundAwardScores: [0], aggregateScore: 0 },
+  ]
+  return snapshot
+}
 function result(resultId: string, sessionId: ScoringSessionId, current: string): Result { return { resultId: resultId as ResultId, tournamentId: ids.tournament, competitionId: ids.competition, scoringSessionId: sessionId, currentRevisionId: current as RevisionId, createdAt: '2026-08-19T10:10:00+09:00', createdByDeviceId: 'court-device' as DeviceId } }
 function revision(resultId: string, revisionId: string, number: number, parents: string[], a: string, b: string, createdAt = '2026-08-19T10:10:00+09:00'): ResultRevision { return { revisionId: revisionId as RevisionId, resultId: resultId as ResultId, revisionNumber: number, parentRevisionIds: parents as RevisionId[], source: 'COURT', operator: 'Court', inputMode: 'NUMBER', rawData: raw(a, b), configVersion: 1, createdAt } }
 async function saveLinear(database: AppDatabase) { const repository = new ResultRepository(database); const r1 = result('result-r1', ids.session1, 'r1-child'); const base = revision('result-r1', 'r1-base', 1, [], '1', '2'); const child = revision('result-r1', 'r1-child', 2, ['r1-base'], '3', '2'); await repository.saveResultWithRevision(r1, base); await repository.saveResultWithRevision(r1, child); const r2 = result('result-r2', ids.session2, 'r2-base'); const second = revision('result-r2', 'r2-base', 1, [], '1', '4'); await repository.saveResultWithRevision(r2, second); return { repository, r1, base, child, r2, second } }
@@ -69,6 +96,40 @@ describe('Host authoritative scoring service', () => {
     const event = state.events[0]!; expect(event.competitionName).toBe('Configured Event'); expect(event.participants.map((item) => item.teamName).sort()).toEqual(['Configured Blue', 'Configured Red']); expect(event.participants.every((item) => item.rounds.every((round) => round.trace.length > 0))).toBe(true); expect(event.participants.every((item) => item.aggregateTrace.length > 0)).toBe(true)
     const expected = calculateScoringScenario({ rounds: [{ roundId: ids.session1, values: [{ participantId: ids.entryA, value: '3' }, { participantId: ids.entryB, value: '2' }] }, { roundId: ids.session2, values: [{ participantId: ids.entryA, value: '1' }, { participantId: ids.entryB, value: '4' }] }] }, config().scoringProfiles[0]!)
     expect(event.engineResult).toEqual(expected)
+  })
+  it('scores Host production Results from configured raw fields through the shared derived rule', async () => {
+    const database = db()
+    const repository = new ConfigRepository(database)
+    const snapshot = derivedConfig()
+    await repository.apply(snapshot, { operator: 'Host', createdAt: '2026-08-19T10:00:00+09:00', changeClass: 'SCORING' })
+    const resultRow = result('derived-result', ids.session1, 'derived-revision')
+    const revisionRow: ResultRevision = {
+      revisionId: 'derived-revision' as RevisionId,
+      resultId: resultRow.resultId,
+      revisionNumber: 1,
+      parentRevisionIds: [],
+      source: 'COURT',
+      operator: 'Court',
+      inputMode: 'SPECIAL',
+      rawData: {
+        inputSchemaId: 'schema-number',
+        inputSchemaVersion: 1,
+        entries: {
+          [ids.entryA]: { normalRopes: 7, longRope: true },
+          [ids.entryB]: { normalRopes: 5, longRope: false },
+        },
+      },
+      configVersion: 1,
+      createdAt: '2026-08-19T10:10:00+09:00',
+    }
+    await new ResultRepository(database).saveResultWithRevision(resultRow, revisionRow)
+
+    const event = (await createHostScoringService(database).loadAuthoritativeState()).events[0]!
+    const red = event.participants.find((item) => item.entryId === ids.entryA)!
+    expect(red.aggregateScore).toBe(10)
+    expect(red.rounds[0]!.trace).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'DERIVED', value: 12 }),
+    ]))
   })
   it('scores the latest common confirmed ancestor during unresolved divergence and ignores timestamps/arrival order', async () => {
     const database = db(); await seedConfig(database); const repository = new ResultRepository(database); const stored = result('result-conflict', ids.session1, 'branch-newer'); const base = revision('result-conflict', 'common-base', 1, [], '1', '2', '2026-08-19T12:00:00+09:00'); const branchA = revision('result-conflict', 'branch-a', 2, ['common-base'], '100', '0', '2026-08-19T23:00:00+09:00'); const branchB = revision('result-conflict', 'branch-b', 2, ['common-base'], '0', '100', '2026-08-19T09:00:00+09:00')

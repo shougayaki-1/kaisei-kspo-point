@@ -46,6 +46,10 @@ function diffLabel(diff: ScoringTestDiff): string {
       return 'ラウンド得点'
     case 'aggregateScore':
       return '合計得点'
+    case 'roundComparisonValues':
+      return '比較値'
+    case 'roundOutcomes':
+      return '勝敗'
   }
 }
 

@@ -87,7 +87,7 @@ describe('scoring test config validation', () => {
 
   it('rejects a round entry that is unknown or belongs to another competition', () => {
     const config = snapshot()
-    config.scoringTestCases[0].rounds[0].values[0].entryId = 'missing-entry' as CompetitionEntryId
+    config.scoringTestCases[0].rounds[0].values![0].entryId = 'missing-entry' as CompetitionEntryId
 
     expect(errorCodes(config)).toContain('UNKNOWN_SCORING_TEST_ENTRY')
   })

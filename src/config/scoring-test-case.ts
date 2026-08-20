@@ -4,15 +4,18 @@ import {
   exactValuesEqual,
   type ExactValue,
 } from '../domain/exact-decimal'
-import type { ScoringProfile } from '../domain/scoring'
+import type { CalculationTraceStep, MatchOutcome, RawParticipantValue, ScoringProfile } from '../domain/scoring'
+import type { RawValue } from '../domain/result'
 import { calculateScoringScenario } from '../domain/scoring-engine'
 import type { CompetitionEntry } from '../domain/tournament'
 import { stableConfigStringify } from './config-version'
+import { unsupportedScoringProfileMessage } from './scoring-profile'
 
 export interface ScoringTestRound {
   roundId: string
   label: string
-  values: Array<{ entryId: CompetitionEntryId; value: ExactValue }>
+  values?: Array<{ entryId: CompetitionEntryId; value: ExactValue }>
+  rawValues?: Array<{ entryId: CompetitionEntryId; fields: Record<string, RawValue> }>
 }
 
 export interface ScoringTestExpectedParticipant {
@@ -20,6 +23,8 @@ export interface ScoringTestExpectedParticipant {
   roundRanks: number[]
   roundAwardScores: ExactValue[]
   aggregateScore: ExactValue
+  roundComparisonValues?: ExactValue[]
+  roundOutcomes?: MatchOutcome[]
 }
 
 export interface ScoringTestCase {
@@ -37,13 +42,18 @@ export interface ScoringTestCase {
 }
 
 export type ScoringTestStatus = 'PASS' | 'FAIL' | 'INVALID'
-export type ScoringTestDiffField = 'roundRanks' | 'roundAwardScores' | 'aggregateScore'
+export type ScoringTestDiffField =
+  | 'roundRanks'
+  | 'roundAwardScores'
+  | 'aggregateScore'
+  | 'roundComparisonValues'
+  | 'roundOutcomes'
 
 export interface ScoringTestDiff {
   entryId: CompetitionEntryId
   field: ScoringTestDiffField
-  expected: number[] | ExactValue[] | ExactValue
-  actual: number[] | ExactValue[] | ExactValue
+  expected: number[] | string[] | ExactValue[] | ExactValue
+  actual: number[] | string[] | ExactValue[] | ExactValue
 }
 
 export interface ScoringTestRunResult {
@@ -51,6 +61,10 @@ export interface ScoringTestRunResult {
   status: ScoringTestStatus
   actual: ScoringTestExpectedParticipant[]
   diffs: ScoringTestDiff[]
+  calculationTraces?: Record<string, {
+    rounds: CalculationTraceStep[][]
+    aggregateTrace: CalculationTraceStep[]
+  }>
   message?: string
 }
 
@@ -69,6 +83,10 @@ function canonicalParticipant(
     roundRanks: [...item.roundRanks],
     roundAwardScores: item.roundAwardScores.map(canonicalizeExactValue),
     aggregateScore: canonicalizeExactValue(item.aggregateScore),
+    ...(item.roundComparisonValues
+      ? { roundComparisonValues: item.roundComparisonValues.map(canonicalizeExactValue) }
+      : {}),
+    ...(item.roundOutcomes ? { roundOutcomes: [...item.roundOutcomes] } : {}),
   }
 }
 
@@ -128,10 +146,14 @@ export function runScoringTestCase(
   if (profile.competitionId !== testCase.competitionId) {
     return invalid(testCase, `ScoringProfile の競技がテスト ${testCase.testCaseId} と一致しません。`)
   }
+  const unsupported = unsupportedScoringProfileMessage(profile)
+  if (unsupported) return invalid(testCase, unsupported)
 
   const entryMap = new Map(entries.map((entry) => [entry.entryId, entry]))
   for (const round of testCase.rounds) {
-    for (const value of round.values) {
+    const values = round.rawValues ?? round.values
+    if (!values) return invalid(testCase, `得点テスト ${testCase.testCaseId} のラウンド入力がありません。`)
+    for (const value of values) {
       const entry = entryMap.get(value.entryId)
       if (!entry) {
         return invalid(testCase, `CompetitionEntry ${value.entryId} が存在しません。`)
@@ -148,10 +170,19 @@ export function runScoringTestCase(
       {
         rounds: testCase.rounds.map((round) => ({
           roundId: round.roundId,
-          values: round.values.map((value) => ({
-            participantId: value.entryId,
-            value: canonicalizeExactValue(value.value),
-          })),
+          ...(round.rawValues
+            ? {
+                rawValues: round.rawValues.map((value): RawParticipantValue<CompetitionEntryId> => ({
+                  participantId: value.entryId,
+                  fields: structuredClone(value.fields),
+                })),
+              }
+            : {
+                values: (round.values ?? []).map((value) => ({
+                  participantId: value.entryId,
+                  value: canonicalizeExactValue(value.value),
+                })),
+              }),
         })),
       },
       profile,
@@ -173,11 +204,20 @@ export function runScoringTestCase(
   const actual: ScoringTestExpectedParticipant[] = outputOrder.flatMap((entryId) => {
     const participant = resultByEntry.get(entryId)
     if (!participant) return []
+    const expected = testCase.expected.find((item) => item.entryId === entryId)
+    const hasComparisonValues = expected?.roundComparisonValues !== undefined
+    const hasOutcomes = expected?.roundOutcomes !== undefined
     return [{
       entryId,
       roundRanks: participant.rounds.map((round) => round.rank),
       roundAwardScores: participant.rounds.map((round) => canonicalizeExactValue(round.awardScore)),
       aggregateScore: canonicalizeExactValue(participant.aggregateScore),
+      ...(hasComparisonValues
+        ? { roundComparisonValues: participant.rounds.map((round) => canonicalizeExactValue(round.comparisonValue ?? 0)) }
+        : {}),
+      ...(hasOutcomes
+        ? { roundOutcomes: participant.rounds.map((round) => round.outcome ?? 'LOSS') }
+        : {}),
     }]
   })
 
@@ -216,6 +256,26 @@ export function runScoringTestCase(
           actual: canonicalizeExactValue(current.aggregateScore),
         })
       }
+      if (expected.roundComparisonValues !== undefined && !exactArraysEqual(
+        expected.roundComparisonValues,
+        current.roundComparisonValues ?? [],
+      )) {
+        diffs.push({
+          entryId: expected.entryId,
+          field: 'roundComparisonValues',
+          expected: expected.roundComparisonValues.map(canonicalizeExactValue),
+          actual: (current.roundComparisonValues ?? []).map(canonicalizeExactValue),
+        })
+      }
+      if (expected.roundOutcomes !== undefined &&
+        JSON.stringify(expected.roundOutcomes) !== JSON.stringify(current.roundOutcomes ?? [])) {
+        diffs.push({
+          entryId: expected.entryId,
+          field: 'roundOutcomes',
+          expected: [...expected.roundOutcomes],
+          actual: [...(current.roundOutcomes ?? [])],
+        })
+      }
     } catch (error) {
       return invalid(testCase, error instanceof Error ? error.message : '得点テスト期待値が不正です。')
     }
@@ -230,6 +290,15 @@ export function runScoringTestCase(
     status: diffs.length === 0 ? 'PASS' : 'FAIL',
     actual,
     diffs,
+    calculationTraces: Object.fromEntries(
+      scenarioResult.participants.map((participant) => [
+        participant.participantId,
+        {
+          rounds: participant.rounds.map((round) => structuredClone(round.trace)),
+          aggregateTrace: structuredClone(participant.aggregateTrace),
+        },
+      ]),
+    ),
   }
 }
 

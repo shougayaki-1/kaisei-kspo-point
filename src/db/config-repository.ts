@@ -102,17 +102,39 @@ function normalizeSnapshot(snapshot: TournamentConfigSnapshot): TournamentConfig
     for (const [rank, score] of Object.entries(profile.awardRule.rankPoints)) {
       profile.awardRule.rankPoints[Number(rank)] = normalizeDecimalValue(score)
     }
+    if (profile.scoringRule?.type === 'WEIGHTED_SUM') {
+      for (const term of profile.scoringRule.terms) {
+        term.weight = normalizeExactValue(term.weight)
+      }
+    }
+    if (profile.scoringRule?.type === 'KING_DODGEBALL') {
+      profile.scoringRule.rolePoints.king = normalizeExactValue(profile.scoringRule.rolePoints.king)
+      profile.scoringRule.rolePoints.minister = normalizeExactValue(profile.scoringRule.rolePoints.minister)
+      profile.scoringRule.rolePoints.knight = normalizeExactValue(profile.scoringRule.rolePoints.knight)
+      profile.scoringRule.winPoints = normalizeExactValue(profile.scoringRule.winPoints)
+      profile.scoringRule.drawPoints = normalizeExactValue(profile.scoringRule.drawPoints)
+      profile.scoringRule.opponentKingOutBonus = normalizeExactValue(profile.scoringRule.opponentKingOutBonus)
+    }
   }
 
   for (const testCase of normalized.scoringTestCases) {
     for (const round of testCase.rounds) {
-      for (const value of round.values) {
+      for (const value of round.values ?? []) {
         value.value = normalizeDecimalValue(value.value)
+      }
+      for (const value of round.rawValues ?? []) {
+        for (const [key, raw] of Object.entries(value.fields)) {
+          if (typeof raw !== 'number' && typeof raw !== 'string') continue
+          value.fields[key] = normalizeDecimalValue(raw)
+        }
       }
     }
     for (const expected of testCase.expected) {
       expected.roundAwardScores = expected.roundAwardScores.map(normalizeExactValue)
       expected.aggregateScore = normalizeExactValue(expected.aggregateScore)
+      if (expected.roundComparisonValues) {
+        expected.roundComparisonValues = expected.roundComparisonValues.map(normalizeExactValue)
+      }
     }
   }
 

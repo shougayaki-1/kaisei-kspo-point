@@ -1,0 +1,51 @@
+{
+  "scoringProfile": {
+    "scoringProfileId": "profile-1",
+    "competitionId": "competition-1",
+    "version": 1,
+    "rankingRule": { "direction": "LOWER_IS_BETTER" },
+    "tieRule": "AVERAGE_OCCUPIED_PLACES",
+    "awardRule": {
+      "type": "RANK_POINTS",
+      "rankPoints": { "1": 50, "2": 30, "3": 20, "4": 10 }
+    },
+    "aggregationRule": "SUM"
+  },
+  "scoringTestCase": {
+    "testCaseId": "taihu-2026",
+    "competitionId": "competition-1",
+    "name": "台風の目 2試合合計",
+    "rounds": [
+      {
+        "roundId": "race-1",
+        "label": "第1試合",
+        "values": [
+          { "entryId": "entry-1", "value": 1 },
+          { "entryId": "entry-2", "value": 2 }
+        ]
+      },
+      {
+        "roundId": "race-2",
+        "label": "第2試合",
+        "values": [
+          { "entryId": "entry-1", "value": 2 },
+          { "entryId": "entry-2", "value": 1 }
+        ]
+      }
+    ],
+    "expected": [
+      {
+        "entryId": "entry-1",
+        "roundRanks": [1, 2],
+        "roundAwardScores": [50, 30],
+        "aggregateScore": 80
+      },
+      {
+        "entryId": "entry-2",
+        "roundRanks": [2, 1],
+        "roundAwardScores": [30, 50],
+        "aggregateScore": 80
+      }
+    ]
+  }
+}

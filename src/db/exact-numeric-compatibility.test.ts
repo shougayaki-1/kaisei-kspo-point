@@ -88,7 +88,7 @@ describe('legacy decimal number compatibility', () => {
       step: '0.1',
     })
     expect(loaded?.scoringProfiles[0]?.awardRule.rankPoints).toEqual({ 1: '0.3', 2: '0.2' })
-    expect(loaded?.scoringTestCases[0]?.rounds[0]?.values[0]?.value).toBe('0.1')
+    expect(loaded?.scoringTestCases[0]?.rounds[0]?.values?.[0]?.value).toBe('0.1')
     expect(loaded?.scoringTestCases[0]?.expected[0]).toMatchObject({
       roundAwardScores: ['0.3'],
       aggregateScore: '0.3',

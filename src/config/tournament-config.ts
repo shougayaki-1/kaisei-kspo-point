@@ -184,8 +184,13 @@ function validateScoringTestCase(
   const participantIds = new Set<string>()
   for (const round of testCase.rounds) {
     checkRequiredText(issues, round.label, '得点テストのラウンド名', testCase.testCaseId)
+    const roundValues = round.rawValues ?? round.values
+    if (!roundValues) {
+      error(issues, 'EMPTY_SCORING_TEST_INPUT', '得点テストのラウンド入力がありません。', testCase.testCaseId)
+      continue
+    }
     const roundParticipants = new Set<string>()
-    for (const value of round.values) {
+    for (const value of roundValues) {
       const entry = entries.get(value.entryId)
       if (!entry || entry.competitionId !== testCase.competitionId) {
         error(
@@ -205,11 +210,20 @@ function validateScoringTestCase(
       }
       roundParticipants.add(value.entryId)
       participantIds.add(value.entryId)
-      if (!isDecimalInputValue(value.value)) {
+      if ('value' in value && !isDecimalInputValue(value.value)) {
         error(
           issues,
           'INVALID_SCORING_TEST_VALUE',
           '得点テストの入力値が不正です。小数は10進文字列で保存してください。',
+          testCase.testCaseId,
+        )
+      }
+      if ('fields' in value &&
+        (value.fields === null || typeof value.fields !== 'object' || Array.isArray(value.fields))) {
+        error(
+          issues,
+          'INVALID_SCORING_TEST_RAW_FIELDS',
+          '得点テストのRaw field mapが不正です。',
           testCase.testCaseId,
         )
       }
@@ -300,6 +314,61 @@ function validateScoringTestCase(
     ) {
       error(issues, 'INVALID_SCORING_APPROVAL_METADATA', '得点テスト承認Fingerprintが不正です。', approvalTarget)
     }
+  }
+}
+
+function validateScoringRule(
+  issues: ConfigValidationIssue[],
+  profile: ScoringProfile,
+  schemaByCompetition: Map<string, InputSchema[]>,
+): void {
+  const rule = profile.scoringRule
+  if (!rule) return
+  const schemaFields = new Set(
+    schemaByCompetition.get(profile.competitionId)?.flatMap((schema) => schema.fields.map((field) => field.key)) ?? [],
+  )
+  const field = (fieldKey: string): void => {
+    checkRequiredText(issues, fieldKey, '得点ルール入力項目', profile.scoringProfileId)
+    if (fieldKey.trim() && !schemaFields.has(fieldKey)) {
+      error(
+        issues,
+        'UNKNOWN_SCORING_RULE_FIELD',
+        `ScoringProfile ${profile.scoringProfileId} の入力項目 ${fieldKey} がInputSchemaにありません。`,
+        profile.scoringProfileId,
+      )
+    }
+  }
+  const exact = (value: unknown, label: string): void => {
+    if (!isDecimalInputValue(value)) {
+      error(issues, 'INVALID_SCORING_RULE_VALUE', `${label} は10進数で設定してください。`, profile.scoringProfileId)
+    }
+  }
+
+  switch (rule.type) {
+    case 'WEIGHTED_SUM':
+      if (rule.terms.length === 0) {
+        error(issues, 'EMPTY_SCORING_RULE_TERMS', 'WEIGHTED_SUM の項目がありません。', profile.scoringProfileId)
+      }
+      for (const term of rule.terms) {
+        field(term.fieldKey)
+        exact(term.weight, `ScoringProfile ${profile.scoringProfileId} の重み`)
+      }
+      break
+    case 'ADJUSTED_TIME':
+      field(rule.elapsedFieldKey)
+      field(rule.penaltyFieldKey)
+      break
+    case 'KING_DODGEBALL':
+      field(rule.kingOutFieldKey)
+      field(rule.ministerOutCountFieldKey)
+      field(rule.knightOutCountFieldKey)
+      exact(rule.rolePoints.king, '王様得点')
+      exact(rule.rolePoints.minister, '大臣得点')
+      exact(rule.rolePoints.knight, '騎士得点')
+      exact(rule.winPoints, '勝利ポイント')
+      exact(rule.drawPoints, '引き分けポイント')
+      exact(rule.opponentKingOutBonus, '王様外野ボーナス')
+      break
   }
 }
 
@@ -490,6 +559,15 @@ export function validateTournamentConfig(snapshot: TournamentConfigSnapshot): Co
       )
     }
 
+    validateScoringRule(
+      issues,
+      profile,
+      new Map(snapshot.inputSchemas.map((schema) => [
+        schema.competitionId,
+        snapshot.inputSchemas.filter((item) => item.competitionId === schema.competitionId),
+      ])),
+    )
+
     if (profile.aggregationRule === 'BEST_N') {
       const bestN = profile.aggregationOptions?.bestN
       if (!Number.isInteger(bestN) || (bestN ?? 0) < 1) {
@@ -503,7 +581,7 @@ export function validateTournamentConfig(snapshot: TournamentConfigSnapshot): Co
     }
 
     const rankKeys = Object.keys(profile.awardRule.rankPoints)
-    if (rankKeys.length === 0) {
+    if (rankKeys.length === 0 && profile.scoringRule?.type !== 'KING_DODGEBALL') {
       error(issues, 'EMPTY_RANK_POINTS', '順位配点を1件以上設定してください。', profile.scoringProfileId)
     }
     const normalizedRanks = new Set<number>()

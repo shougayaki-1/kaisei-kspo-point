@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { CompetitionEntryId, CompetitionId, ScoringProfileId, TeamId } from '../domain/ids'
 import type { ScoringProfile } from '../domain/scoring'
 import type { CompetitionEntry } from '../domain/tournament'
+import taihuFixture from './fixtures/2026-taihu-no-me.scoring.json'
 import {
   approveScoringTestChange,
   runScoringTestCase,
@@ -101,12 +102,109 @@ describe('runScoringTestCase', () => {
 
   it('returns INVALID when a referenced CompetitionEntry is unavailable', () => {
     const broken = testCase()
-    broken.rounds[0].values[0].entryId = 'missing-entry' as CompetitionEntryId
+    broken.rounds[0].values![0].entryId = 'missing-entry' as CompetitionEntryId
 
     const result = runScoringTestCase(broken, profile(), entries)
 
     expect(result.status).toBe('INVALID')
     expect(result.message).toContain('missing-entry')
+  })
+
+  it('runs raw field regression cases through the shared derived scorer and retains its trace', () => {
+    const rawProfile: ScoringProfile = {
+      ...profile({ 1: 10, 2: 0 }),
+      scoringRule: {
+        type: 'WEIGHTED_SUM',
+        terms: [
+          { fieldKey: 'normalRopes', weight: 1 },
+          { fieldKey: 'longRope', weight: 5 },
+        ],
+      },
+    }
+    const rawCase: ScoringTestCase = {
+      testCaseId: 'raw-test-1',
+      competitionId,
+      name: '五色綱引き raw derived',
+      rounds: [{
+        roundId: 'set-1',
+        label: '第1セット',
+        rawValues: [
+          { entryId: entries[0].entryId, fields: { normalRopes: 7, longRope: true } },
+          { entryId: entries[1].entryId, fields: { normalRopes: 5, longRope: false } },
+        ],
+      }],
+      expected: [
+        { entryId: entries[0].entryId, roundRanks: [1], roundAwardScores: [10], aggregateScore: 10, roundComparisonValues: [12] },
+        { entryId: entries[1].entryId, roundRanks: [2], roundAwardScores: [0], aggregateScore: 0, roundComparisonValues: [5] },
+      ],
+    }
+
+    const result = runScoringTestCase(rawCase, rawProfile, entries)
+
+    expect(result.status).toBe('PASS')
+    expect(result.calculationTraces?.[entries[0].entryId].rounds[0]).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: 'DERIVED', value: 12 })]),
+    )
+  })
+
+  it('covers 王様ドッジボール draw points and king-out bonus in a raw ScoringTestCase', () => {
+    const kingProfile: ScoringProfile = {
+      ...profile(),
+      awardRule: { type: 'RANK_POINTS', rankPoints: {} },
+      aggregationRule: 'WIN_POINTS',
+      scoringRule: {
+        type: 'KING_DODGEBALL',
+        kingOutFieldKey: 'kingOut',
+        ministerOutCountFieldKey: 'ministerOutCount',
+        knightOutCountFieldKey: 'knightOutCount',
+        rolePoints: { king: 5, minister: 2, knight: 1 },
+        winPoints: 2,
+        drawPoints: 1,
+        opponentKingOutBonus: 1,
+      },
+    }
+    const kingCase: ScoringTestCase = {
+      testCaseId: 'king-dodgeball-2026',
+      competitionId,
+      name: '王様ドッジボール 引き分け + 王様外野',
+      rounds: [{
+        roundId: 'match-1',
+        label: '第1試合',
+        rawValues: [
+          { entryId: entries[0].entryId, fields: { kingOut: true, ministerOutCount: 2, knightOutCount: 3 } },
+          { entryId: entries[1].entryId, fields: { kingOut: true, ministerOutCount: 2, knightOutCount: 3 } },
+        ],
+      }],
+      expected: [
+        { entryId: entries[0].entryId, roundRanks: [1], roundAwardScores: [2], aggregateScore: 2, roundComparisonValues: [12], roundOutcomes: ['DRAW'] },
+        { entryId: entries[1].entryId, roundRanks: [1], roundAwardScores: [2], aggregateScore: 2, roundComparisonValues: [12], roundOutcomes: ['DRAW'] },
+      ],
+    }
+
+    const result = runScoringTestCase(kingCase, kingProfile, entries)
+
+    expect(result.status).toBe('PASS')
+    expect(result.calculationTraces?.[entries[0].entryId].rounds[0]).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: 'WIN_POINTS', value: 2 })]),
+    )
+  })
+
+  it('fails closed when WIN_POINTS is not paired with the configured current-year rule', () => {
+    const result = runScoringTestCase(
+      testCase(),
+      { ...profile(), aggregationRule: 'WIN_POINTS' },
+      entries,
+    )
+
+    expect(result.status).toBe('INVALID')
+    expect(result.message).toMatch(/KING_DODGEBALL|production Scoring Engine/i)
+  })
+
+  it('runs a complete 台風の目 two-race rank-point case from config data', () => {
+    const taihuProfile = taihuFixture.scoringProfile as unknown as ScoringProfile
+    const taihuCase = taihuFixture.scoringTestCase as unknown as ScoringTestCase
+
+    expect(runScoringTestCase(taihuCase, taihuProfile, entries).status).toBe('PASS')
   })
 })
 
