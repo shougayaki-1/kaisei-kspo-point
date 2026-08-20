@@ -3,6 +3,7 @@ import type { TournamentId } from '../domain/ids'
 import { getOrCreateDeviceId } from '../device/device-service'
 import { ConfigRepository } from '../db/config-repository'
 import { createDatabase } from '../db/database'
+import { resetAllPersistentData } from '../db/data-reset'
 import { APP_VERSION } from '../pwa/app-version'
 import {
   UNSUPPORTED_PWA_SNAPSHOT,
@@ -15,6 +16,7 @@ import { CourtScoringSession } from './CourtScoringSession'
 import { createCourtResultService } from './court-result-service'
 import { CourtTransferHistory } from './CourtTransferHistory'
 import { createCourtTransferHistoryServices } from './court-transfer-history-service'
+import { DataManagementPanel } from './DataManagementPanel'
 import { DeviceDiagnostics } from './DeviceDiagnostics'
 import { HostScoringDashboard } from './HostScoringDashboard'
 import { createHostScoringService } from './host-scoring-service'
@@ -31,6 +33,7 @@ export interface AppProps {
   configRepository?: AppConfigRepository
   operatorName?: string
   pwaRuntime?: PwaRuntime
+  resetPersistentData?: () => Promise<void> | void
 }
 
 const RELOAD_CONFIRMATION = 'アプリを再読み込みします。保存済みの大会データは削除されません。続行しますか？'
@@ -41,6 +44,7 @@ export function App({
   configRepository,
   operatorName = '本部担当',
   pwaRuntime,
+  resetPersistentData,
 }: AppProps = {}) {
   const [mode, setMode] = useState<AppMode>(null)
   const [hostTab, setHostTab] = useState<HostTab>('CONFIG')
@@ -108,6 +112,16 @@ export function App({
 
   const handleReload = () => { if (confirmReload(RELOAD_CONFIRMATION)) reload() }
   const handleActivateUpdate = () => { if (pwaRuntime) void pwaRuntime.activateUpdate() }
+  const handleResetPersistentData = async () => {
+    if (resetPersistentData) {
+      await resetPersistentData()
+    } else {
+      await resetAllPersistentData(appDatabase)
+    }
+    setActiveTournamentId(undefined)
+    setKnownConfigVersion(null)
+    setKnownConfigVersionId(null)
+  }
   const returnToModeSelection = () => { setMode(null); setHostTab('CONFIG') }
 
   let content: ReactNode
@@ -163,6 +177,7 @@ export function App({
       pwa={pwaSnapshot}
       onActivateUpdate={pwaRuntime ? handleActivateUpdate : undefined}
     />
+    <DataManagementPanel onReset={handleResetPersistentData} />
     <footer className="status-bar" aria-label="端末状態">
       <span>App {APP_VERSION}</span>
       <span>{knownConfigVersion === null ? 'Config -' : `Config v${knownConfigVersion}`}</span>
