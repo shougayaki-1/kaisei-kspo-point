@@ -1,7 +1,6 @@
-import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { BatchId, DeviceId, RevisionId } from '../domain/ids'
-import type { ResultRevision } from '../domain/result'
+import type { RawResultData, ResultRevision } from '../domain/result'
 import { createCourtResultService } from '../app/court-result-service'
 import { createCourtTransferHistoryServices } from '../app/court-transfer-history-service'
 import { createHostScoringService } from '../app/host-scoring-service'
@@ -12,6 +11,11 @@ import { TransferRepository } from '../db/transfer-repository'
 import { createTransferBatch, encodeBatchFragments } from '../transfer/codec'
 import { backupTestIds, seedBackupConfig } from '../backup/test-helpers'
 import { buildReleaseIdentifier } from '../release/release-identifier'
+import resultSource from '../domain/result.ts?raw'
+import tournamentSource from '../domain/tournament.ts?raw'
+import configSource from '../config/tournament-config.ts?raw'
+import schemaSource from '../db/schema.ts?raw'
+import runbook from '../../docs/event-day-operations.md?raw'
 
 const opened: AppDatabase[] = []
 const names = new Set<string>()
@@ -36,7 +40,7 @@ function branchFrom(
   red: string,
   blue: string,
 ): ResultRevision {
-  const rawData = structuredClone(parent.rawData) as {
+  const rawData = structuredClone(parent.rawData) as unknown as {
     entries: Record<string, Record<string, unknown>>
   }
   rawData.entries[backupTestIds.entryA]!.score = red
@@ -46,7 +50,7 @@ function branchFrom(
     revisionId: revisionId as RevisionId,
     revisionNumber: parent.revisionNumber + 1,
     parentRevisionIds: [parent.revisionId],
-    rawData,
+    rawData: rawData as RawResultData,
     createdAt: `2026-08-20T04:${revisionId === 'branch-left' ? '20' : '21'}:00.000Z`,
   }
 }
@@ -85,7 +89,7 @@ describe('event-day automated rehearsal', () => {
         [backupTestIds.entryB]: { score: '1' },
       },
     })
-    const history = await courtService.getHistory(created.result.resultId)
+    const history = await courtService.getResultHistory(created.result.resultId)
     expect(history.revisions.map((item) => item.revisionId)).toEqual([
       created.revision.revisionId,
       corrected.revision.revisionId,
@@ -182,12 +186,7 @@ describe('event-day automated rehearsal', () => {
       backupFormatVersion: 1,
     })
 
-    const productionSchemaText = [
-      '../domain/result.ts',
-      '../domain/tournament.ts',
-      '../config/tournament-config.ts',
-      '../db/schema.ts',
-    ].map((relative) => readFileSync(new URL(relative, import.meta.url), 'utf8')).join('\n')
+    const productionSchemaText = [resultSource, tournamentSource, configSource, schemaSource].join('\n')
     for (const forbidden of [
       /playerName/i,
       /birthdate/i,
@@ -201,7 +200,6 @@ describe('event-day automated rehearsal', () => {
   })
 
   it('keeps an executable operator runbook with preflight, role, recovery and manual physical gates', () => {
-    const runbook = readFileSync(new URL('../../docs/event-day-operations.md', import.meta.url), 'utf8')
     for (const heading of [
       'Preflight', 'Court', 'Host', 'Display', 'Config update', 'Recovery', 'Failure handling',
       'Manual physical rehearsal', 'Coverage matrix', 'Release identifier',
