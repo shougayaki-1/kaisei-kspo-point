@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { ConfigRepository } from '../db/config-repository'
-import type { PwaRuntime } from '../pwa/runtime'
+import type { PwaRuntime, PwaRuntimeSnapshot } from '../pwa/runtime'
 import { App } from './App'
 
 function configRepository(): Pick<ConfigRepository, 'loadCurrent' | 'apply'> {
@@ -27,7 +27,7 @@ function configRepository(): Pick<ConfigRepository, 'loadCurrent' | 'apply'> {
 function waitingPwaRuntime(): PwaRuntime {
   return {
     start: vi.fn(),
-    getSnapshot: vi.fn(() => ({
+    getSnapshot: vi.fn((): PwaRuntimeSnapshot => ({
       serviceWorkerStatus: 'UPDATE_WAITING',
       offlineReady: true,
       updateAvailable: true,
