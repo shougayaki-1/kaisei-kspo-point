@@ -2,12 +2,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { createId, type BatchId, type DeviceId, type RevisionId } from '../domain/ids'
 import type { ResultRevision } from '../domain/result'
 import { createDatabase } from '../db/database'
-import { ResultRepository } from '../db/result-repository'
 import { TransferRepository } from '../db/transfer-repository'
 import { applyAck, decodeAck, encodeAck, markBatchSentManually } from '../transfer/ack'
 import { createTransferBatch, decodeQrFragment, encodeBatchFragments } from '../transfer/codec'
-import { importTransferBatch } from '../transfer/import-service'
 import type { TransferProgress } from '../transfer/receiver'
+import { processCompletedHostBatch } from './host-transfer-import-service'
 
 export type TransferDemoMode = 'HOST' | 'COURT'
 
@@ -37,7 +36,6 @@ export interface TransferDemoServices {
 function createBrowserTransferServices(deviceId: DeviceId): TransferDemoServices {
   const db = createDatabase()
   const transferRepository = new TransferRepository(db)
-  const resultRepository = new ResultRepository(db)
 
   async function requireTournament() {
     const tournament = await db.tournaments.toCollection().first()
@@ -172,13 +170,9 @@ function createBrowserTransferServices(deviceId: DeviceId): TransferDemoServices
     },
 
     async processHostBatch(batchId) {
-      const tournament = await requireTournament()
-      const receiver = await transferRepository.restoreReceiver(tournament.tournamentId)
-      const batch = await receiver.getCompletedBatch(batchId)
-      const { ack } = await importTransferBatch(batch, {
-        repository: resultRepository,
+      const ack = await processCompletedHostBatch(db, {
+        batchId,
         hostDeviceId: deviceId,
-        currentConfigVersion: tournament.currentConfigVersion,
         now: new Date().toISOString(),
       })
       return encodeAck(ack)
