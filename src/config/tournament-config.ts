@@ -68,6 +68,16 @@ function checkDuplicateIds<T>(
   }
 }
 
+function checkRequiredId(
+  issues: ConfigValidationIssue[],
+  value: unknown,
+  label: string,
+): void {
+  if (typeof value !== 'string' || !value.trim()) {
+    error(issues, 'MISSING_ID', `${label} IDを入力してください。`)
+  }
+}
+
 function checkRequiredText(
   issues: ConfigValidationIssue[],
   value: string,
@@ -244,6 +254,8 @@ export function validateTournamentConfig(snapshot: TournamentConfigSnapshot): Co
   const issues: ConfigValidationIssue[] = []
   const tournamentId = snapshot.tournament.tournamentId
 
+  checkRequiredId(issues, tournamentId, '大会')
+
   checkRequiredText(issues, snapshot.tournament.name, '大会名', String(tournamentId))
   if (
     !Number.isInteger(snapshot.tournament.currentConfigVersion) ||
@@ -261,6 +273,16 @@ export function validateTournamentConfig(snapshot: TournamentConfigSnapshot): Co
   checkDuplicateIds(issues, snapshot.inputSchemas, (item) => item.inputSchemaId)
   checkDuplicateIds(issues, snapshot.scoringProfiles, (item) => item.scoringProfileId)
   checkDuplicateIds(issues, snapshot.scoringTestCases, (item) => item.testCaseId)
+
+  for (const team of snapshot.teams) checkRequiredId(issues, team.teamId, 'Team')
+  for (const competition of snapshot.competitions) checkRequiredId(issues, competition.competitionId, 'Competition')
+  for (const entry of snapshot.competitionEntries) checkRequiredId(issues, entry.entryId, 'CompetitionEntry')
+  for (const slot of snapshot.scheduleSlots) checkRequiredId(issues, slot.slotId, 'ScheduleSlot')
+  for (const run of snapshot.courtRuns) checkRequiredId(issues, run.courtRunId, 'CourtRun')
+  for (const session of snapshot.scoringSessions) checkRequiredId(issues, session.scoringSessionId, 'ScoringSession')
+  for (const schema of snapshot.inputSchemas) checkRequiredId(issues, schema.inputSchemaId, 'InputSchema')
+  for (const profile of snapshot.scoringProfiles) checkRequiredId(issues, profile.scoringProfileId, 'ScoringProfile')
+  for (const testCase of snapshot.scoringTestCases) checkRequiredId(issues, testCase.testCaseId, 'ScoringTestCase')
 
   const teams = new Map(snapshot.teams.map((item) => [item.teamId, item]))
   const competitions = new Map(snapshot.competitions.map((item) => [item.competitionId, item]))

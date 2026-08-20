@@ -86,6 +86,20 @@ describe('tournament config file', () => {
     expect(() => parseTournamentConfigFile(jsonFor(unsupported))).toThrow(/UNSUPPORTED_AGGREGATION_RULE/)
   })
 
+  it('rejects a missing entity ID instead of treating an empty ID as valid', () => {
+    const missingTeamId = record()
+    missingTeamId.snapshot.teams[0]!.teamId = '' as never
+
+    expect(() => parseTournamentConfigFile(jsonFor(missingTeamId))).toThrow(/MISSING_ID/)
+  })
+
+  it('rejects a ScoringSession that references a missing ScheduleSlot', () => {
+    const missingSlot = record()
+    missingSlot.snapshot.scoringSessions[0]!.slotId = 'missing-slot' as never
+
+    expect(() => parseTournamentConfigFile(jsonFor(missingSlot))).toThrow(/UNKNOWN_SESSION_SLOT/)
+  })
+
   it('imports without activating and preserves the file ConfigVersion identity', async () => {
     const imported = record()
     const repository = {
