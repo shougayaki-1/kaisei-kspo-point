@@ -43,3 +43,14 @@ export function buildReleaseIdentifier(input: ReleaseIdentifierInput): ReleaseId
   }
   return buildReleaseIdentifierFromSha(BUILD_RELEASE_SHA, input)
 }
+
+export function tryBuildReleaseIdentifier(
+  activeConfigVersionId: string | null,
+): { identifier?: ReleaseIdentifier; error?: string } {
+  if (!activeConfigVersionId) return {}
+  try {
+    return { identifier: buildReleaseIdentifier({ activeConfigVersionId }) }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'release identifier is unavailable' }
+  }
+}

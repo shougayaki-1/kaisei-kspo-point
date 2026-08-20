@@ -87,7 +87,17 @@ function snapshotFor(prefix: string, name = `${prefix}大会`): TournamentConfig
       awardRule: { type: 'RANK_POINTS', rankPoints: { 1: 30, 2: 20, 3: 10, 4: 0 } },
       aggregationRule: 'SUM',
     }],
-    scoringTestCases: [],
+    scoringTestCases: [{
+      testCaseId: `${prefix}-test-1`,
+      competitionId,
+      name: '通常順位',
+      rounds: [{
+        roundId: `${prefix}-round-1`,
+        label: '第1展開',
+        values: [{ entryId, value: 1 }],
+      }],
+      expected: [{ entryId, roundRanks: [1], roundAwardScores: [30], aggregateScore: 30 }],
+    }],
   }
 }
 
@@ -237,5 +247,35 @@ describe('Config Update service', () => {
     expect((await repository.getActiveVersion(alpha.snapshot.tournament.tournamentId))?.configVersionId)
       .toBe((await repository.listVersions(alpha.snapshot.tournament.tournamentId))[0]?.configVersionId)
     expect(await hostDb.tournaments.toArray()).toEqual([alpha.snapshot.tournament])
+  })
+
+  it('rejects mixed imported tournaments when Host has not been initialized', async () => {
+    const courtDb = db(`config-court-mixed-imports-${crypto.randomUUID()}`)
+    const repository = new ConfigRepository(courtDb)
+    const alpha = snapshotFor('alpha')
+    const beta = snapshotFor('beta')
+
+    await repository.importVersion({
+      configVersionId: 'alpha-imported-v1',
+      tournamentId: alpha.tournament.tournamentId,
+      version: 1,
+      createdAt: '2026-08-19T11:00:00+09:00',
+      operator: '外部本部',
+      changeClass: 'SCORING',
+      snapshot: { ...alpha, tournament: { ...alpha.tournament, currentConfigVersion: 1 } },
+    })
+    await repository.importVersion({
+      configVersionId: 'beta-imported-v1',
+      tournamentId: beta.tournament.tournamentId,
+      version: 1,
+      createdAt: '2026-08-19T11:05:00+09:00',
+      operator: '外部本部',
+      changeClass: 'SCORING',
+      snapshot: { ...beta, tournament: { ...beta.tournament, currentConfigVersion: 1 } },
+    })
+
+    const service = createConfigUpdateService(courtDb)
+    await expect(service.activate('beta-imported-v1')).rejects.toThrow(/multiple tournaments|integrity/i)
+    expect(await courtDb.tournaments.count()).toBe(0)
   })
 })

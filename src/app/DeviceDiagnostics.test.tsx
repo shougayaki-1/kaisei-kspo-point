@@ -25,6 +25,7 @@ describe('DeviceDiagnostics', () => {
     expect(within(diagnostics).getByText('0.1.0')).toBeInTheDocument()
     expect(within(diagnostics).getByText('Build release SHA')).toBeInTheDocument()
     expect(within(diagnostics).getByText('0123456789abcdef0123456789abcdef01234567')).toBeInTheDocument()
+    expect(within(diagnostics).getByText('検証済み')).toBeInTheDocument()
     expect(within(diagnostics).getByText('Active ConfigVersion')).toBeInTheDocument()
     expect(within(diagnostics).getByText('cfg-active-001')).toBeInTheDocument()
     expect(within(diagnostics).getByText('IndexedDB / Storage')).toBeInTheDocument()

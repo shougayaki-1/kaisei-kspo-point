@@ -3,6 +3,7 @@ import type { PwaRuntimeSnapshot } from '../pwa/runtime'
 export interface DeviceDiagnosticsProps {
   appVersion: string
   releaseSha?: string
+  releaseGateError?: string
   activeConfigVersionId: string | null
   storageAvailable: boolean
   pwa: PwaRuntimeSnapshot
@@ -12,6 +13,7 @@ export interface DeviceDiagnosticsProps {
 export function DeviceDiagnostics({
   appVersion,
   releaseSha = '',
+  releaseGateError,
   activeConfigVersionId,
   storageAvailable,
   pwa,
@@ -23,6 +25,7 @@ export function DeviceDiagnostics({
       <dl>
         <div><dt>App Version</dt><dd>{appVersion}</dd></div>
         <div><dt>Build release SHA</dt><dd>{releaseSha || '未埋め込み'}</dd></div>
+        <div><dt>Release gate</dt><dd>{releaseGateError ? `BLOCKED: ${releaseGateError}` : activeConfigVersionId ? (releaseSha ? '検証済み' : 'BLOCKED: release SHAなし') : 'ConfigVersion待ち'}</dd></div>
         <div><dt>Active ConfigVersion</dt><dd>{activeConfigVersionId ?? '-'}</dd></div>
         <div><dt>IndexedDB / Storage</dt><dd>{storageAvailable ? '利用可能' : '利用不可'}</dd></div>
         <div><dt>Service Worker</dt><dd>{pwa.serviceWorkerStatus}</dd></div>

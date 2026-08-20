@@ -89,7 +89,22 @@ function snapshotFor(prefix: string, name = `${prefix}大会`): TournamentConfig
         aggregationRule: 'SUM',
       },
     ],
-    scoringTestCases: [],
+    scoringTestCases: [{
+      testCaseId: `${prefix}-test-1`,
+      competitionId,
+      name: '通常順位',
+      rounds: [{
+        roundId: `${prefix}-round-1`,
+        label: '第1展開',
+        values: [{ entryId, value: 1 }],
+      }],
+      expected: [{
+        entryId,
+        roundRanks: [1],
+        roundAwardScores: [30],
+        aggregateScore: 30,
+      }],
+    }],
   }
 }
 
@@ -114,6 +129,16 @@ afterEach(async () => {
 })
 
 describe('ConfigRepository', () => {
+  it('rejects activation when a scoring profile has no saved regression test', async () => {
+    const db = makeDb()
+    const repository = new ConfigRepository(db)
+    const draft = snapshotFor('missing-test')
+    draft.scoringTestCases = []
+
+    await expect(repository.apply(draft, metadata())).rejects.toThrow(/回帰テスト|regression/i)
+    expect(await db.configVersions.count()).toBe(0)
+  })
+
   it('creates immutable Config v1 on first apply', async () => {
     const db = makeDb()
     const repository = new ConfigRepository(db)

@@ -3,6 +3,7 @@ import {
   BUILD_RELEASE_SHA,
   buildReleaseIdentifier,
   buildReleaseIdentifierFromSha,
+  tryBuildReleaseIdentifier,
 } from './release-identifier'
 
 const validSha = '0123456789abcdef0123456789abcdef01234567'
@@ -25,6 +26,17 @@ describe('release identifier', () => {
     } else {
       expect(() => buildReleaseIdentifier({ activeConfigVersionId: 'config-approved' }))
         .toThrow(/embedded|VITE_RELEASE_SHA|release SHA/i)
+    }
+  })
+
+  it('exposes a blocked release gate when an active config cannot be bound to the build artifact', () => {
+    const gate = tryBuildReleaseIdentifier('config-approved')
+    if (BUILD_RELEASE_SHA) {
+      expect(gate.identifier?.releaseSha).toBe(BUILD_RELEASE_SHA)
+      expect(gate.error).toBeUndefined()
+    } else {
+      expect(gate.identifier).toBeUndefined()
+      expect(gate.error).toMatch(/embedded|VITE_RELEASE_SHA|release SHA/i)
     }
   })
 })

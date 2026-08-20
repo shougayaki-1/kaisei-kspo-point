@@ -214,6 +214,16 @@ describe('tournament config file', () => {
     expect(repository.activateVersionForHost).not.toHaveBeenCalled()
   })
 
+  it('rejects malformed approval metadata before importing a production config file', () => {
+    const malformed = record()
+    malformed.snapshot.scoringTestCases[0]!.lastApprovedChange = {
+      operator: '',
+      approvedAt: 'not-a-timestamp',
+    }
+
+    expect(() => parseTournamentConfigFile(jsonFor(malformed))).toThrow(/approval|承認/i)
+  })
+
   it('accepts an intentionally changed imported expectation only with matching approval provenance', async () => {
     const active = record()
     const imported = structuredClone(active)

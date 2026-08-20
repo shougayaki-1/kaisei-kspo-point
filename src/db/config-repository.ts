@@ -20,7 +20,7 @@ import {
 import type { TournamentConfigSnapshot } from '../config/tournament-config'
 import { validateTournamentConfig } from '../config/tournament-config'
 import type { AppDatabase } from './database'
-import type { ConfigChangeClass, ConfigVersionRecord } from './schema'
+import type { AuditEventRecord, ConfigChangeClass, ConfigVersionRecord } from './schema'
 import type { Tournament } from '../domain/tournament'
 
 export interface ScoringTestApproval {
@@ -44,7 +44,8 @@ export interface AppliedConfigVersion {
 
 export class ScoringRegressionError extends Error {
   constructor(public readonly results: ScoringTestRunResult[]) {
-    super('scoring regression approval required')
+    const detail = results.map((result) => result.message).filter(Boolean).join('; ')
+    super(detail ? `scoring regression approval required: ${detail}` : 'scoring regression approval required')
     this.name = 'ScoringRegressionError'
   }
 }
@@ -121,6 +122,34 @@ function validateSnapshot(snapshot: TournamentConfigSnapshot): TournamentConfigS
     )
   }
   return normalized
+}
+
+function invalidRegressionResult(testCaseId: string, message: string): ScoringTestRunResult {
+  return {
+    testCaseId,
+    status: 'INVALID',
+    actual: [],
+    diffs: [],
+    message,
+  }
+}
+
+function missingRegressionResults(snapshot: TournamentConfigSnapshot): ScoringTestRunResult[] {
+  const casesByCompetition = new Set(snapshot.scoringTestCases.map((testCase) => testCase.competitionId))
+  return snapshot.scoringProfiles
+    .filter((profile) => !casesByCompetition.has(profile.competitionId))
+    .map((profile) => invalidRegressionResult(
+      profile.scoringProfileId,
+      `ScoringProfile ${profile.scoringProfileId} に保存済みの回帰テストがありません。`,
+    ))
+}
+
+function validApprovalTimestamp(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0 && !Number.isNaN(Date.parse(value))
+}
+
+function validApprovalMetadata(approval: ScoringTestApproval): boolean {
+  return typeof approval.operator === 'string' && approval.operator.trim().length > 0 && validApprovalTimestamp(approval.approvedAt)
 }
 
 export class ConfigRepository {
@@ -258,9 +287,22 @@ export class ConfigRepository {
     }
     snapshot.tournament.currentConfigVersion = record.version
 
-    const tables = this.normalizedConfigTables()
+    const tables = [...this.normalizedConfigTables(), this.db.auditEvents]
     return this.db.transaction('rw', tables, async () => {
       await this.replaceNormalizedRows(snapshot)
+      const auditEvent: AuditEventRecord = {
+        eventId: createId<string>(),
+        type: 'CONFIG_UPDATED',
+        timestamp: record.createdAt,
+        targetId: record.configVersionId,
+        metadata: {
+          action: 'EXPLICIT_ACTIVATION',
+          operator: record.operator,
+          version: record.version,
+          tournamentId: record.tournamentId,
+        },
+      }
+      await this.db.auditEvents.add(auditEvent)
       return { version: record.version, snapshot: clone(snapshot) }
     })
   }
@@ -271,6 +313,12 @@ export class ConfigRepository {
     const hostTournament = await this.getHostTournament()
     if (hostTournament && hostTournament.tournamentId !== record.tournamentId) {
       throw new Error('ConfigVersion tournament mismatch; version is not compatible with the active Host tournament')
+    }
+    if (!hostTournament) {
+      const tournamentIds = new Set((await this.db.configVersions.toArray()).map((item) => item.tournamentId))
+      if ([...tournamentIds].some((tournamentId) => tournamentId !== record.tournamentId)) {
+        throw new Error('Host tournament integrity error: imported ConfigVersions belong to multiple tournaments')
+      }
     }
     return this.activateVersion(configVersionId, (hostTournament?.tournamentId ?? record.tournamentId) as TournamentId)
   }
@@ -285,6 +333,15 @@ export class ConfigRepository {
 
     if (active) {
       const activeTestCases = new Map(active.snapshot.scoringTestCases.map((testCase) => [testCase.testCaseId, testCase]))
+      const removedTestCases = active.snapshot.scoringTestCases.filter(
+        (testCase) => !normalizedInput.scoringTestCases.some((candidate) => candidate.testCaseId === testCase.testCaseId),
+      )
+      if (removedTestCases.length > 0) {
+        throw new ScoringRegressionError(removedTestCases.map((testCase) => invalidRegressionResult(
+          testCase.testCaseId,
+          `有効中のScoringTestCase ${testCase.testCaseId} は承認なしに削除できません。`,
+        )))
+      }
       const manuallyChangedExpectations = normalizedInput.scoringTestCases.filter((testCase) => {
         const previous = activeTestCases.get(testCase.testCaseId)
         return previous && stableConfigStringify(previous.expected) !== stableConfigStringify(testCase.expected)
@@ -300,7 +357,10 @@ export class ConfigRepository {
       }
     }
 
-    const regressionResults = await this.previewRegression(normalizedInput)
+    const regressionResults = [
+      ...missingRegressionResults(normalizedInput),
+      ...(await this.previewRegression(normalizedInput)),
+    ]
     const invalidResults = regressionResults.filter((result) => result.status === 'INVALID')
     if (invalidResults.length > 0) {
       throw new ScoringRegressionError(regressionResults)
@@ -310,6 +370,15 @@ export class ConfigRepository {
     const approvals = new Map(
       (metadata.scoringTestApprovals ?? []).map((approval) => [approval.testCaseId, approval]),
     )
+    const malformedApprovals = (metadata.scoringTestApprovals ?? []).filter(
+      (approval) => !validApprovalMetadata(approval),
+    )
+    if (malformedApprovals.length > 0) {
+      throw new ScoringRegressionError(malformedApprovals.map((approval) => invalidRegressionResult(
+        approval.testCaseId,
+        '得点テスト承認には担当者名と有効な承認日時が必要です。',
+      )))
+    }
     if (failedResults.some((result) => {
       const approval = approvals.get(result.testCaseId)
       return !approval || approval.actualFingerprint !== scoringTestResultFingerprint(result)
@@ -347,7 +416,7 @@ export class ConfigRepository {
       )
     }
 
-    const tables = [...this.normalizedConfigTables(), this.db.configVersions]
+    const tables = [...this.normalizedConfigTables(), this.db.configVersions, this.db.auditEvents]
 
     return this.db.transaction('rw', tables, async () => {
       const existingVersions = await this.db.configVersions
@@ -370,6 +439,39 @@ export class ConfigRepository {
         snapshot: clone(appliedSnapshot),
       }
       await this.db.configVersions.add(versionRecord)
+
+      await this.db.auditEvents.add({
+        eventId: createId<string>(),
+        type: 'CONFIG_UPDATED',
+        timestamp: metadata.createdAt,
+        targetId: versionRecord.configVersionId,
+        metadata: {
+          action: 'APPLY',
+          operator: metadata.operator,
+          changeClass: metadata.changeClass,
+          version: nextVersion,
+          previousConfigVersionId: active?.configVersionId,
+        },
+      } satisfies AuditEventRecord)
+      for (const result of failedResults) {
+        const approval = approvals.get(result.testCaseId)
+        if (!approval) continue
+        await this.db.auditEvents.add({
+          eventId: createId<string>(),
+          type: 'SCORING_TEST_APPROVED',
+          timestamp: approval.approvedAt,
+          targetId: result.testCaseId,
+          metadata: {
+            operator: approval.operator,
+            sourceConfigVersionId: active?.configVersionId,
+            configVersionId: versionRecord.configVersionId,
+            actualFingerprint: approval.actualFingerprint,
+            approvalFingerprint: appliedSnapshot.scoringTestCases.find(
+              (testCase) => testCase.testCaseId === result.testCaseId,
+            )?.lastApprovedChange?.approvalFingerprint,
+          },
+        } satisfies AuditEventRecord)
+      }
 
       return { version: nextVersion, snapshot: clone(appliedSnapshot) }
     })

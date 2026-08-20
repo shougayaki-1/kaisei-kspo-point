@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ConfigRepository } from '../db/config-repository'
 import type { PwaRuntime, PwaRuntimeSnapshot } from '../pwa/runtime'
 import { App } from './App'
+import type { ConfigVersionRecord } from '../db/schema'
 
 function configRepository(): Pick<ConfigRepository, 'loadCurrent' | 'apply'> {
   let version = 0
@@ -21,6 +22,26 @@ function configRepository(): Pick<ConfigRepository, 'loadCurrent' | 'apply'> {
         },
       }
     }),
+  }
+}
+
+function configRepositoryWithActiveVersion(): Pick<ConfigRepository, 'loadCurrent' | 'apply' | 'getActiveVersion'> {
+  const repository = configRepository()
+  return {
+    ...repository,
+    getActiveVersion: vi.fn(async (): Promise<ConfigVersionRecord> => ({
+      configVersionId: 'cfg-active-001',
+      tournamentId: 'tournament-1' as never,
+      version: 1,
+      createdAt: '2026-08-20T00:00:00.000Z',
+      operator: 'Host',
+      changeClass: 'SCORING',
+      snapshot: {
+        tournament: { tournamentId: 'tournament-1' as never, name: '大会', currentConfigVersion: 1 },
+        teams: [], competitions: [], competitionEntries: [], scheduleSlots: [], courtRuns: [],
+        scoringSessions: [], inputSchemas: [], scoringProfiles: [], scoringTestCases: [],
+      },
+    })),
   }
 }
 
@@ -100,6 +121,16 @@ describe('App', () => {
 
     const statusBar = screen.getByLabelText('端末状態')
     expect(await within(statusBar).findByText('Config v1')).toBeInTheDocument()
+  })
+
+  it('blocks event operations when an active ConfigVersion has no embedded release SHA', async () => {
+    render(<App configRepository={configRepositoryWithActiveVersion()} />)
+    fireEvent.click(screen.getByRole('button', { name: '本部モード' }))
+    fireEvent.change(screen.getByLabelText('新規大会名'), { target: { value: '開成運動交流祭' } })
+    fireEvent.click(screen.getByRole('button', { name: '新しい大会を作成' }))
+    fireEvent.click(screen.getByRole('button', { name: '設定を適用' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/release SHA|埋め込まれた/i)
   })
 
   it('reloads only after confirmation', () => {

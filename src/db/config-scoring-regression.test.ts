@@ -161,6 +161,42 @@ describe('ConfigRepository scoring regression gate', () => {
     }))
     const versions = await repository.listVersions(first.tournament.tournamentId)
     expect(versions[0].snapshot.scoringTestCases[0].expected[0].aggregateScore).toBe(30)
+    expect(await db.auditEvents.where('type').equals('SCORING_TEST_APPROVED').count()).toBe(1)
+  })
+
+  it('rejects malformed approval metadata instead of persisting an untraceable change', async () => {
+    const db = makeDb()
+    const repository = new ConfigRepository(db)
+    const first = snapshot()
+    await repository.apply(first, metadata())
+
+    const changed = structuredClone(first)
+    changed.scoringProfiles[0].awardRule.rankPoints = { 1: 50, 2: 30 }
+    const preview = await repository.previewRegression(changed)
+
+    await expect(repository.apply(changed, {
+      ...metadata('2026-08-19T13:25:00+09:00'),
+      scoringTestApprovals: [{
+        testCaseId: 'test-1',
+        actualFingerprint: resultFingerprint(preview[0]),
+        operator: '',
+        approvedAt: 'not-a-timestamp',
+      }],
+    })).rejects.toBeInstanceOf(ScoringRegressionError)
+    expect(await repository.listVersions(first.tournament.tournamentId)).toHaveLength(1)
+  })
+
+  it('rejects removal of an active regression test case', async () => {
+    const db = makeDb()
+    const repository = new ConfigRepository(db)
+    const first = snapshot()
+    await repository.apply(first, metadata())
+
+    const removed = structuredClone(first)
+    removed.scoringTestCases = []
+    await expect(repository.apply(removed, metadata('2026-08-19T13:27:00+09:00')))
+      .rejects.toBeInstanceOf(ScoringRegressionError)
+    expect(await repository.listVersions(first.tournament.tournamentId)).toHaveLength(1)
   })
 
   it('does not allow partial approval when multiple saved tests fail', async () => {

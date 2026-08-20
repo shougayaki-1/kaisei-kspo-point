@@ -44,7 +44,16 @@ function snapshot(): TournamentConfigSnapshot { return {
     { key: 'verified', label: '確認', type: 'BOOLEAN', required: true },
   ] }],
   scoringProfiles: [{ scoringProfileId: 'profile-1' as ScoringProfileId, competitionId: ids.competition, version: 1, rankingRule: { direction: 'HIGHER_IS_BETTER' }, tieRule: 'AVERAGE_OCCUPIED_PLACES', awardRule: { type: 'RANK_POINTS', rankPoints: { 1: 10, 2: 5 } }, aggregationRule: 'SUM' }],
-  scoringTestCases: [],
+  scoringTestCases: [{
+    testCaseId: 'test-1',
+    competitionId: ids.competition,
+    name: '通常順位',
+    rounds: [{ roundId: 'test-round-1', label: '第1展開', values: [{ entryId: ids.entryA, value: 2 }, { entryId: ids.entryB, value: 1 }] }],
+    expected: [
+      { entryId: ids.entryA, roundRanks: [1], roundAwardScores: [10], aggregateScore: 10 },
+      { entryId: ids.entryB, roundRanks: [2], roundAwardScores: [5], aggregateScore: 5 },
+    ],
+  }],
 } }
 async function seed(db: AppDatabase) { return new ConfigRepository(db).apply(snapshot(), { operator: '本部', createdAt: '2026-08-19T09:00:00+09:00', changeClass: 'INPUT_SCHEMA' }) }
 interface ExpectedCourtResultService {

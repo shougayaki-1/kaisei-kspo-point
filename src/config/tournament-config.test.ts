@@ -182,4 +182,16 @@ describe('validateTournamentConfig', () => {
 
     expect(errorCodes(snapshot)).toContain('PLAYER_PII_FIELD')
   })
+
+  it('rejects a Japanese player-identifying label even when its key is generic', () => {
+    const snapshot = validSnapshot()
+    snapshot.inputSchemas[0].fields[0] = {
+      key: 'name',
+      label: '選手名',
+      type: 'NUMBER',
+      required: true,
+    }
+
+    expect(errorCodes(snapshot)).toContain('PLAYER_PII_FIELD')
+  })
 })

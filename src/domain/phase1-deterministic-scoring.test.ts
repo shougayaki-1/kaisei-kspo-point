@@ -195,7 +195,20 @@ describe('Phase 1 deterministic scoring RED', () => {
         }],
       }],
       scoringProfiles: [exactProfile({ 1: '0.30', 2: '0.20' })],
-      scoringTestCases: [],
+      scoringTestCases: [{
+        testCaseId: 'persisted-config-test',
+        competitionId,
+        name: 'persisted config',
+        rounds: [{
+          roundId: 'persisted-round-1',
+          label: 'persisted round',
+          values: [{ entryId: entryOne, value: '0.1' }, { entryId: entryTwo, value: '0.2' }],
+        }],
+        expected: [
+          { entryId: entryOne, roundRanks: [2], roundAwardScores: ['0.2'], aggregateScore: '0.2' },
+          { entryId: entryTwo, roundRanks: [1], roundAwardScores: ['0.3'], aggregateScore: '0.3' },
+        ],
+      }],
     } as unknown as TournamentConfigSnapshot
 
     await repository.apply(snapshot, {

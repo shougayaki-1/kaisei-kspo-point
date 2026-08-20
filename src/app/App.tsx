@@ -7,7 +7,7 @@ import { resetAllPersistentData } from '../db/data-reset'
 import { createHostBackup } from '../backup/backup-service'
 import { prepareHostRestore, restorePreparedHostBackup } from '../backup/restore-service'
 import { APP_VERSION } from '../pwa/app-version'
-import { BUILD_RELEASE_SHA } from '../release/release-identifier'
+import { BUILD_RELEASE_SHA, tryBuildReleaseIdentifier } from '../release/release-identifier'
 import {
   UNSUPPORTED_PWA_SNAPSHOT,
   type PwaRuntime,
@@ -32,7 +32,7 @@ import { TransferDemo } from './TransferDemo'
 
 type AppMode = 'HOST' | 'COURT' | 'DISPLAY' | null
 type HostTab = 'SCORING' | 'CONFIG' | 'QR' | 'BACKUP'
-type AppConfigRepository = Pick<ConfigRepository, 'loadCurrent' | 'apply'> & Partial<Pick<ConfigRepository, 'previewRegression'>>
+type AppConfigRepository = Pick<ConfigRepository, 'loadCurrent' | 'apply'> & Partial<Pick<ConfigRepository, 'getActiveVersion' | 'previewRegression'>>
 
 export interface AppProps {
   confirmReload?: (message: string) => boolean
@@ -65,6 +65,10 @@ export function App({
   const [pwaSnapshot, setPwaSnapshot] = useState<PwaRuntimeSnapshot>(() =>
     pwaRuntime?.getSnapshot() ?? { ...UNSUPPORTED_PWA_SNAPSHOT },
   )
+  const releaseGate = useMemo(
+    () => tryBuildReleaseIdentifier(knownConfigVersionId),
+    [knownConfigVersionId],
+  )
 
   const appDatabase = useMemo(() => createDatabase(), [])
   const browserConfigRepository = useMemo(() => new ConfigRepository(appDatabase), [appDatabase])
@@ -88,10 +92,12 @@ export function App({
       const tournamentId = result.snapshot.tournament.tournamentId
       setActiveTournamentId(tournamentId)
       setKnownConfigVersion(result.version)
-      if (!configRepository) {
-        const active = await browserConfigRepository.getActiveVersion(tournamentId)
-        setKnownConfigVersionId(active?.configVersionId ?? null)
-      }
+      const active = resolvedConfigRepository.getActiveVersion
+        ? await resolvedConfigRepository.getActiveVersion(tournamentId)
+        : !configRepository
+          ? await browserConfigRepository.getActiveVersion(tournamentId)
+          : undefined
+      if (active) setKnownConfigVersionId(active.configVersionId)
       return result
     },
   }), [browserConfigRepository, configRepository, resolvedConfigRepository])
@@ -149,9 +155,18 @@ export function App({
     setKnownConfigVersionId(result.configVersionId)
   }
   const returnToModeSelection = () => { setMode(null); setHostTab('CONFIG') }
+  const releaseGateBlocksMode = Boolean(
+    releaseGate.error && knownConfigVersionId && !(mode === 'HOST' && hostTab === 'BACKUP'),
+  )
 
   let content: ReactNode
-  if (mode === 'HOST') {
+  if (releaseGateBlocksMode) {
+    content = <section role="alert" className="release-gate-blocked">
+      <h1>リリース識別子を検証できません</h1>
+      <p>有効なConfigVersionに対して、ビルドへ埋め込まれたrelease SHAを検証できないため、イベント操作を停止しています。</p>
+      <p>{releaseGate.error}</p>
+    </section>
+  } else if (mode === 'HOST') {
     content = <>
       <div className="mode-header">
         <div><h1>本部モード</h1><p>大会全体の集計・設定を管理します。</p></div>
@@ -211,7 +226,8 @@ export function App({
     <main>{content}</main>
     <DeviceDiagnostics
       appVersion={APP_VERSION}
-      releaseSha={BUILD_RELEASE_SHA}
+      releaseSha={releaseGate.identifier?.releaseSha ?? BUILD_RELEASE_SHA}
+      releaseGateError={releaseGate.error}
       activeConfigVersionId={knownConfigVersionId}
       storageAvailable={storageAvailable}
       pwa={pwaSnapshot}

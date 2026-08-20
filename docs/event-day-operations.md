@@ -22,7 +22,7 @@ Before distributing an event-day build, record one immutable release identifier 
 | DB schema version | `5` |
 | Backup format version | `1` |
 
-The production build embeds `VITE_RELEASE_SHA` at build time from the approved commit. Device diagnostics shows that embedded SHA; `buildReleaseIdentifier()` refuses an artifact without it or with a missing ConfigVersion ID. Do not type a SHA into the UI or treat the Phase 7 PR head alone as a production release identifier while the production 2026 ConfigVersion is blocked.
+The production build embeds `VITE_RELEASE_SHA` at build time from the approved commit. Device diagnostics shows that embedded SHA; `buildReleaseIdentifier()` refuses an artifact without it or with a missing ConfigVersion ID, and App blocks event operations when an active ConfigVersion cannot be bound to the artifact. Do not type a SHA into the UI or treat the Phase 7 PR head alone as a production release identifier while the production 2026 ConfigVersion is blocked.
 
 ## Preflight
 
@@ -77,7 +77,7 @@ The production build embeds `VITE_RELEASE_SHA` at build time from the approved c
 1. Export the active immutable ConfigVersion as a `KAISEI_TOURNAMENT_CONFIG` schema-v1 JSON document when an archival/transfer copy is required.
 2. For an incoming config file, use `設定ファイルを検証・取り込む` first. Import persists an immutable version but does not activate it.
 3. Review validation results. Duplicate IDs, broken CompetitionEntry/CourtRun/ScoringSession references, invalid InputSchema/rank point tables, and unsupported scoring modes must fail closed.
-4. Confirm every ScoringProfile has at least one regression ScoringTestCase. Any missing test, non-PASS result, missing provenance, or stale approval blocks activation.
+4. Confirm every ScoringProfile has at least one regression ScoringTestCase. Both the Host editor apply path and config-file activation fail closed on a missing test, non-PASS result, removed/changed baseline without review, missing provenance, malformed approval metadata, or stale approval; approved expectation updates are written to the audit log.
 5. Only then use the explicit activation action. The active Host Tournament is checked by the service; do not select a Tournament ID from the imported file.
 
 ### CONFIG_UPDATE QR to Court
@@ -160,14 +160,14 @@ Formal Design §24 は18個 of normative invariants. The user-requested “28 in
 | 7 | §24: applied ConfigVersion immutable | `config-update-service.test.ts`, `config-file.test.ts` | import/activate boundary tests | Verify old version remains selectable/history |
 | 8 | §24: Simulator never writes production Result store | simulator/regression integration tests | covered by existing store-boundary regression | Check production result count after simulation |
 | 9 | §24: real/Simulator/ScoringTestCase share scoring implementation | `host-scoring-service.test.ts`, scoring engine/simulator tests | Host event scoring in rehearsal | Compare Host trace to approved cases |
-| 10 | §24: changed scoring regression cannot activate without review | `TournamentConfigRegressionIntegration.test.tsx`, `config-file.test.ts` | config file fresh regression gate | Operator reviews all ScoringTestCases |
+| 10 | §24: changed scoring regression cannot activate without review | `TournamentConfigRegressionIntegration.test.tsx`, `config-file.test.ts`, `config-scoring-regression.test.ts` | Host/config-file fresh regression gate, approval provenance, audit event | Operator reviews all ScoringTestCases |
 | 11 | §24: QR resend/forgotten ACK/Host-restore resend safe | `resend-phase3.test.ts`, transfer history tests | `backup/disaster-recovery.integration.test.ts` | Historical real QR resend after spare-host restore |
 | 12 | §24: safe reload does not delete IndexedDB | `reload-persistence.test.ts`, `phase5-data-management-integration.test.tsx` | partial QR reload/resume in event-day rehearsal | Full app close/reopen offline |
 | 13 | §24: Service Worker update not auto-applied during event | `update-policy.test.ts`, `phase5-pwa-integration.test.tsx` | policy automated; browser lifecycle cannot be fully emulated | Real waiting SW across reload/restart |
 | 14 | §24: external network request not required in normal flow | Phase 5 production dependency/offline build tests | all DB/QR rehearsal paths run without API dependency | Physically disable network |
 | 15 | §24: Team names/count not hardcoded | config validation and Host scoring tests | data-driven Host/Display state | Inspect final production config |
 | 16 | §24: physical Court and ScoringSession remain distinct | `court-result-service.test.ts` | production Court selects configured session/run | Multi-court final-config rehearsal |
-| 17 | §24: no player personal PII | `validateTournamentConfig` rejects PII-like production InputSchema fields | `config/tournament-config.test.ts` | Confirm final forms/config contain no player PII |
+| 17 | §24: no player personal PII | `validateTournamentConfig` structurally rejects PII-like production InputSchema keys, labels, and special keys | `src/config/tournament-config.test.ts` | Confirm final forms/config contain no player PII |
 | 18 | §24: current rules outrank prior-year material | no production 2026 JSON generated from old data | authoritative-source blocker enforced in Task 14 | Final rule owner signs off exact 2026 ConfigVersion |
 | 19 | Supplemental: Display is read-only | `DisplayDashboard.test.tsx`, `App.test.tsx` | same Host service output | Inspect Display controls |
 | 20 | Supplemental: Display standings equal Host-authoritative state | `DisplayDashboard.test.tsx` | shared `loadAuthoritativeState` | Same Host browser profile + HDMI comparison |

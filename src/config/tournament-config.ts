@@ -87,7 +87,7 @@ function checkRequiredText(
   if (!value.trim()) error(issues, 'EMPTY_LABEL', `${label}を入力してください。`, targetId)
 }
 
-const PLAYER_PII_FIELD_PATTERN = /(?:player|athlete|participant|student|guardian|parent|child|person|personal)[\s._-]*(?:name|id|identifier|number|code|email|phone|contact|birth|dob|address)|(?:氏名|生年月日|連絡先|電話|メール|住所|学籍|個人番号)/i
+const PLAYER_PII_FIELD_PATTERN = /(?:player|athlete|participant|student|guardian|parent|child|person|personal)[\s._-]*(?:name|id|identifier|number|code|email|phone|contact|birth|dob|address)|(?:選手|参加者|生徒|児童|保護者|本人|子ども|個人)[\s._-]*(?:名|氏名|名前|番号|識別|id|メール|電話|連絡|住所|生年月日)|(?:氏名|名前|生年月日|連絡先|電話|メール|住所|学籍|個人番号)/i
 
 function checkProductionFieldName(
   issues: ConfigValidationIssue[],
@@ -262,6 +262,44 @@ function validateScoringTestCase(
       `${testCase.name || testCase.testCaseId} の入力参加単位と期待値の参加単位が一致しません。`,
       testCase.testCaseId,
     )
+  }
+
+  const approval = testCase.lastApprovedChange
+  if (approval !== undefined) {
+    const approvalTarget = testCase.testCaseId
+    if (
+      !approval ||
+      typeof approval !== 'object' ||
+      Array.isArray(approval) ||
+      typeof approval.operator !== 'string' ||
+      !approval.operator.trim()
+    ) {
+      error(issues, 'INVALID_SCORING_APPROVAL_METADATA', '得点テスト承認の担当者名が不正です。', approvalTarget)
+    }
+    if (
+      !approval ||
+      typeof approval !== 'object' ||
+      Array.isArray(approval) ||
+      typeof approval.approvedAt !== 'string' ||
+      !approval.approvedAt.trim() ||
+      Number.isNaN(Date.parse(approval.approvedAt))
+    ) {
+      error(issues, 'INVALID_SCORING_APPROVAL_METADATA', '得点テスト承認日時が不正です。', approvalTarget)
+    }
+    if (
+      approval && typeof approval === 'object' && !Array.isArray(approval) &&
+      approval.sourceConfigVersionId !== undefined &&
+      (typeof approval.sourceConfigVersionId !== 'string' || !approval.sourceConfigVersionId.trim())
+    ) {
+      error(issues, 'INVALID_SCORING_APPROVAL_METADATA', '得点テスト承認の元ConfigVersion IDが不正です。', approvalTarget)
+    }
+    if (
+      approval && typeof approval === 'object' && !Array.isArray(approval) &&
+      approval.approvalFingerprint !== undefined &&
+      (typeof approval.approvalFingerprint !== 'string' || !approval.approvalFingerprint.trim())
+    ) {
+      error(issues, 'INVALID_SCORING_APPROVAL_METADATA', '得点テスト承認Fingerprintが不正です。', approvalTarget)
+    }
   }
 }
 

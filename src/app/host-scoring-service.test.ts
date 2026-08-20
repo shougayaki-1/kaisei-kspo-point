@@ -9,6 +9,7 @@ import { ConfigRepository } from '../db/config-repository'
 import { createDatabase, type AppDatabase } from '../db/database'
 import { ResultRepository } from '../db/result-repository'
 import { calculateScoringScenario } from '../domain/scoring-engine'
+import { scoringTestResultFingerprint } from '../config/scoring-test-case'
 import { createHostScoringService } from './host-scoring-service'
 
 const openDatabases: AppDatabase[] = []
@@ -33,7 +34,16 @@ function config(rankPoints: Record<number, number | string> = { 1: 10, 2: 5 }): 
   courtRuns: [{ courtRunId: ids.run1, slotId: ids.slot1, courtLabel: 'Court alpha', participantEntryIds: [ids.entryA, ids.entryB] }, { courtRunId: ids.run2, slotId: ids.slot2, courtLabel: 'Court beta', participantEntryIds: [ids.entryA, ids.entryB] }],
   scoringSessions: [{ scoringSessionId: ids.session1, competitionId: ids.competition, slotId: ids.slot1, label: 'Round 1 session', courtRunIds: [ids.run1], inputScope: 'PER_COURT' }, { scoringSessionId: ids.session2, competitionId: ids.competition, slotId: ids.slot2, label: 'Round 2 session', courtRunIds: [ids.run2], inputScope: 'PER_COURT' }],
   inputSchemas: [{ inputSchemaId: 'schema-number', competitionId: ids.competition, version: 1, fields: [{ key: 'score', label: 'Raw score', type: 'NUMBER', required: true }] }],
-  scoringProfiles: [{ scoringProfileId: ids.profile, competitionId: ids.competition, version: 1, rankingRule: { direction: 'HIGHER_IS_BETTER' }, tieRule: 'AVERAGE_OCCUPIED_PLACES', awardRule: { type: 'RANK_POINTS', rankPoints }, aggregationRule: 'SUM' }], scoringTestCases: [],
+  scoringProfiles: [{ scoringProfileId: ids.profile, competitionId: ids.competition, version: 1, rankingRule: { direction: 'HIGHER_IS_BETTER' }, tieRule: 'AVERAGE_OCCUPIED_PLACES', awardRule: { type: 'RANK_POINTS', rankPoints }, aggregationRule: 'SUM' }], scoringTestCases: [{
+    testCaseId: 'test-1',
+    competitionId: ids.competition,
+    name: '通常順位',
+    rounds: [{ roundId: 'test-round-1', label: '第1ラウンド', values: [{ entryId: ids.entryA, value: 2 }, { entryId: ids.entryB, value: 1 }] }],
+    expected: [
+      { entryId: ids.entryA, roundRanks: [1], roundAwardScores: [rankPoints[1] ?? 0], aggregateScore: rankPoints[1] ?? 0 },
+      { entryId: ids.entryB, roundRanks: [2], roundAwardScores: [rankPoints[2] ?? 0], aggregateScore: rankPoints[2] ?? 0 },
+    ],
+  }],
 } }
 async function seedConfig(database: AppDatabase, rankPoints?: Record<number, number | string>) { const repository = new ConfigRepository(database); await repository.apply(config(rankPoints), { operator: 'Host', createdAt: '2026-08-19T10:00:00+09:00', changeClass: 'SCORING' }); return repository.getActiveVersion(ids.tournament) }
 function raw(a: string, b: string) { return { inputSchemaId: 'schema-number', inputSchemaVersion: 1, entries: { [ids.entryA]: { score: a }, [ids.entryB]: { score: b } } } }
@@ -97,7 +107,7 @@ describe('Host authoritative scoring service', () => {
     const name = `host-reload-${crypto.randomUUID()}`; const firstDb = db(name); await seedConfig(firstDb); const { repository, r1, child } = await saveLinear(firstDb); await repository.saveResultWithRevision(r1, structuredClone(child)); const first = await createHostScoringService(firstDb).loadAuthoritativeState(); const firstSerialized = JSON.stringify(first.standings); expect(await firstDb.resultRevisions.where('resultId').equals(r1.resultId).count()).toBe(2); firstDb.close(); const secondDb = db(name); const second = await createHostScoringService(secondDb).loadAuthoritativeState(); expect(JSON.stringify(second.standings)).toBe(firstSerialized)
   })
   it('derives teams/events/profile only from active ConfigVersion and ignores inactive scoring rules', async () => {
-    const database = db(); const repository = new ConfigRepository(database); await repository.apply(config({ 1: 10, 2: 5 }), { operator: 'Host', createdAt: '2026-08-19T10:00:00+09:00', changeClass: 'SCORING' }); await repository.apply(config({ 1: 30, 2: 10 }), { operator: 'Host', createdAt: '2026-08-19T10:01:00+09:00', changeClass: 'SCORING' }); await saveLinear(database)
+    const database = db(); const repository = new ConfigRepository(database); const initial = config({ 1: 10, 2: 5 }); await repository.apply(initial, { operator: 'Host', createdAt: '2026-08-19T10:00:00+09:00', changeClass: 'SCORING' }); const changed = structuredClone(initial); changed.scoringProfiles[0]!.awardRule.rankPoints = { 1: 30, 2: 10 }; const preview = await repository.previewRegression(changed); await repository.apply(changed, { operator: 'Host', createdAt: '2026-08-19T10:01:00+09:00', changeClass: 'SCORING', scoringTestApprovals: preview.filter((item) => item.status === 'FAIL').map((item) => ({ testCaseId: item.testCaseId, actualFingerprint: scoringTestResultFingerprint(item), operator: 'Host', approvedAt: '2026-08-19T10:00:30+09:00' })) }); await saveLinear(database)
     const state = await createHostScoringService(database).loadAuthoritativeState(); expect(state.configVersion).toBe(2); expect(state.events[0]?.scoringProfileId).toBe(ids.profile); expect(state.events[0]?.participants.map((item) => item.aggregateScore).sort()).toEqual([40, 40]); expect(state.standings.map((row) => row.teamName).sort()).toEqual(['Configured Blue', 'Configured Red'])
   })
   it('fails closed for incompatible raw Result/config or missing ScoringProfile', async () => {
