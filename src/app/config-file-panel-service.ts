@@ -7,9 +7,9 @@ export function createConfigFilePanelServices(db: AppDatabase): ConfigFilePanelS
   const repository = new ConfigRepository(db)
   return {
     importJson: (json) => importTournamentConfigFile(repository, json),
-    activate: (configVersionId, tournamentId) => activateImportedConfigFile(repository, configVersionId, tournamentId as never),
+    activate: (configVersionId) => activateImportedConfigFile(repository, configVersionId),
     async exportActive() {
-      const tournament = await db.tournaments.toCollection().first()
+      const tournament = await repository.getHostTournament()
       if (!tournament) throw new Error('active Tournament does not exist')
       const record = await repository.getActiveVersion(tournament.tournamentId)
       if (!record) throw new Error('active ConfigVersion does not exist')

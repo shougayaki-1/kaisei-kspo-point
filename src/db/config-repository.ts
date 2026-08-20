@@ -8,17 +8,20 @@ import {
 import {
   approveScoringTestChange,
   runScoringTestCase,
+  scoringTestApprovalFingerprint,
   scoringTestResultFingerprint,
   type ScoringTestRunResult,
 } from '../config/scoring-test-case'
 import {
   areConfigVersionsEquivalent,
   materializeConfigVersionId,
+  stableConfigStringify,
 } from '../config/config-version'
 import type { TournamentConfigSnapshot } from '../config/tournament-config'
 import { validateTournamentConfig } from '../config/tournament-config'
 import type { AppDatabase } from './database'
 import type { ConfigChangeClass, ConfigVersionRecord } from './schema'
+import type { Tournament } from '../domain/tournament'
 
 export interface ScoringTestApproval {
   testCaseId: string
@@ -122,6 +125,14 @@ function validateSnapshot(snapshot: TournamentConfigSnapshot): TournamentConfigS
 
 export class ConfigRepository {
   constructor(private readonly db: AppDatabase) {}
+
+  async getHostTournament(): Promise<Tournament | undefined> {
+    const tournaments = await this.db.tournaments.toArray()
+    if (tournaments.length > 1) {
+      throw new Error('Host tournament integrity error: multiple tournaments are present')
+    }
+    return tournaments[0] ?? undefined
+  }
 
   private materializeRecord(record: ConfigVersionRecord): ConfigVersionRecord {
     return {
@@ -254,11 +265,40 @@ export class ConfigRepository {
     })
   }
 
+  async activateVersionForHost(configVersionId: string): Promise<AppliedConfigVersion> {
+    const record = await this.getVersionById(configVersionId)
+    if (!record) throw new Error(`ConfigVersion ${configVersionId} does not exist`)
+    const hostTournament = await this.getHostTournament()
+    if (hostTournament && hostTournament.tournamentId !== record.tournamentId) {
+      throw new Error('ConfigVersion tournament mismatch; version is not compatible with the active Host tournament')
+    }
+    return this.activateVersion(configVersionId, (hostTournament?.tournamentId ?? record.tournamentId) as TournamentId)
+  }
+
   async apply(
     snapshot: TournamentConfigSnapshot,
     metadata: ApplyConfigMetadata,
   ): Promise<AppliedConfigVersion> {
     const normalizedInput = validateSnapshot(snapshot)
+    const tournamentId = normalizedInput.tournament.tournamentId
+    const active = await this.getActiveVersion(tournamentId)
+
+    if (active) {
+      const activeTestCases = new Map(active.snapshot.scoringTestCases.map((testCase) => [testCase.testCaseId, testCase]))
+      const manuallyChangedExpectations = normalizedInput.scoringTestCases.filter((testCase) => {
+        const previous = activeTestCases.get(testCase.testCaseId)
+        return previous && stableConfigStringify(previous.expected) !== stableConfigStringify(testCase.expected)
+      })
+      if (manuallyChangedExpectations.length > 0) {
+        throw new ScoringRegressionError(manuallyChangedExpectations.map((testCase) => ({
+          testCaseId: testCase.testCaseId,
+          status: 'INVALID' as const,
+          actual: [],
+          diffs: [],
+          message: '保存済みScoringTestCaseの期待値は、回帰レビュー承認を経ずに変更できません。',
+        })))
+      }
+    }
 
     const regressionResults = await this.previewRegression(normalizedInput)
     const invalidResults = regressionResults.filter((result) => result.status === 'INVALID')
@@ -287,17 +327,26 @@ export class ConfigRepository {
       if (index < 0) {
         throw new ScoringRegressionError(regressionResults)
       }
+      const profile = normalizedInput.scoringProfiles.find(
+        (candidate) => candidate.competitionId === appliedSnapshot.scoringTestCases[index]!.competitionId,
+      )
+      if (!profile) throw new ScoringRegressionError(regressionResults)
       appliedSnapshot.scoringTestCases[index] = approveScoringTestChange(
         appliedSnapshot.scoringTestCases[index],
         result,
         {
           operator: approval.operator,
           approvedAt: approval.approvedAt,
+          sourceConfigVersionId: active?.configVersionId,
+          approvalFingerprint: scoringTestApprovalFingerprint(
+            appliedSnapshot.scoringTestCases[index],
+            profile,
+            result,
+          ),
         },
       )
     }
 
-    const tournamentId = appliedSnapshot.tournament.tournamentId
     const tables = [...this.normalizedConfigTables(), this.db.configVersions]
 
     return this.db.transaction('rw', tables, async () => {

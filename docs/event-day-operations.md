@@ -22,12 +22,12 @@ Before distributing an event-day build, record one immutable release identifier 
 | DB schema version | `5` |
 | Backup format version | `1` |
 
-The code-level `buildReleaseIdentifier()` gate refuses an empty/abbreviated SHA or missing ConfigVersion ID. Do not treat the Phase 7 PR head alone as a production release identifier while the production 2026 ConfigVersion is blocked.
+The production build embeds `VITE_RELEASE_SHA` at build time from the approved commit. Device diagnostics shows that embedded SHA; `buildReleaseIdentifier()` refuses an artifact without it or with a missing ConfigVersion ID. Do not type a SHA into the UI or treat the Phase 7 PR head alone as a production release identifier while the production 2026 ConfigVersion is blocked.
 
 ## Preflight
 
 - [ ] Record the five release-identifier fields above and retain them with the event log.
-- [ ] Confirm Host, every Court, Display, and spare Host use the same approved App version and release SHA.
+- [ ] Confirm Host, every Court, and spare Host use the same approved App version and embedded release SHA. Open Display as a second tab/window in the Host browser profile; do not use a separate Display network device.
 - [ ] Confirm the active ConfigVersion ID is the approved 2026 ConfigVersion on every required device.
 - [ ] Confirm every ScoringTestCase for that ConfigVersion is GREEN immediately before activation/release.
 - [ ] Confirm Device role: one authoritative Host, assigned Courts, read-only Display, and spare Host.
@@ -64,10 +64,11 @@ The code-level `buildReleaseIdentifier()` gate refuses an empty/abbreviated SHA 
 ## Display
 
 1. Confirm App version and active ConfigVersion visibility.
-2. Select Display mode.
-3. Confirm standings match Host-authoritative state.
-4. Confirm there are no Result/revision/config/transfer/conflict/backup/restore/reset/update-activation write actions.
-5. Display may be safely reloaded offline; it must not become a second scoring authority.
+2. In the same Host browser profile, open a second tab/window and select Display mode.
+3. Connect the Host device to the external monitor via HDMI (or equivalent local display output).
+4. Confirm standings match the Host-authoritative state and continue updating without a second database.
+5. Confirm there are no Result/revision/config/transfer/conflict/backup/restore/reset/update-activation write actions.
+6. Display may be safely reloaded offline; it must not become a second scoring authority.
 
 ## Config update
 
@@ -76,8 +77,8 @@ The code-level `buildReleaseIdentifier()` gate refuses an empty/abbreviated SHA 
 1. Export the active immutable ConfigVersion as a `KAISEI_TOURNAMENT_CONFIG` schema-v1 JSON document when an archival/transfer copy is required.
 2. For an incoming config file, use `設定ファイルを検証・取り込む` first. Import persists an immutable version but does not activate it.
 3. Review validation results. Duplicate IDs, broken CompetitionEntry/CourtRun/ScoringSession references, invalid InputSchema/rank point tables, and unsupported scoring modes must fail closed.
-4. Run fresh ScoringTestCase regression. Any non-PASS result blocks activation; stale approvals are not reusable.
-5. Only then use the explicit activation action.
+4. Confirm every ScoringProfile has at least one regression ScoringTestCase. Any missing test, non-PASS result, missing provenance, or stale approval blocks activation.
+5. Only then use the explicit activation action. The active Host Tournament is checked by the service; do not select a Tournament ID from the imported file.
 
 ### CONFIG_UPDATE QR to Court
 
@@ -121,26 +122,26 @@ Restore is separate from reload, Service Worker activation, and destructive rese
 
 This section requires actual devices and cannot be satisfied by GitHub Actions alone. Current status: physical/manual: NOT EXECUTED.
 
-Use at least Host, Court, Display, and spare Host devices. For the full Formal Design rehearsal, use Host 1 + Court 3–5 + spare Host 1 where available.
+Use Host 1, Court 3–5, spare Host 1 where available, and an external monitor connected to Host 1. Display is a second tab/window in the same Host 1 browser profile, not a separate network device.
 
 - [ ] Install the exact approved PWA build on every device.
 - [ ] Record App version, full release SHA, Device ID/role, and ConfigVersion ID.
 - [ ] Physically disable Wi-Fi/network. Do not simulate offline only in DevTools.
 - [ ] Fully close and reopen each installed PWA offline.
-- [ ] Confirm Host/Court/Display boot and local storage diagnostics without network.
+- [ ] Confirm Host/Court/spare boot and local storage diagnostics without network; open the Display tab/window on Host 1 and verify the HDMI monitor.
 - [ ] Court: create a real Result and correction using the final authoritative config.
 - [ ] Court→Host: transfer real QR with device camera/USB reader; test multi-part, out-of-order, duplicate, interrupted/reload/resume.
 - [ ] Host: verify import marker, shared scoring, Calculation Trace, standings and ACK.
 - [ ] Court: scan ACK and reopen/resend an ACKed historical batch.
 - [ ] Create two divergent revisions intentionally; verify unresolved common-ancestor scoring and explicit resolution.
-- [ ] Display: confirm read-only surface and exact Host standings.
+- [ ] Display tab/window: confirm read-only surface, exact Host standings, and update behavior on the HDMI monitor.
 - [ ] Create Host backup; then create/import another batch after backup.
 - [ ] Simulate Host failure; restore the old backup to spare Host.
 - [ ] Resend the post-backup historical batch; verify only missing Revision is recovered and duplicate resend is harmless.
 - [ ] Exercise CONFIG_UPDATE QR persistence and explicit activation using an approved compatible ConfigVersion.
 - [ ] Detect a waiting Service Worker update and confirm event-day pin prevents automatic activation across reload/restart.
 - [ ] Create final backup and verify final standings.
-- [ ] Confirm no player name, birthdate, contact information, or student personal identifier is requested/stored in production Result/config flow.
+- [ ] Confirm the structural production-config gate rejects player personal-information field keys/labels and that no such field is present in the final ConfigVersion; no player name, birthdate, contact information, or student personal identifier is requested/stored.
 
 Do not mark this section complete from automated test output.
 
@@ -166,21 +167,21 @@ Formal Design §24 は18個 of normative invariants. The user-requested “28 in
 | 14 | §24: external network request not required in normal flow | Phase 5 production dependency/offline build tests | all DB/QR rehearsal paths run without API dependency | Physically disable network |
 | 15 | §24: Team names/count not hardcoded | config validation and Host scoring tests | data-driven Host/Display state | Inspect final production config |
 | 16 | §24: physical Court and ScoringSession remain distinct | `court-result-service.test.ts` | production Court selects configured session/run | Multi-court final-config rehearsal |
-| 17 | §24: no player personal PII | event-day static production-schema PII gate | `integration/event-day-rehearsal.test.ts` | Confirm forms/config do not request player PII |
+| 17 | §24: no player personal PII | `validateTournamentConfig` rejects PII-like production InputSchema fields | `config/tournament-config.test.ts` | Confirm final forms/config contain no player PII |
 | 18 | §24: current rules outrank prior-year material | no production 2026 JSON generated from old data | authoritative-source blocker enforced in Task 14 | Final rule owner signs off exact 2026 ConfigVersion |
 | 19 | Supplemental: Display is read-only | `DisplayDashboard.test.tsx`, `App.test.tsx` | same Host service output | Inspect Display controls |
-| 20 | Supplemental: Display standings equal Host-authoritative state | `DisplayDashboard.test.tsx` | shared `loadAuthoritativeState` | Side-by-side Host/Display comparison |
+| 20 | Supplemental: Display standings equal Host-authoritative state | `DisplayDashboard.test.tsx` | shared `loadAuthoritativeState` | Same Host browser profile + HDMI comparison |
 | 21 | Supplemental: versioned config file validates/imports without auto-activation | `config-file.test.ts`, `ConfigFilePanel.test.tsx` | production ConfigRepository boundary | Import final config on spare profile first |
 | 22 | Supplemental: authoritative 2026 production config is final and approved | intentionally blocked; no guessed fixture | not runnable until source finalized | Mandatory rule-owner signoff |
 | 23 | Supplemental: installed PWA boots with physical network disabled | build/PWA tests only | automation cannot prove installed browser behavior | Mandatory physical offline boot |
 | 24 | Supplemental: real camera/USB QR path works | codec/frame/receiver automated | logical payload path automated | Mandatory physical scanner/camera test |
-| 25 | Supplemental: real multi-device flow works | logical databases simulate device state | software path automated | Mandatory Host + Courts + Display + spare Host rehearsal |
+| 25 | Supplemental: real multi-device flow works | logical databases simulate device state | software path automated | Mandatory Host + Courts + spare Host + same-profile HDMI Display rehearsal |
 | 26 | Supplemental: actual Service Worker lifecycle/pinning works | runtime/update policy tests | state-machine behavior automated | Mandatory real SW waiting/activation test |
 | 27 | Supplemental: spare-Host physical recovery/historical resend works | `backup/disaster-recovery.integration.test.ts` | logical Host A/Host B automated | Mandatory spare-device restore/resend |
-| 28 | Supplemental: one approved release identifier is used across roles | `buildReleaseIdentifier` test in event-day rehearsal | constants/config identity automated | Record/compare five identifier fields on every device |
+| 28 | Supplemental: one approved release identifier is used across roles | `release/release-identifier.test.ts`, CI build embeds `github.sha` | constants/config identity automated | Record/compare five identifier fields on every device |
 
 ## Automated scenario index
 
-The following requested event-day steps are automated either in the new cross-phase rehearsal or existing focused integration/regression suites: Court Result/correction; immutable RESULT_BATCH; QR fragmentation/out-of-order/duplicate/partial persistence/reload resume; single Host import/import marker; shared scoring/Calculation Trace/standings; divergence/common-ancestor projection/explicit resolution; ACK/history; backup/old-backup restore/historical resend/missing-revision recovery/double-add prevention/final standings equivalence; CONFIG_UPDATE persistence/explicit activation; scoring regression/stale fingerprint rejection; safe reload; update pin policy; Display read-only/equality; and PII schema gate.
+The following requested event-day steps are automated either in the new cross-phase rehearsal or existing focused integration/regression suites: Court Result/correction; immutable RESULT_BATCH; QR fragmentation/out-of-order/duplicate/partial persistence/reload resume; single Host import/import marker; shared scoring/Calculation Trace/standings; divergence/common-ancestor projection/explicit resolution; ACK/history; backup/old-backup restore/historical resend/missing-revision recovery/double-add prevention/final standings equivalence; CONFIG_UPDATE persistence/explicit activation; cross-Tournament activation rejection; scoring regression/stale fingerprint/provenance rejection; safe reload; update pin policy; Display read-only/equality/polling resilience; and structural PII config validation.
 
 Physical install, real camera/USB QR, true radio-offline boot, real multi-device concurrency, actual browser Service Worker lifecycle, and spare-device recovery remain manual gates as explicitly required by Formal Design.

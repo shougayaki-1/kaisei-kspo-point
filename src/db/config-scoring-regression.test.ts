@@ -153,10 +153,12 @@ describe('ConfigRepository scoring regression gate', () => {
     expect(applied.version).toBe(2)
     expect(applied.snapshot.scoringTestCases[0].expected.map((item) => item.aggregateScore))
       .toEqual([50, 30])
-    expect(applied.snapshot.scoringTestCases[0].lastApprovedChange).toEqual({
+    expect(applied.snapshot.scoringTestCases[0].lastApprovedChange).toEqual(expect.objectContaining({
       operator: '本部担当',
       approvedAt: '2026-08-19T13:19:00+09:00',
-    })
+      sourceConfigVersionId: expect.any(String),
+      approvalFingerprint: expect.any(String),
+    }))
     const versions = await repository.listVersions(first.tournament.tournamentId)
     expect(versions[0].snapshot.scoringTestCases[0].expected[0].aggregateScore).toBe(30)
   })
@@ -212,6 +214,26 @@ describe('ConfigRepository scoring regression gate', () => {
       }],
     })).rejects.toBeInstanceOf(ScoringRegressionError)
 
+    expect((await repository.listVersions(first.tournament.tournamentId)).map((item) => item.version))
+      .toEqual([1])
+  })
+
+  it('rejects a draft that changes scoring rules and expected outputs together', async () => {
+    const db = makeDb()
+    const repository = new ConfigRepository(db)
+    const first = snapshot()
+    await repository.apply(first, metadata())
+
+    const tampered = structuredClone(first)
+    tampered.scoringProfiles[0].awardRule.rankPoints = { 1: 50, 2: 30 }
+    tampered.scoringTestCases[0].expected = [
+      { entryId: 'entry-1' as CompetitionEntryId, roundRanks: [1], roundAwardScores: [50], aggregateScore: 50 },
+      { entryId: 'entry-2' as CompetitionEntryId, roundRanks: [2], roundAwardScores: [30], aggregateScore: 30 },
+    ]
+
+    expect((await repository.previewRegression(tampered)).map((result) => result.status)).toEqual(['PASS'])
+    await expect(repository.apply(tampered, metadata('2026-08-19T13:50:00+09:00')))
+      .rejects.toBeInstanceOf(ScoringRegressionError)
     expect((await repository.listVersions(first.tournament.tournamentId)).map((item) => item.version))
       .toEqual([1])
   })

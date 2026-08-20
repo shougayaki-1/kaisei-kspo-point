@@ -1,7 +1,9 @@
-import type { TournamentId } from '../domain/ids'
 import type { ConfigVersionRecord } from '../db/schema'
 import type { AppliedConfigVersion, ConfigRepository } from '../db/config-repository'
-import type { ScoringTestRunResult } from './scoring-test-case'
+import {
+  scoringTestApprovalFingerprint,
+  type ScoringTestRunResult,
+} from './scoring-test-case'
 import { stableConfigStringify } from './config-version'
 import { validateTournamentConfig } from './tournament-config'
 
@@ -16,11 +18,19 @@ export interface TournamentConfigFileDocument {
 
 export type ConfigFileRepository = Pick<
   ConfigRepository,
-  'importVersion' | 'getVersionById' | 'previewRegression' | 'activateVersion'
+  'importVersion' | 'getVersionById' | 'getHostTournament' | 'getActiveVersion' | 'previewRegression' | 'activateVersionForHost'
 >
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function scoringTestCaseBaseline(testCase: ConfigVersionRecord['snapshot']['scoringTestCases'][number]): unknown {
+  return {
+    competitionId: testCase.competitionId,
+    rounds: testCase.rounds,
+    expected: testCase.expected,
+  }
 }
 
 function validateConfigVersionRecord(value: unknown): ConfigVersionRecord {
@@ -89,16 +99,61 @@ export async function importTournamentConfigFile(
 export async function activateImportedConfigFile(
   repository: ConfigFileRepository,
   configVersionId: string,
-  tournamentId: TournamentId,
 ): Promise<AppliedConfigVersion> {
   const record = await repository.getVersionById(configVersionId)
   if (!record) throw new Error(`ConfigVersion ${configVersionId} does not exist`)
-  if (record.tournamentId !== tournamentId) throw new Error('ConfigVersion tournament mismatch')
+  const hostTournament = await repository.getHostTournament()
+  if (hostTournament && record.tournamentId !== hostTournament.tournamentId) {
+    throw new Error('ConfigVersion tournament mismatch with the active Host tournament')
+  }
+
+  const active = hostTournament
+    ? await repository.getActiveVersion(hostTournament.tournamentId)
+    : undefined
+  const testCasesByCompetition = new Map<string, number>()
+  for (const testCase of record.snapshot.scoringTestCases) {
+    testCasesByCompetition.set(testCase.competitionId, (testCasesByCompetition.get(testCase.competitionId) ?? 0) + 1)
+  }
+  const uncoveredProfiles = record.snapshot.scoringProfiles.filter(
+    (profile) => (testCasesByCompetition.get(profile.competitionId) ?? 0) === 0,
+  )
+  if (uncoveredProfiles.length > 0) {
+    throw new Error(`scoring regression test required for profile(s): ${uncoveredProfiles.map((profile) => profile.scoringProfileId).join(', ')}`)
+  }
 
   const results: ScoringTestRunResult[] = await repository.previewRegression(record.snapshot)
   const blocked = results.filter((result) => result.status !== 'PASS')
   if (blocked.length > 0) {
     throw new Error(`scoring regression gate failed: ${blocked.map((result) => `${result.testCaseId}:${result.status}`).join(', ')}`)
   }
-  return repository.activateVersion(configVersionId, tournamentId)
+
+  if (active && active.configVersionId !== record.configVersionId) {
+    const candidateProfiles = new Map(record.snapshot.scoringProfiles.map((profile) => [profile.competitionId, profile]))
+    const resultById = new Map(results.map((result) => [result.testCaseId, result]))
+    for (const previous of active.snapshot.scoringTestCases) {
+      const candidate = record.snapshot.scoringTestCases.find((testCase) => testCase.testCaseId === previous.testCaseId)
+      if (!candidate) {
+        throw new Error(`scoring regression test cannot be removed during activation: ${previous.testCaseId}`)
+      }
+      if (
+        stableConfigStringify(scoringTestCaseBaseline(previous)) ===
+        stableConfigStringify(scoringTestCaseBaseline(candidate))
+      ) continue
+      const approval = candidate.lastApprovedChange
+      const profile = candidateProfiles.get(candidate.competitionId)
+      const result = resultById.get(candidate.testCaseId)
+      if (
+        !approval ||
+        approval.sourceConfigVersionId !== active.configVersionId ||
+        !approval.approvalFingerprint ||
+        !profile ||
+        !result ||
+        approval.approvalFingerprint !== scoringTestApprovalFingerprint(candidate, profile, result)
+      ) {
+        throw new Error(`scoring test case ${candidate.testCaseId} expectation change lacks portable approval provenance`)
+      }
+    }
+  }
+
+  return repository.activateVersionForHost(configVersionId)
 }

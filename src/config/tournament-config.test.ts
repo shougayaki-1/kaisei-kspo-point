@@ -169,4 +169,17 @@ describe('validateTournamentConfig', () => {
     )
     expect(issues.some((issue) => issue.severity === 'ERROR')).toBe(false)
   })
+
+  it('rejects player personal-information fields from production input schemas', () => {
+    const snapshot = validSnapshot()
+    snapshot.inputSchemas[0].fields[0] = {
+      key: 'athleteName',
+      label: '選手名',
+      type: 'SELECT',
+      required: true,
+      options: [{ value: 'red', label: '赤' }],
+    }
+
+    expect(errorCodes(snapshot)).toContain('PLAYER_PII_FIELD')
+  })
 })

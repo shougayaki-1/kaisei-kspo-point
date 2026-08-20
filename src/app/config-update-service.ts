@@ -34,7 +34,7 @@ export function createConfigUpdateService(db: AppDatabase) {
 
   return {
     async loadStatus(): Promise<ConfigUpdateStatus> {
-      const activeTournament = await db.tournaments.toCollection().first()
+      const activeTournament = await configRepository.getHostTournament()
       if (activeTournament) {
         const active = await configRepository.getActiveVersion(activeTournament.tournamentId)
         const versions = await configRepository.listVersions(activeTournament.tournamentId)
@@ -53,6 +53,9 @@ export function createConfigUpdateService(db: AppDatabase) {
         return { tournamentId: null, activeConfigVersionId: null, versions: [] }
       }
       const tournamentIds = [...new Set(allVersions.map((record) => record.tournamentId))].sort()
+      if (tournamentIds.length > 1) {
+        throw new Error('Host tournament integrity error: imported ConfigVersions belong to multiple tournaments')
+      }
       const tournamentId = tournamentIds[0] as TournamentId
       const versions = await configRepository.listVersions(tournamentId)
       return {
@@ -115,8 +118,8 @@ export function createConfigUpdateService(db: AppDatabase) {
       return receiver.getProgress(transferId)
     },
 
-    async activate(configVersionId: string, tournamentId: TournamentId): Promise<void> {
-      await configRepository.activateVersion(configVersionId, tournamentId)
+    async activate(configVersionId: string): Promise<void> {
+      await configRepository.activateVersionForHost(configVersionId)
     },
   }
 }

@@ -21,6 +21,7 @@ export function DisplayDashboard({
 
   useEffect(() => {
     let cancelled = false
+    let refreshTimer: number | undefined
     const refresh = async () => {
       try {
         const value = await service.loadAuthoritativeState()
@@ -30,26 +31,31 @@ export function DisplayDashboard({
         }
       } catch (cause: unknown) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : '表示用の集計状態を取得できません')
+      } finally {
+        if (!cancelled && refreshIntervalMs > 0) {
+          refreshTimer = window.setTimeout(() => void refresh(), refreshIntervalMs)
+        }
       }
     }
 
     void refresh()
-    const refreshTimer = refreshIntervalMs > 0
-      ? window.setInterval(() => void refresh(), refreshIntervalMs)
-      : undefined
 
     return () => {
       cancelled = true
-      if (refreshTimer !== undefined) window.clearInterval(refreshTimer)
+      if (refreshTimer !== undefined) window.clearTimeout(refreshTimer)
     }
   }, [refreshIntervalMs, service])
 
-  if (error) return <section aria-label="Display standings"><p role="alert">{error}</p></section>
-  if (!state) return <section aria-label="Display standings"><p>集計中...</p></section>
+  if (!state) {
+    return <section aria-label="Display standings">
+      {error ? <p role="alert">{error}</p> : <p>集計中...</p>}
+    </section>
+  }
 
   return (
     <section aria-label="Display standings">
       <h2>総合順位</h2>
+      {error ? <p role="alert">更新失敗（前回の表示を継続）: {error}</p> : null}
       <p>Current ConfigVersion: v{state.configVersion} / {state.configVersionId}</p>
       <ol>
         {state.standings.map((standing) => (

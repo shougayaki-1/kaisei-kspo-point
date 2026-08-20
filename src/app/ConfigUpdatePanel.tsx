@@ -20,7 +20,7 @@ export interface ConfigUpdatePanelServices {
     importedConfigVersionId?: string
     tournamentId?: TournamentId
   }>
-  activate(configVersionId: string, tournamentId: TournamentId): Promise<void>
+  activate(configVersionId: string): Promise<void>
 }
 
 export interface ConfigUpdatePanelProps {
@@ -40,7 +40,6 @@ export function ConfigUpdatePanel({
   const [exportId, setExportId] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [importedId, setImportedId] = useState<string | null>(null)
-  const [importedTournamentId, setImportedTournamentId] = useState<TournamentId | null>(null)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
@@ -85,7 +84,6 @@ export function ConfigUpdatePanel({
       const result = await services.ingestFrame(input.trim(), now())
       if (result.complete && result.importedConfigVersionId) {
         setImportedId(result.importedConfigVersionId)
-        setImportedTournamentId(result.tournamentId ?? status?.tournamentId ?? null)
         setMessage('ConfigVersionを保存しました。まだ有効化されていません。')
         await reloadStatus()
       } else {
@@ -97,14 +95,13 @@ export function ConfigUpdatePanel({
   }
 
   const activate = async () => {
-    const tournamentId = importedTournamentId ?? status?.tournamentId
-    if (!importedId || !tournamentId) {
+    if (!importedId) {
       setError('有効化対象のTournament / ConfigVersionを確認できません')
       return
     }
     setError('')
     try {
-      await services.activate(importedId, tournamentId)
+      await services.activate(importedId)
       setMessage(`ConfigVersion ${importedId} を有効化しました。`)
       await reloadStatus()
     } catch (cause) {

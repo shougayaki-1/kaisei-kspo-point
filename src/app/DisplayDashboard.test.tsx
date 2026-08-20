@@ -130,4 +130,45 @@ describe('DisplayDashboard', () => {
     expect(screen.queryByText('1位 Configured Red: 7.5')).not.toBeInTheDocument()
     expect(service.loadAuthoritativeState).toHaveBeenCalledTimes(2)
   })
+
+  it('waits for a refresh to finish before scheduling the next read', async () => {
+    vi.useFakeTimers()
+    const initial = authoritativeState()
+    let resolveFirst!: (value: HostScoringState) => void
+    const first = new Promise<HostScoringState>((resolve) => { resolveFirst = resolve })
+    const service = {
+      loadAuthoritativeState: vi.fn()
+        .mockReturnValueOnce(first)
+        .mockResolvedValueOnce(initial),
+    }
+
+    render(<DisplayDashboard service={service} refreshIntervalMs={1000} />)
+    expect(service.loadAuthoritativeState).toHaveBeenCalledOnce()
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    expect(service.loadAuthoritativeState).toHaveBeenCalledOnce()
+
+    resolveFirst(initial)
+    await act(async () => { await first })
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    expect(service.loadAuthoritativeState).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps the last known good standings visible when a later refresh fails', async () => {
+    vi.useFakeTimers()
+    const state = authoritativeState()
+    const service = {
+      loadAuthoritativeState: vi.fn()
+        .mockResolvedValueOnce(state)
+        .mockRejectedValueOnce(new Error('一時的なIndexedDB読み取り失敗')),
+    }
+
+    render(<DisplayDashboard service={service} refreshIntervalMs={1000} />)
+    await act(async () => { await Promise.resolve() })
+    expect(screen.getByText('1位 Configured Red: 7.5')).toBeInTheDocument()
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    expect(screen.getByText('1位 Configured Red: 7.5')).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('一時的なIndexedDB読み取り失敗')
+  })
 })

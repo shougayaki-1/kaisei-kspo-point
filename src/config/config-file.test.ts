@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ConfigVersionRecord } from '../db/schema'
+import type { Tournament } from '../domain/tournament'
 import type { TournamentConfigSnapshot } from './tournament-config'
 import {
   CONFIG_FILE_SCHEMA_VERSION,
@@ -9,6 +10,7 @@ import {
   serializeTournamentConfigFile,
   type ConfigFileRepository,
 } from './config-file'
+import { scoringTestApprovalFingerprint } from './scoring-test-case'
 
 function snapshot(): TournamentConfigSnapshot {
   return {
@@ -21,7 +23,22 @@ function snapshot(): TournamentConfigSnapshot {
     scoringSessions: [{ scoringSessionId: 'session-1' as never, competitionId: 'competition-1' as never, slotId: 'slot-1' as never, label: 'Round 1', courtRunIds: ['run-1' as never], inputScope: 'WHOLE_SLOT' }],
     inputSchemas: [{ inputSchemaId: 'schema-1', competitionId: 'competition-1' as never, version: 1, fields: [{ key: 'count', label: 'Count', type: 'NUMBER', required: true, min: 0, max: 100 }] }],
     scoringProfiles: [{ scoringProfileId: 'profile-1' as never, competitionId: 'competition-1' as never, version: 1, rankingRule: { direction: 'HIGHER_IS_BETTER' }, tieRule: 'AVERAGE_OCCUPIED_PLACES', awardRule: { type: 'RANK_POINTS', rankPoints: { 1: 30, 2: 20, 3: 10, 4: 0 } }, aggregationRule: 'SUM' }],
-    scoringTestCases: [],
+    scoringTestCases: [{
+      testCaseId: 'case-1',
+      competitionId: 'competition-1' as never,
+      name: '通常順位',
+      rounds: [{
+        roundId: 'round-1',
+        label: '第1試合',
+        values: [{ entryId: 'entry-1' as never, value: 1 }],
+      }],
+      expected: [{
+        entryId: 'entry-1' as never,
+        roundRanks: [1],
+        roundAwardScores: [30],
+        aggregateScore: 30,
+      }],
+    }],
   }
 }
 
@@ -104,30 +121,138 @@ describe('tournament config file', () => {
     const imported = record()
     const repository = {
       importVersion: vi.fn(async () => imported),
+      getHostTournament: vi.fn(async () => undefined),
+      getActiveVersion: vi.fn(async () => undefined),
       getVersionById: vi.fn(),
       previewRegression: vi.fn(),
-      activateVersion: vi.fn(),
+      activateVersionForHost: vi.fn(),
     } satisfies ConfigFileRepository
 
     await expect(importTournamentConfigFile(repository, jsonFor(imported))).resolves.toEqual(imported)
     expect(repository.importVersion).toHaveBeenCalledWith(imported)
-    expect(repository.activateVersion).not.toHaveBeenCalled()
+    expect(repository.activateVersionForHost).not.toHaveBeenCalled()
   })
 
   it('blocks explicit activation unless every imported ScoringTestCase passes fresh regression', async () => {
     const imported = record()
     const repository = {
       importVersion: vi.fn(),
+      getHostTournament: vi.fn(async () => undefined),
+      getActiveVersion: vi.fn(async () => undefined),
       getVersionById: vi.fn(async () => imported),
       previewRegression: vi.fn(async () => [{ testCaseId: 'case-1', status: 'FAIL', actual: [], diffs: [], message: 'changed' } as never]),
-      activateVersion: vi.fn(async () => ({ version: 1, snapshot: imported.snapshot })),
+      activateVersionForHost: vi.fn(async () => ({ version: 1, snapshot: imported.snapshot })),
     } satisfies ConfigFileRepository
 
-    await expect(activateImportedConfigFile(repository, 'config-v1', 'tournament-1' as never)).rejects.toThrow(/regression/i)
-    expect(repository.activateVersion).not.toHaveBeenCalled()
+    await expect(activateImportedConfigFile(repository, 'config-v1')).rejects.toThrow(/regression/i)
+    expect(repository.activateVersionForHost).not.toHaveBeenCalled()
 
     repository.previewRegression.mockResolvedValue([])
-    await activateImportedConfigFile(repository, 'config-v1', 'tournament-1' as never)
-    expect(repository.activateVersion).toHaveBeenCalledWith('config-v1', 'tournament-1')
+    await activateImportedConfigFile(repository, 'config-v1')
+    expect(repository.activateVersionForHost).toHaveBeenCalledWith('config-v1')
+  })
+
+  it('rejects a ConfigVersion from another tournament without mutating the active host state', async () => {
+    const activeTournament: Tournament = {
+      tournamentId: 'tournament-a' as never,
+      name: '大会A',
+      currentConfigVersion: 1,
+    }
+    const imported = record()
+    imported.tournamentId = 'tournament-b'
+    imported.snapshot.tournament.tournamentId = 'tournament-b' as never
+    const repository = {
+      importVersion: vi.fn(),
+      getHostTournament: vi.fn(async () => activeTournament),
+      getActiveVersion: vi.fn(async () => undefined),
+      getVersionById: vi.fn(async () => imported),
+      previewRegression: vi.fn(async () => []),
+      activateVersionForHost: vi.fn(),
+    } satisfies ConfigFileRepository
+
+    await expect(activateImportedConfigFile(repository, imported.configVersionId)).rejects.toThrow(/tournament/i)
+    expect(repository.activateVersionForHost).not.toHaveBeenCalled()
+  })
+
+  it('rejects production activation when a scoring profile has no regression test case', async () => {
+    const imported = record()
+    imported.snapshot.scoringTestCases = []
+    const repository = {
+      importVersion: vi.fn(),
+      getHostTournament: vi.fn(async () => undefined),
+      getActiveVersion: vi.fn(async () => undefined),
+      getVersionById: vi.fn(async () => imported),
+      previewRegression: vi.fn(async () => []),
+      activateVersionForHost: vi.fn(),
+    } satisfies ConfigFileRepository
+
+    await expect(activateImportedConfigFile(repository, imported.configVersionId)).rejects.toThrow(/regression test/i)
+    expect(repository.activateVersionForHost).not.toHaveBeenCalled()
+  })
+
+  it('rejects imported expected output changes without portable approval provenance', async () => {
+    const active = record()
+    const imported = structuredClone(active)
+    imported.configVersionId = 'config-v2'
+    imported.version = 2
+    imported.snapshot.tournament.currentConfigVersion = 2
+    imported.snapshot.scoringTestCases[0]!.expected[0]!.aggregateScore = 999
+    const repository = {
+      importVersion: vi.fn(),
+      getHostTournament: vi.fn(async () => ({
+        tournamentId: active.tournamentId as never,
+        name: '大会',
+        currentConfigVersion: active.version,
+      })),
+      getActiveVersion: vi.fn(async () => active),
+      getVersionById: vi.fn(async () => imported),
+      previewRegression: vi.fn(async () => []),
+      activateVersionForHost: vi.fn(),
+    } satisfies ConfigFileRepository
+
+    await expect(activateImportedConfigFile(repository, imported.configVersionId)).rejects.toThrow(/test case|approval/i)
+    expect(repository.activateVersionForHost).not.toHaveBeenCalled()
+  })
+
+  it('accepts an intentionally changed imported expectation only with matching approval provenance', async () => {
+    const active = record()
+    const imported = structuredClone(active)
+    imported.configVersionId = 'config-v2'
+    imported.version = 2
+    imported.snapshot.tournament.currentConfigVersion = 2
+    imported.snapshot.scoringProfiles[0]!.awardRule.rankPoints[1] = 40
+    imported.snapshot.scoringTestCases[0]!.expected[0]!.roundAwardScores = [40]
+    imported.snapshot.scoringTestCases[0]!.expected[0]!.aggregateScore = 40
+    const result = {
+      testCaseId: 'case-1',
+      status: 'PASS' as const,
+      actual: imported.snapshot.scoringTestCases[0]!.expected,
+      diffs: [],
+    }
+    imported.snapshot.scoringTestCases[0]!.lastApprovedChange = {
+      operator: '本部担当',
+      approvedAt: '2026-08-20T00:10:00.000Z',
+      sourceConfigVersionId: active.configVersionId,
+      approvalFingerprint: scoringTestApprovalFingerprint(
+        imported.snapshot.scoringTestCases[0]!,
+        imported.snapshot.scoringProfiles[0]!,
+        result,
+      ),
+    }
+    const repository = {
+      importVersion: vi.fn(),
+      getHostTournament: vi.fn(async () => ({
+        tournamentId: active.tournamentId as never,
+        name: '大会',
+        currentConfigVersion: active.version,
+      })),
+      getActiveVersion: vi.fn(async () => active),
+      getVersionById: vi.fn(async () => imported),
+      previewRegression: vi.fn(async () => [result]),
+      activateVersionForHost: vi.fn(async () => ({ version: imported.version, snapshot: imported.snapshot })),
+    } satisfies ConfigFileRepository
+
+    await expect(activateImportedConfigFile(repository, imported.configVersionId)).resolves.toMatchObject({ version: 2 })
+    expect(repository.activateVersionForHost).toHaveBeenCalledWith(imported.configVersionId)
   })
 })

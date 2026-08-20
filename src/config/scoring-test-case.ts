@@ -7,6 +7,7 @@ import {
 import type { ScoringProfile } from '../domain/scoring'
 import { calculateScoringScenario } from '../domain/scoring-engine'
 import type { CompetitionEntry } from '../domain/tournament'
+import { stableConfigStringify } from './config-version'
 
 export interface ScoringTestRound {
   roundId: string
@@ -30,6 +31,8 @@ export interface ScoringTestCase {
   lastApprovedChange?: {
     operator: string
     approvedAt: string
+    sourceConfigVersionId?: string
+    approvalFingerprint?: string
   }
 }
 
@@ -54,6 +57,8 @@ export interface ScoringTestRunResult {
 export interface ScoringTestApprovalMetadata {
   operator: string
   approvedAt: string
+  sourceConfigVersionId?: string
+  approvalFingerprint?: string
 }
 
 function canonicalParticipant(
@@ -75,6 +80,22 @@ export function scoringTestResultFingerprint(
     actual: [...result.actual]
       .sort((left, right) => left.entryId.localeCompare(right.entryId))
       .map(canonicalParticipant),
+  })
+}
+
+export function scoringTestApprovalFingerprint(
+  testCase: ScoringTestCase,
+  profile: ScoringProfile,
+  result: Pick<ScoringTestRunResult, 'testCaseId' | 'actual'>,
+): string {
+  return stableConfigStringify({
+    scoringProfile: profile,
+    testCase: {
+      testCaseId: testCase.testCaseId,
+      competitionId: testCase.competitionId,
+      rounds: testCase.rounds,
+    },
+    actual: result.actual,
   })
 }
 
@@ -223,6 +244,11 @@ export function approveScoringTestChange(
 
   const approved = structuredClone(testCase)
   approved.expected = result.actual.map(canonicalParticipant)
-  approved.lastApprovedChange = { ...metadata }
+  approved.lastApprovedChange = {
+    operator: metadata.operator,
+    approvedAt: metadata.approvedAt,
+    ...(metadata.sourceConfigVersionId ? { sourceConfigVersionId: metadata.sourceConfigVersionId } : {}),
+    ...(metadata.approvalFingerprint ? { approvalFingerprint: metadata.approvalFingerprint } : {}),
+  }
   return approved
 }

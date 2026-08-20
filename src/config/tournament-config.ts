@@ -87,6 +87,18 @@ function checkRequiredText(
   if (!value.trim()) error(issues, 'EMPTY_LABEL', `${label}を入力してください。`, targetId)
 }
 
+const PLAYER_PII_FIELD_PATTERN = /(?:player|athlete|participant|student|guardian|parent|child|person|personal)[\s._-]*(?:name|id|identifier|number|code|email|phone|contact|birth|dob|address)|(?:氏名|生年月日|連絡先|電話|メール|住所|学籍|個人番号)/i
+
+function checkProductionFieldName(
+  issues: ConfigValidationIssue[],
+  value: string,
+  target: string,
+): void {
+  if (PLAYER_PII_FIELD_PATTERN.test(value)) {
+    error(issues, 'PLAYER_PII_FIELD', '選手個人を識別・連絡できる入力項目はproduction設定に追加できません。', target)
+  }
+}
+
 function validateField(
   issues: ConfigValidationIssue[],
   schema: InputSchema,
@@ -95,6 +107,8 @@ function validateField(
   const target = `${schema.inputSchemaId}:${field.key}`
   checkRequiredText(issues, field.key, '入力項目キー', target)
   checkRequiredText(issues, field.label, '入力項目名', target)
+  checkProductionFieldName(issues, field.key, target)
+  checkProductionFieldName(issues, field.label, target)
 
   if (field.type === 'NUMBER' || field.type === 'PENALTY') {
     const minValid = field.min === undefined || isDecimalInputValue(field.min)
@@ -139,6 +153,7 @@ function validateField(
 
   if (field.type === 'SPECIAL') {
     checkRequiredText(issues, field.specialKey, '特殊入力キー', target)
+    checkProductionFieldName(issues, field.specialKey, target)
   }
 }
 

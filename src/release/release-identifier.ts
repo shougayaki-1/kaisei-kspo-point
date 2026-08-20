@@ -11,12 +11,16 @@ export interface ReleaseIdentifier {
 }
 
 export interface ReleaseIdentifierInput {
-  releaseSha: string
   activeConfigVersionId: string
 }
 
-export function buildReleaseIdentifier(input: ReleaseIdentifierInput): ReleaseIdentifier {
-  const releaseSha = input.releaseSha.trim()
+export const BUILD_RELEASE_SHA = (import.meta.env.VITE_RELEASE_SHA ?? '').trim()
+
+export function buildReleaseIdentifierFromSha(
+  releaseShaInput: string,
+  input: ReleaseIdentifierInput,
+): ReleaseIdentifier {
+  const releaseSha = releaseShaInput.trim()
   const activeConfigVersionId = input.activeConfigVersionId.trim()
   if (!/^[0-9a-f]{40}$/i.test(releaseSha)) {
     throw new Error('release SHA must be a full 40-character git commit SHA')
@@ -31,4 +35,11 @@ export function buildReleaseIdentifier(input: ReleaseIdentifierInput): ReleaseId
     databaseSchemaVersion: DATABASE_SCHEMA_VERSION,
     backupFormatVersion: BACKUP_FORMAT_VERSION,
   }
+}
+
+export function buildReleaseIdentifier(input: ReleaseIdentifierInput): ReleaseIdentifier {
+  if (!BUILD_RELEASE_SHA) {
+    throw new Error('VITE_RELEASE_SHA is not embedded in this build artifact')
+  }
+  return buildReleaseIdentifierFromSha(BUILD_RELEASE_SHA, input)
 }

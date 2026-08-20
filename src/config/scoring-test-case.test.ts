@@ -118,6 +118,8 @@ describe('approveScoringTestChange', () => {
     const approved = approveScoringTestChange(source, result, {
       operator: '本部担当',
       approvedAt: '2026-08-19T13:00:00+09:00',
+      sourceConfigVersionId: 'config-v1',
+      approvalFingerprint: 'approval-fingerprint-v2',
     })
 
     expect(approved.testCaseId).toBe(source.testCaseId)
@@ -127,6 +129,8 @@ describe('approveScoringTestChange', () => {
     expect(approved.lastApprovedChange).toEqual({
       operator: '本部担当',
       approvedAt: '2026-08-19T13:00:00+09:00',
+      sourceConfigVersionId: 'config-v1',
+      approvalFingerprint: 'approval-fingerprint-v2',
     })
     expect(source.expected[0].aggregateScore).toBe(30)
   })

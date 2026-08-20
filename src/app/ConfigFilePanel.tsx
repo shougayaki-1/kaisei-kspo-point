@@ -4,7 +4,7 @@ import type { ConfigVersionRecord } from '../db/schema'
 
 export interface ConfigFilePanelServices {
   importJson(json: string): Promise<ConfigVersionRecord>
-  activate(configVersionId: string, tournamentId: string): Promise<AppliedConfigVersion>
+  activate(configVersionId: string): Promise<AppliedConfigVersion>
   exportActive(): Promise<string>
 }
 
@@ -37,7 +37,7 @@ export function ConfigFilePanel({
     if (!imported) return
     setError('')
     try {
-      const result = await services.activate(imported.configVersionId, imported.tournamentId)
+      const result = await services.activate(imported.configVersionId)
       setStatus(`ConfigVersion ${imported.configVersionId} を有効化しました。`)
       onActivated?.({ tournamentId: imported.tournamentId, configVersionId: imported.configVersionId, version: result.version })
     } catch (cause) {

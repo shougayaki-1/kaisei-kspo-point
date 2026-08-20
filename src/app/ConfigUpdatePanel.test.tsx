@@ -55,6 +55,6 @@ describe('ConfigUpdatePanel', () => {
     expect(service.activate).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'このConfigVersionを有効化' }))
 
-    await waitFor(() => expect(service.activate).toHaveBeenCalledWith('config-v2', tournamentId))
+    await waitFor(() => expect(service.activate).toHaveBeenCalledWith('config-v2'))
   })
 })

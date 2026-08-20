@@ -170,7 +170,7 @@ describe('Config Update service', () => {
     const courtRepository = new ConfigRepository(courtDb)
     const courtService = createConfigUpdateService(courtDb)
     for (const frame of v1Export.frames) await courtService.ingestFrame(frame, '2026-08-19T10:30:00+09:00')
-    await courtService.activate(hostV1!.configVersionId!, originalDraft.tournament.tournamentId)
+    await courtService.activate(hostV1!.configVersionId!)
     const activeV1 = await courtRepository.loadCurrent(originalDraft.tournament.tournamentId)
     expect(activeV1?.tournament.name).toBe('shared大会')
 
@@ -182,7 +182,7 @@ describe('Config Update service', () => {
     expect(versionsBeforeActivation.map((record) => record.version)).toEqual([1, 2])
     expect(versionsBeforeActivation[0].snapshot.tournament.name).toBe('shared大会')
 
-    await courtService.activate(hostV2!.configVersionId!, originalDraft.tournament.tournamentId)
+    await courtService.activate(hostV2!.configVersionId!)
     expect((await courtRepository.loadCurrent(originalDraft.tournament.tournamentId))?.tournament.name).toBe('変更後')
     expect((await courtRepository.listVersions(originalDraft.tournament.tournamentId))[0].snapshot.tournament.name).toBe('shared大会')
   })
@@ -215,5 +215,27 @@ describe('Config Update service', () => {
     await expect(
       repository.activateVersion('fixed-config-id', 'different-tournament' as TournamentId),
     ).rejects.toThrow(/compatible|tournament|mismatch/i)
+  })
+
+  it('rejects a different tournament ConfigVersion at the service boundary without changing Host state', async () => {
+    const hostDb = db(`config-host-cross-tournament-${crypto.randomUUID()}`)
+    const repository = new ConfigRepository(hostDb)
+    const alpha = await repository.apply(snapshotFor('alpha'), metadata('2026-08-19T11:00:00+09:00'))
+    const beta = snapshotFor('beta')
+    await repository.importVersion({
+      configVersionId: 'beta-imported-v1',
+      tournamentId: beta.tournament.tournamentId,
+      version: 1,
+      createdAt: '2026-08-19T11:05:00+09:00',
+      operator: '外部本部',
+      changeClass: 'SCORING',
+      snapshot: { ...beta, tournament: { ...beta.tournament, currentConfigVersion: 1 } },
+    })
+
+    const service = createConfigUpdateService(hostDb)
+    await expect(service.activate('beta-imported-v1')).rejects.toThrow(/tournament|integrity/i)
+    expect((await repository.getActiveVersion(alpha.snapshot.tournament.tournamentId))?.configVersionId)
+      .toBe((await repository.listVersions(alpha.snapshot.tournament.tournamentId))[0]?.configVersionId)
+    expect(await hostDb.tournaments.toArray()).toEqual([alpha.snapshot.tournament])
   })
 })
