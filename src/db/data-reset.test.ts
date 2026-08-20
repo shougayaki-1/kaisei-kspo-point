@@ -81,7 +81,7 @@ describe('destructive persistent-data reset', () => {
     const db = await seedEveryTable(name)
     const revisions = db.table('resultRevisions')
     const originalClear = revisions.clear.bind(revisions)
-    revisions.clear = vi.fn(async () => { throw new Error('forced reset failure') })
+    revisions.clear = vi.fn(async () => { throw new Error('forced reset failure') }) as unknown as typeof revisions.clear
 
     await expect(resetAllPersistentData(db)).rejects.toThrow('forced reset failure')
 
