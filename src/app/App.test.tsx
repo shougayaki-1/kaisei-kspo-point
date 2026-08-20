@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { ConfigRepository } from '../db/config-repository'
+import type { PwaRuntime } from '../pwa/runtime'
 import { App } from './App'
 
 function configRepository(): Pick<ConfigRepository, 'loadCurrent' | 'apply'> {
@@ -20,6 +21,21 @@ function configRepository(): Pick<ConfigRepository, 'loadCurrent' | 'apply'> {
         },
       }
     }),
+  }
+}
+
+function waitingPwaRuntime(): PwaRuntime {
+  return {
+    start: vi.fn(),
+    getSnapshot: vi.fn(() => ({
+      serviceWorkerStatus: 'UPDATE_WAITING',
+      offlineReady: true,
+      updateAvailable: true,
+      eventDayPinned: true,
+      reloadRequired: false,
+    })),
+    subscribe: vi.fn(() => () => {}),
+    activateUpdate: vi.fn(async () => true),
   }
 }
 
@@ -63,14 +79,14 @@ describe('App', () => {
   })
 
   it('keeps Display mode read-only and hides Host/Court destructive and write surfaces', async () => {
-    render(<App configRepository={configRepository()} />)
+    render(<App configRepository={configRepository()} pwaRuntime={waitingPwaRuntime()} />)
     fireEvent.click(screen.getByRole('button', { name: '表示モード' }))
 
     expect(screen.getByRole('heading', { name: '表示モード' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '大会設定' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '結果QR転送' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'QR受信' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'バックアップ / 復元' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '本部バックアップ・復元' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'データ管理' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '新しいアプリ版を有効化' })).not.toBeInTheDocument()
   })
