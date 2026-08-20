@@ -98,11 +98,10 @@ describe('transactional Host restore', () => {
     await destination.localSettings.put({ key: 'existing', value: 42 })
     const prepared = await prepareHostRestore(serializeHostBackup(backup))
 
-    const table = destination.resultRevisions as unknown as { bulkAdd: (rows: unknown[]) => Promise<unknown> }
-    const original = table.bulkAdd.bind(table)
-    table.bulkAdd = async () => { throw new Error('injected restore failure') }
+    destination.resultRevisions.hook('creating', () => {
+      throw new Error('injected restore failure')
+    })
     await expect(restorePreparedHostBackup(destination, prepared)).rejects.toThrow('injected restore failure')
-    table.bulkAdd = original
 
     expect(await destination.operators.toArray()).toEqual([{ operatorId: 'keep-me', name: 'Existing Host' }])
     expect(await destination.localSettings.toArray()).toEqual([{ key: 'existing', value: 42 }])
