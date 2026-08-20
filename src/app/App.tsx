@@ -4,6 +4,8 @@ import { getOrCreateDeviceId } from '../device/device-service'
 import { ConfigRepository } from '../db/config-repository'
 import { createDatabase } from '../db/database'
 import { resetAllPersistentData } from '../db/data-reset'
+import { createHostBackup } from '../backup/backup-service'
+import { prepareHostRestore, restorePreparedHostBackup } from '../backup/restore-service'
 import { APP_VERSION } from '../pwa/app-version'
 import {
   UNSUPPORTED_PWA_SNAPSHOT,
@@ -18,13 +20,14 @@ import { CourtTransferHistory } from './CourtTransferHistory'
 import { createCourtTransferHistoryServices } from './court-transfer-history-service'
 import { DataManagementPanel } from './DataManagementPanel'
 import { DeviceDiagnostics } from './DeviceDiagnostics'
+import { HostBackupPanel, type HostBackupPanelServices } from './HostBackupPanel'
 import { HostScoringDashboard } from './HostScoringDashboard'
 import { createHostScoringService } from './host-scoring-service'
 import { TournamentConfigEditor } from './TournamentConfigEditor'
 import { TransferDemo } from './TransferDemo'
 
 type AppMode = 'HOST' | 'COURT' | null
-type HostTab = 'SCORING' | 'CONFIG' | 'QR'
+type HostTab = 'SCORING' | 'CONFIG' | 'QR' | 'BACKUP'
 type AppConfigRepository = Pick<ConfigRepository, 'loadCurrent' | 'apply'> & Partial<Pick<ConfigRepository, 'previewRegression'>>
 
 export interface AppProps {
@@ -34,6 +37,7 @@ export interface AppProps {
   operatorName?: string
   pwaRuntime?: PwaRuntime
   resetPersistentData?: () => Promise<void> | void
+  hostBackupServices?: HostBackupPanelServices
 }
 
 const RELOAD_CONFIRMATION = 'アプリを再読み込みします。保存済みの大会データは削除されません。続行しますか？'
@@ -45,6 +49,7 @@ export function App({
   operatorName = '本部担当',
   pwaRuntime,
   resetPersistentData,
+  hostBackupServices,
 }: AppProps = {}) {
   const [mode, setMode] = useState<AppMode>(null)
   const [hostTab, setHostTab] = useState<HostTab>('CONFIG')
@@ -64,6 +69,12 @@ export function App({
   const courtResultServices = useMemo(() => createCourtResultService(appDatabase, { deviceId }), [appDatabase, deviceId])
   const courtTransferHistoryServices = useMemo(() => createCourtTransferHistoryServices(appDatabase), [appDatabase])
   const hostScoringServices = useMemo(() => createHostScoringService(appDatabase), [appDatabase])
+  const browserHostBackupServices = useMemo<HostBackupPanelServices>(() => ({
+    createBackup: () => createHostBackup(appDatabase),
+    prepareRestore: (json) => prepareHostRestore(json),
+    restore: (prepared) => restorePreparedHostBackup(appDatabase, prepared),
+  }), [appDatabase])
+  const resolvedHostBackupServices = hostBackupServices ?? browserHostBackupServices
   const editorConfigRepository = useMemo<AppConfigRepository>(() => ({
     loadCurrent: (tournamentId) => resolvedConfigRepository.loadCurrent(tournamentId),
     previewRegression: resolvedConfigRepository.previewRegression ? (snapshot) => resolvedConfigRepository.previewRegression!(snapshot) : undefined,
@@ -122,6 +133,11 @@ export function App({
     setKnownConfigVersion(null)
     setKnownConfigVersionId(null)
   }
+  const handleHostRestored = (result: { tournamentId: string; activeConfigVersionId: string; activeConfigVersion: number }) => {
+    setActiveTournamentId(result.tournamentId as TournamentId)
+    setKnownConfigVersion(result.activeConfigVersion)
+    setKnownConfigVersionId(result.activeConfigVersionId)
+  }
   const returnToModeSelection = () => { setMode(null); setHostTab('CONFIG') }
 
   let content: ReactNode
@@ -135,6 +151,7 @@ export function App({
         <button type="button" aria-pressed={hostTab === 'SCORING'} onClick={() => setHostTab('SCORING')}>得点・順位</button>
         <button type="button" aria-pressed={hostTab === 'CONFIG'} onClick={() => setHostTab('CONFIG')}>大会設定</button>
         <button type="button" aria-pressed={hostTab === 'QR'} onClick={() => setHostTab('QR')}>QR受信</button>
+        <button type="button" aria-pressed={hostTab === 'BACKUP'} onClick={() => setHostTab('BACKUP')}>バックアップ</button>
       </nav>
       {hostTab === 'SCORING' ? (
         <HostScoringDashboard service={hostScoringServices} />
@@ -143,8 +160,10 @@ export function App({
           <TournamentConfigEditor repository={editorConfigRepository} tournamentId={activeTournamentId} operatorName={operatorName} />
           <ConfigUpdatePanel mode="HOST" services={configUpdateServices} />
         </>
-      ) : (
+      ) : hostTab === 'QR' ? (
         <TransferDemo mode="HOST" deviceId={deviceId} />
+      ) : (
+        <HostBackupPanel services={resolvedHostBackupServices} onRestored={handleHostRestored} />
       )}
     </>
   } else if (mode === 'COURT') {

@@ -11,6 +11,27 @@ import type {
   TransferBatchRecord,
 } from './schema'
 
+const IMPORTED_BATCH_META_PREFIX = 'host.imported-result-batch:'
+interface ImportedBatchMetaValue {
+  kind: 'IMPORTED_RESULT_BATCH'
+  tournamentId: TournamentId
+  batchId: BatchId
+  importedAt: string
+}
+
+function importedBatchMetaKey(tournamentId: TournamentId, batchId: BatchId): string {
+  return `${IMPORTED_BATCH_META_PREFIX}${tournamentId}:${batchId}`
+}
+
+function isImportedBatchMetaValue(value: unknown): value is ImportedBatchMetaValue {
+  if (value === null || typeof value !== 'object') return false
+  const item = value as Partial<ImportedBatchMetaValue>
+  return item.kind === 'IMPORTED_RESULT_BATCH' &&
+    typeof item.tournamentId === 'string' && item.tournamentId.length > 0 &&
+    typeof item.batchId === 'string' && item.batchId.length > 0 &&
+    typeof item.importedAt === 'string' && item.importedAt.length > 0
+}
+
 export class TransferRepository {
   constructor(private readonly db: AppDatabase) {}
 
@@ -177,6 +198,41 @@ export class TransferRepository {
     revisionId: RevisionId,
   ): Promise<RevisionDeliveryRecord | undefined> {
     return this.db.revisionDeliveries.get(revisionId)
+  }
+
+  async markImportedBatch(
+    batchId: BatchId,
+    tournamentId: TournamentId,
+    importedAt: string,
+  ): Promise<void> {
+    if (!String(batchId).length || !String(tournamentId).length || !importedAt) {
+      throw new Error('invalid imported batch metadata')
+    }
+    const key = importedBatchMetaKey(tournamentId, batchId)
+    const existing = await this.db.appMeta.get(key)
+    if (existing) {
+      if (!isImportedBatchMetaValue(existing.value) ||
+        existing.value.tournamentId !== tournamentId || existing.value.batchId !== batchId) {
+        throw new Error(`imported batch metadata collision for ${batchId}`)
+      }
+      return
+    }
+    const value: ImportedBatchMetaValue = {
+      kind: 'IMPORTED_RESULT_BATCH',
+      tournamentId,
+      batchId,
+      importedAt,
+    }
+    await this.db.appMeta.add({ key, value })
+  }
+
+  async listImportedBatchIds(tournamentId: TournamentId): Promise<BatchId[]> {
+    const records = await this.db.appMeta.filter((record) => {
+      const value = record.value
+      return isImportedBatchMetaValue(value) && value.tournamentId === tournamentId
+    }).toArray()
+    return [...new Set(records.map((record) => (record.value as ImportedBatchMetaValue).batchId))]
+      .sort((left, right) => left < right ? -1 : left > right ? 1 : 0)
   }
 
   async markBatchSentManually(
