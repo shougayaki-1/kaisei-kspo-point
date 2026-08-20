@@ -24,6 +24,7 @@ describe('Phase 5 PWA integration', () => {
   it('uses the single app version source and exposes device diagnostics', async () => {
     render(<App />)
 
+    fireEvent.click(screen.getByRole('button', { name: '端末状態' }))
     const diagnostics = screen.getByLabelText('Device diagnostics')
     expect(within(diagnostics).getByText('App Version')).toBeInTheDocument()
     expect(within(diagnostics).getByText(APP_VERSION)).toBeInTheDocument()
@@ -37,6 +38,7 @@ describe('Phase 5 PWA integration', () => {
     const reload = vi.fn()
 
     render(<App pwaRuntime={pwaRuntime} reload={reload} />)
+    fireEvent.click(screen.getByRole('button', { name: '端末状態' }))
     fireEvent.click(screen.getByRole('button', { name: '新しいアプリ版を有効化' }))
 
     expect(pwaRuntime.activateUpdate).toHaveBeenCalledOnce()

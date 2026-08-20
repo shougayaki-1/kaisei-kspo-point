@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { PwaRuntime, PwaRuntimeSnapshot } from '../pwa/runtime'
 import { App } from './App'
@@ -39,11 +39,15 @@ describe('Phase 5 operation separation', () => {
     expect(pwaRuntime.activateUpdate).not.toHaveBeenCalled()
     expect(resetPersistentData).not.toHaveBeenCalled()
 
+    fireEvent.click(screen.getByRole('button', { name: '端末状態' }))
     fireEvent.click(screen.getByRole('button', { name: '新しいアプリ版を有効化' }))
     expect(pwaRuntime.activateUpdate).toHaveBeenCalledOnce()
     expect(reload).toHaveBeenCalledOnce()
     expect(resetPersistentData).not.toHaveBeenCalled()
 
+    fireEvent.click(screen.getByRole('button', { name: '閉じる' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'アプリの設定・データ管理' }))
     fireEvent.click(screen.getByRole('button', { name: '保存データの初期化を開始' }))
     fireEvent.click(screen.getByRole('checkbox', { name: '削除対象を確認しました' }))
     fireEvent.click(screen.getByRole('button', { name: '保存データを完全に削除' }))

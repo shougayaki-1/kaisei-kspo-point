@@ -101,6 +101,27 @@ describe('App', () => {
     expect(screen.getByText(/^Device [0-9a-f-]+$/i)).toBeInTheDocument()
   })
 
+  it('groups mode choices into descriptive cards so operators can select the right workspace', () => {
+    render(<App />)
+
+    const choices = screen.getByRole('region', { name: 'モードを選択' })
+    expect(within(choices).getByRole('heading', { name: '本部モード' })).toBeInTheDocument()
+    expect(within(choices).getByText('大会全体の集計と設定を管理')).toBeInTheDocument()
+    expect(within(choices).getByRole('heading', { name: 'コートモード' })).toBeInTheDocument()
+    expect(within(choices).getByText('競技結果を入力して本部へ転送')).toBeInTheDocument()
+    expect(within(choices).getByRole('heading', { name: '表示モード' })).toBeInTheDocument()
+    expect(within(choices).getByText('最新の得点と順位を確認')).toBeInTheDocument()
+  })
+
+  it('keeps device diagnostics out of the workspace until an operator opens the status panel', () => {
+    render(<App />)
+
+    expect(screen.queryByLabelText('Device diagnostics')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '端末状態' }))
+    expect(screen.getByRole('dialog', { name: '端末状態' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Device diagnostics')).toBeInTheDocument()
+  })
+
   it('shows tournament configuration and QR receive tabs in Host mode', () => {
     render(<App configRepository={configRepository()} />)
     fireEvent.click(screen.getByRole('button', { name: '本部モード' }))
@@ -173,8 +194,9 @@ describe('App', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'このConfigVersionを有効化' }))
 
     expect(await screen.findByText('Config v2')).toBeInTheDocument()
-    expect(screen.getByText('config-v2')).toBeInTheDocument()
     expect(await screen.findByRole('alert')).toHaveTextContent(/release SHA|埋め込まれた/i)
+    fireEvent.click(screen.getByRole('button', { name: '端末状態' }))
+    expect(screen.getByText('config-v2')).toBeInTheDocument()
   })
 
   it('reloads only after confirmation', () => {

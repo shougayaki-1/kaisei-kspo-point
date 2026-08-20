@@ -1,4 +1,26 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
+  AppBar,
+  Box,
+  Button,
+  Card,
+  CardContent,
+  Chip,
+  Container,
+  Drawer,
+  Paper,
+  Stack,
+  Toolbar,
+  Typography,
+} from '@mui/material'
+import AssessmentRoundedIcon from '@mui/icons-material/AssessmentRounded'
+import ExpandMoreRoundedIcon from '@mui/icons-material/ExpandMoreRounded'
+import GroupsRoundedIcon from '@mui/icons-material/GroupsRounded'
+import MonitorRoundedIcon from '@mui/icons-material/MonitorRounded'
+import StadiumRoundedIcon from '@mui/icons-material/StadiumRounded'
 import type { TournamentId } from '../domain/ids'
 import { getOrCreateDeviceId } from '../device/device-service'
 import { ConfigRepository } from '../db/config-repository'
@@ -57,6 +79,33 @@ export interface AppProps {
 
 const RELOAD_CONFIRMATION = 'アプリを再読み込みします。保存済みの大会データは削除されません。続行しますか？'
 
+interface ModeChoiceProps {
+  title: string
+  description: string
+  actionLabel: string
+  icon: ReactNode
+  onClick: () => void
+}
+
+function ModeChoice({ title, description, actionLabel, icon, onClick }: ModeChoiceProps) {
+  return (
+    <Card component="article" variant="outlined" sx={{ height: '100%', display: 'flex' }}>
+      <CardContent sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2, p: 3, width: '100%', '&:last-child': { pb: 3 } }}>
+        <Box sx={{ display: 'grid', placeItems: 'center', width: 48, height: 48, borderRadius: 3, bgcolor: 'primary.light', color: 'primary.main' }}>
+          {icon}
+        </Box>
+        <Box sx={{ display: 'grid', gap: 0.75 }}>
+          <Typography component="h2" variant="h5">{title}</Typography>
+          <Typography color="text.secondary">{description}</Typography>
+        </Box>
+        <Button variant="contained" aria-label={title} onClick={onClick} sx={{ mt: 'auto' }}>
+          {actionLabel}
+        </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
 export function App({
   confirmReload = (message) => window.confirm(message),
   reload = () => window.location.reload(),
@@ -77,6 +126,7 @@ export function App({
   const [pwaSnapshot, setPwaSnapshot] = useState<PwaRuntimeSnapshot>(() =>
     pwaRuntime?.getSnapshot() ?? { ...UNSUPPORTED_PWA_SNAPSHOT },
   )
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
   const releaseGate = useMemo(
     () => tryBuildReleaseIdentifier(knownConfigVersionId),
     [knownConfigVersionId],
@@ -233,33 +283,95 @@ export function App({
       <DisplayDashboard service={hostScoringServices} />
     </>
   } else {
-    content = <>
-      <h1>開成運動交流祭 得点管理</h1><p>使用するモードを選択してください。</p>
-      <div className="mode-actions">
-        <button type="button" onClick={() => { setHostTab('CONFIG'); setMode('HOST') }}>本部モード</button>
-        <button type="button" onClick={() => setMode('COURT')}>コートモード</button>
-        <button type="button" onClick={() => setMode('DISPLAY')}>表示モード</button>
-      </div>
-    </>
+    content = <Stack spacing={4}>
+      <Stack className="mode-hero" spacing={1.5}>
+        <Chip label="OFFLINE SCORE MANAGEMENT" color="primary" variant="outlined" sx={{ alignSelf: 'flex-start', fontWeight: 700, letterSpacing: '0.08em' }} />
+        <Typography component="h1" variant="h1">開成運動交流祭<br />得点管理</Typography>
+        <Typography color="text.secondary" sx={{ fontSize: '1.1rem', maxWidth: 560 }}>
+          使用するモードを選択してください。端末ごとの役割に合わせて、必要な操作だけを表示します。
+        </Typography>
+      </Stack>
+      <Box component="section" aria-label="モードを選択" className="mode-choice-grid">
+        <ModeChoice
+          title="本部モード"
+          description="大会全体の集計と設定を管理"
+          actionLabel="本部を開く"
+          icon={<GroupsRoundedIcon fontSize="large" />}
+          onClick={() => { setHostTab('CONFIG'); setMode('HOST') }}
+        />
+        <ModeChoice
+          title="コートモード"
+          description="競技結果を入力して本部へ転送"
+          actionLabel="コートを開く"
+          icon={<StadiumRoundedIcon fontSize="large" />}
+          onClick={() => setMode('COURT')}
+        />
+        <ModeChoice
+          title="表示モード"
+          description="最新の得点と順位を確認"
+          actionLabel="表示を開く"
+          icon={<MonitorRoundedIcon fontSize="large" />}
+          onClick={() => setMode('DISPLAY')}
+        />
+      </Box>
+    </Stack>
   }
 
-  return <div className="app-shell">
-    <main>{content}</main>
-    <DeviceDiagnostics
-      appVersion={APP_VERSION}
-      releaseSha={releaseGate.identifier?.releaseSha ?? BUILD_RELEASE_SHA}
-      releaseGateError={releaseGate.error}
-      activeConfigVersionId={knownConfigVersionId}
-      storageAvailable={storageAvailable}
-      pwa={pwaSnapshot}
-      onActivateUpdate={pwaRuntime && mode !== 'DISPLAY' ? handleActivateUpdate : undefined}
-    />
-    {mode !== 'DISPLAY' && !releaseGateActive ? <DataManagementPanel onReset={handleResetPersistentData} /> : null}
-    <footer className="status-bar" aria-label="端末状態">
-      <span>App {APP_VERSION}</span>
-      <span>{knownConfigVersion === null ? 'Config -' : `Config v${knownConfigVersion}`}</span>
-      <span>Device {deviceId.slice(0, 8)}</span>
-      <button type="button" className="reload-button" onClick={handleReload}>アプリを再読み込み</button>
-    </footer>
-  </div>
+  return <Box className="app-shell">
+    <AppBar position="sticky" color="inherit" elevation={0} sx={{ borderBottom: '1px solid #e1e7f0', bgcolor: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(12px)' }}>
+      <Toolbar sx={{ width: 'min(1200px, 100%)', mx: 'auto', gap: 1.5 }}>
+        <Box sx={{ display: 'grid', placeItems: 'center', width: 36, height: 36, borderRadius: 2.5, bgcolor: 'primary.main', color: 'primary.contrastText' }}>
+          <AssessmentRoundedIcon fontSize="small" />
+        </Box>
+        <Typography variant="subtitle1" sx={{ flexGrow: 1, fontWeight: 800 }}>開成運動交流祭 得点管理</Typography>
+        <Button color="primary" variant="text" startIcon={<AssessmentRoundedIcon />} onClick={() => setDiagnosticsOpen(true)}>
+          端末状態
+        </Button>
+      </Toolbar>
+    </AppBar>
+
+    <Box component="main" className="app-main">
+      <Container maxWidth="lg">{content}</Container>
+      {mode !== 'DISPLAY' && !releaseGateActive ? (
+        <Container maxWidth="lg" sx={{ mt: 3 }}>
+          <Accordion disableGutters elevation={0} sx={{ border: '1px solid #e1e7f0', borderRadius: '16px !important', overflow: 'hidden', '&:before': { display: 'none' } }}>
+            <AccordionSummary expandIcon={<ExpandMoreRoundedIcon />}>
+              <Typography sx={{ fontWeight: 700 }}>アプリの設定・データ管理</Typography>
+            </AccordionSummary>
+            <AccordionDetails><DataManagementPanel onReset={handleResetPersistentData} /></AccordionDetails>
+          </Accordion>
+        </Container>
+      ) : null}
+    </Box>
+
+    <Drawer
+      anchor="right"
+      open={diagnosticsOpen}
+      onClose={() => setDiagnosticsOpen(false)}
+      slotProps={{ paper: { 'aria-labelledby': 'device-status-title' } }}
+    >
+      <Stack sx={{ width: 'min(100vw, 420px)', p: 3 }} spacing={2}>
+        <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
+          <Typography id="device-status-title" variant="h6">端末状態</Typography>
+          <Button size="small" onClick={() => setDiagnosticsOpen(false)}>閉じる</Button>
+        </Stack>
+        <DeviceDiagnostics
+          appVersion={APP_VERSION}
+          releaseSha={releaseGate.identifier?.releaseSha ?? BUILD_RELEASE_SHA}
+          releaseGateError={releaseGate.error}
+          activeConfigVersionId={knownConfigVersionId}
+          storageAvailable={storageAvailable}
+          pwa={pwaSnapshot}
+          onActivateUpdate={pwaRuntime && mode !== 'DISPLAY' ? handleActivateUpdate : undefined}
+        />
+      </Stack>
+    </Drawer>
+
+    <Paper component="footer" square className="status-bar" aria-label="端末状態" elevation={0}>
+      <Chip size="small" label={`App ${APP_VERSION}`} />
+      <Typography variant="body2">{knownConfigVersion === null ? 'Config -' : `Config v${knownConfigVersion}`}</Typography>
+      <Typography variant="body2">Device {deviceId.slice(0, 8)}</Typography>
+      <Button variant="outlined" size="small" className="reload-button" onClick={handleReload}>アプリを再読み込み</Button>
+    </Paper>
+  </Box>
 }

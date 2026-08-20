@@ -1,7 +1,9 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { CssBaseline, ThemeProvider } from '@mui/material'
 import { registerSW } from 'virtual:pwa-register'
 import { App } from './app/App'
+import { appTheme } from './app/theme'
 import { createPwaRuntime, type RegisterPwa } from './pwa/runtime'
 import './index.css'
 
@@ -26,6 +28,9 @@ pwaRuntime.start()
 
 createRoot(rootElement).render(
   <StrictMode>
-    <App pwaRuntime={pwaRuntime} />
+    <ThemeProvider theme={appTheme}>
+      <CssBaseline />
+      <App pwaRuntime={pwaRuntime} />
+    </ThemeProvider>
   </StrictMode>,
 )

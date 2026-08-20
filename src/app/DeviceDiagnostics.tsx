@@ -1,3 +1,4 @@
+import { Alert, Box, Button, Divider, Stack, Typography } from '@mui/material'
 import type { PwaRuntimeSnapshot } from '../pwa/runtime'
 
 export interface DeviceDiagnosticsProps {
@@ -19,26 +20,35 @@ export function DeviceDiagnostics({
   pwa,
   onActivateUpdate,
 }: DeviceDiagnosticsProps) {
+  const rows = [
+    ['App Version', appVersion],
+    ['Build release SHA', releaseSha || '未埋め込み'],
+    ['Release gate', releaseGateError ? `BLOCKED: ${releaseGateError}` : activeConfigVersionId ? (releaseSha ? '検証済み' : 'BLOCKED: release SHAなし') : 'ConfigVersion待ち'],
+    ['Active ConfigVersion', activeConfigVersionId ?? '-'],
+    ['IndexedDB / Storage', storageAvailable ? '利用可能' : '利用不可'],
+    ['Service Worker', pwa.serviceWorkerStatus],
+    ['Offline readiness', pwa.offlineReady ? '準備完了' : '未準備'],
+    ['Update available', pwa.updateAvailable ? 'あり' : 'なし'],
+    ['Event-day version pin', pwa.eventDayPinned ? '有効' : '無効'],
+  ]
+
   return (
-    <section aria-label="Device diagnostics">
-      <h2>端末診断</h2>
-      <dl>
-        <div><dt>App Version</dt><dd>{appVersion}</dd></div>
-        <div><dt>Build release SHA</dt><dd>{releaseSha || '未埋め込み'}</dd></div>
-        <div><dt>Release gate</dt><dd>{releaseGateError ? `BLOCKED: ${releaseGateError}` : activeConfigVersionId ? (releaseSha ? '検証済み' : 'BLOCKED: release SHAなし') : 'ConfigVersion待ち'}</dd></div>
-        <div><dt>Active ConfigVersion</dt><dd>{activeConfigVersionId ?? '-'}</dd></div>
-        <div><dt>IndexedDB / Storage</dt><dd>{storageAvailable ? '利用可能' : '利用不可'}</dd></div>
-        <div><dt>Service Worker</dt><dd>{pwa.serviceWorkerStatus}</dd></div>
-        <div><dt>Offline readiness</dt><dd>{pwa.offlineReady ? '準備完了' : '未準備'}</dd></div>
-        <div><dt>Update available</dt><dd>{pwa.updateAvailable ? 'あり' : 'なし'}</dd></div>
-        <div><dt>Event-day version pin</dt><dd>{pwa.eventDayPinned ? '有効' : '無効'}</dd></div>
-      </dl>
+    <Box component="section" aria-label="Device diagnostics">
+      <Typography component="h2" variant="h5" gutterBottom>端末診断</Typography>
+      <Stack divider={<Divider flexItem />}>
+        {rows.map(([label, value]) => (
+          <Box key={label} sx={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 2, py: 1.25 }}>
+            <Typography variant="body2" color="text.secondary">{label}</Typography>
+            <Typography variant="body2" sx={{ fontWeight: 700, textAlign: 'right', overflowWrap: 'anywhere' }}>{value}</Typography>
+          </Box>
+        ))}
+      </Stack>
       {pwa.updateAvailable && onActivateUpdate ? (
-        <button type="button" onClick={onActivateUpdate}>新しいアプリ版を有効化</button>
+        <Button fullWidth variant="contained" onClick={onActivateUpdate} sx={{ mt: 2 }}>新しいアプリ版を有効化</Button>
       ) : null}
       {pwa.reloadRequired ? (
-        <p>新しいアプリ版は有効化済みです。必要なタイミングで安全な再読み込みを実行してください。</p>
+        <Alert severity="info" sx={{ mt: 2 }}>新しいアプリ版は有効化済みです。必要なタイミングで安全な再読み込みを実行してください。</Alert>
       ) : null}
-    </section>
+    </Box>
   )
 }

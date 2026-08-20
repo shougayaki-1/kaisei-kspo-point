@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { Alert, Box, Button, Checkbox, FormControlLabel, Stack, Typography } from '@mui/material'
 import { DATA_RESET_TARGETS } from '../db/data-reset'
 
 export interface DataManagementPanelProps {
@@ -38,20 +39,23 @@ export function DataManagementPanel({ onReset }: DataManagementPanelProps) {
   }
 
   return (
-    <section aria-label="Data management">
-      <h2>データ管理</h2>
-      <p>通常の再読み込みとは別の操作です。再読み込みでは保存済みデータを削除しません。</p>
+    <Box component="section" aria-label="Data management">
+      <Stack spacing={2}>
+      <Box>
+        <Typography component="h2" variant="h6">データ管理</Typography>
+        <Typography color="text.secondary" sx={{ mt: 0.5 }}>通常の再読み込みとは別の操作です。再読み込みでは保存済みデータを削除しません。</Typography>
+      </Box>
 
       {stage === 'IDLE' ? (
-        <button type="button" onClick={() => setStage('CONFIRMING')}>
+        <Button type="button" variant="outlined" color="error" onClick={() => setStage('CONFIRMING')}>
           保存データの初期化を開始
-        </button>
+        </Button>
       ) : null}
 
       {stage === 'CONFIRMING' || stage === 'RUNNING' ? (
-        <div>
-          <strong>この操作は取り消せません</strong>
-          <p>この端末の次の保存データを、参照関係を含めて一括で削除します。</p>
+        <Alert severity="warning" variant="outlined">
+          <Typography sx={{ fontWeight: 800 }}>この操作は取り消せません</Typography>
+          <Typography variant="body2" sx={{ mt: 0.5 }}>この端末の次の保存データを、参照関係を含めて一括で削除します。</Typography>
           <ul>
             {DATA_RESET_TARGETS.map((target) => (
               <li key={target.label}>
@@ -59,38 +63,40 @@ export function DataManagementPanel({ onReset }: DataManagementPanelProps) {
               </li>
             ))}
           </ul>
-          <p>端末の Device ID、インストール済みアプリ本体、Service Worker は保持します。</p>
-          <label>
-            <input
-              type="checkbox"
+          <Typography variant="body2">端末の Device ID、インストール済みアプリ本体、Service Worker は保持します。</Typography>
+          <FormControlLabel
+            control={<Checkbox
               checked={acknowledged}
               disabled={stage === 'RUNNING'}
               onChange={(event) => setAcknowledged(event.target.checked)}
-            />
-            削除対象を確認しました
-          </label>
-          <div>
-            <button type="button" onClick={cancel} disabled={stage === 'RUNNING'}>キャンセル</button>
-            <button
+            />}
+            label="削除対象を確認しました"
+          />
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 1 }}>
+            <Button type="button" variant="outlined" onClick={cancel} disabled={stage === 'RUNNING'}>キャンセル</Button>
+            <Button
               type="button"
+              variant="contained"
+              color="error"
               onClick={() => void reset()}
               disabled={!acknowledged || stage === 'RUNNING'}
             >
               保存データを完全に削除
-            </button>
-          </div>
-        </div>
+            </Button>
+          </Stack>
+        </Alert>
       ) : null}
 
       {stage === 'DONE' ? (
-        <div>
-          <p role="status">保存データを削除しました。</p>
-          <p>アプリ版は変更されていません。必要な場合は通常の再読み込みを別途実行してください。</p>
-          <button type="button" onClick={() => setStage('IDLE')}>閉じる</button>
-        </div>
+        <Alert severity="success">
+          <Typography role="status" sx={{ fontWeight: 700 }}>保存データを削除しました。</Typography>
+          <Typography variant="body2" sx={{ mt: 0.5 }}>アプリ版は変更されていません。必要な場合は通常の再読み込みを別途実行してください。</Typography>
+          <Button type="button" size="small" onClick={() => setStage('IDLE')} sx={{ mt: 1 }}>閉じる</Button>
+        </Alert>
       ) : null}
 
-      {error ? <p role="alert">{error}</p> : null}
-    </section>
+      {error ? <Alert severity="error" role="alert">{error}</Alert> : null}
+      </Stack>
+    </Box>
   )
 }
