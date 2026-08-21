@@ -2,7 +2,7 @@ import type { AppDatabase } from '../../db/database'
 import type { TournamentId } from '../../domain/ids'
 import type {
   ConfigEditDraft,
-  SetupDraftRepository,
+  SetupDraftRepository as SetupDraftRepositoryContract,
   TournamentSetupDraft,
 } from './setup-types'
 
@@ -16,7 +16,7 @@ function clone<T>(value: T): T {
   return structuredClone(value)
 }
 
-export class SetupDraftRepository implements SetupDraftRepository {
+export class SetupDraftRepository implements SetupDraftRepositoryContract {
   constructor(private readonly db: AppDatabase) {}
 
   async loadSetupDraft(): Promise<TournamentSetupDraft | undefined> {
