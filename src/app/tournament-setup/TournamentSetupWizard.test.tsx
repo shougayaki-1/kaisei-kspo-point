@@ -41,6 +41,48 @@ function createRepository(initialDraft?: TournamentSetupDraft) {
   }
 }
 
+function rankPoints(count: number): Record<number, number> {
+  return Object.fromEntries(
+    Array.from({ length: count }, (_, index) => [index + 1, count - index]),
+  )
+}
+
+function createReviewDraft(
+  currentStep: TournamentSetupDraft['currentStep'],
+): TournamentSetupDraft {
+  return {
+    draftFormatVersion: 1,
+    draftId: 'review-draft',
+    createdAt: '2026-08-21T09:00:00+09:00',
+    updatedAt: '2026-08-21T09:05:00+09:00',
+    currentStep,
+    tournament: { name: '開成運動交流祭', eventDate: '2026-09-20' },
+    teams: [
+      { teamKey: 'red', name: '赤組' },
+      { teamKey: 'blue', name: '青組' },
+    ],
+    templateSource: { type: 'BUILT_IN', templateId: 'generic-templates', templateVersion: 1 },
+    competitions: [
+      {
+        competitionKey: 'ranking', name: '順位競技', competitionKind: 'RANKING', inputGrouping: 'WHOLE_ROUND', rounds: 1, courts: 1, groupsPerTeam: 1,
+        scoring: { inputType: 'RANK', rankingDirection: 'MANUAL', rankPoints: rankPoints(2) },
+      },
+      {
+        competitionKey: 'time', name: 'タイム競技', competitionKind: 'TIME', inputGrouping: 'WHOLE_ROUND', rounds: 1, courts: 1, groupsPerTeam: 1,
+        scoring: { inputType: 'TIME', rankingDirection: 'LOWER', rankPoints: rankPoints(2) },
+      },
+      {
+        competitionKey: 'quantity', name: '回数競技', competitionKind: 'QUANTITY', inputGrouping: 'WHOLE_ROUND', rounds: 1, courts: 1, groupsPerTeam: 1,
+        scoring: { inputType: 'NUMBER', rankingDirection: 'HIGHER', rankPoints: rankPoints(2) },
+      },
+      {
+        competitionKey: 'win-loss', name: '勝敗競技', competitionKind: 'WIN_LOSS', inputGrouping: 'WHOLE_ROUND', rounds: 1, courts: 1, groupsPerTeam: 1,
+        scoring: { inputType: 'WIN_LOSS', rankingDirection: 'MANUAL', rankPoints: rankPoints(2) },
+      },
+    ],
+  }
+}
+
 async function waitForHydration() {
   await waitFor(() => expect(screen.queryByText('読み込み中…')).not.toBeInTheDocument())
 }
@@ -246,5 +288,46 @@ describe('TournamentSetupWizard', () => {
 
     await waitFor(() => expect(screen.getByText('保存済み')).toBeInTheDocument())
     expect(storedDraft?.tournament.name).toBe('新しい名前')
+  })
+
+  it('shows operator-facing input previews for all generic competition kinds without raw schema terms', async () => {
+    const { repository } = createRepository(createReviewDraft('SCORING_REVIEW'))
+
+    render(<TournamentSetupWizard repository={repository} onCancel={vi.fn()} onReadyToApply={vi.fn()} />)
+
+    expect(await screen.findByText('順位を入力')).toBeInTheDocument()
+    expect(screen.getByText('タイムを入力')).toBeInTheDocument()
+    expect(screen.getByText('記録を入力')).toBeInTheDocument()
+    expect(screen.getByText('勝敗を入力')).toBeInTheDocument()
+    expect(screen.queryByText('RANK')).not.toBeInTheDocument()
+    expect(screen.queryByText('WIN_LOSS')).not.toBeInTheDocument()
+  })
+
+  it('blocks final handoff for errors and requires warning acknowledgement before calling onReadyToApply', async () => {
+    const invalidDraft = createReviewDraft('FINAL_CHECK')
+    invalidDraft.tournament.name = ''
+    invalidDraft.competitions[0]!.scoring.rankPoints = {}
+    const { repository } = createRepository(invalidDraft)
+    const onReadyToApply = vi.fn()
+
+    render(<TournamentSetupWizard repository={repository} onCancel={vi.fn()} onReadyToApply={onReadyToApply} />)
+
+    expect(await screen.findByText('大会情報')).toBeInTheDocument()
+    const summary = screen.getByLabelText('設定内容の集計')
+    expect(within(summary).getByText('参加チーム')).toBeInTheDocument()
+    expect(within(summary).getByText('2組')).toBeInTheDocument()
+    expect(within(summary).getByText('競技')).toBeInTheDocument()
+    expect(within(summary).getByText('4競技')).toBeInTheDocument()
+    expect(screen.getAllByText('大会名を入力してください。')).toHaveLength(1)
+    expect(screen.getByText('順位競技 の順位配点を確認してください。')).toBeInTheDocument()
+    expect(screen.queryByText('EMPTY_TOURNAMENT_NAME')).not.toBeInTheDocument()
+
+    const applyButton = screen.getByRole('button', { name: 'この内容で大会を作成する' })
+    expect(applyButton).toBeDisabled()
+    fireEvent.click(applyButton)
+    expect(onReadyToApply).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getAllByRole('button', { name: '修正する' })[0]!)
+    expect(await screen.findByLabelText('大会名')).toBeInTheDocument()
   })
 })

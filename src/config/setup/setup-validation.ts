@@ -1,6 +1,6 @@
 import { compileTournamentSetup } from './setup-compiler'
 import type { SetupStep, TournamentSetupDraft } from './setup-types'
-import type { ConfigValidationIssue } from '../tournament-config'
+import type { ConfigValidationIssue, TournamentConfigSnapshot } from '../tournament-config'
 
 export interface SetupIssue {
   severity: 'ERROR' | 'WARNING'
@@ -51,8 +51,11 @@ function courtAssignmentIssue(
   }
 }
 
-function buildTargetContextMap(draft: TournamentSetupDraft): Map<string, TargetContext> {
-  const snapshot = compileTournamentSetup(draft, {
+function buildTargetContextMap(
+  draft: TournamentSetupDraft,
+  compiledSnapshot?: TournamentConfigSnapshot,
+): Map<string, TargetContext> {
+  const snapshot = compiledSnapshot ?? compileTournamentSetup(draft, {
     createId: createIdFactory(),
   })
   const targetMap = new Map<string, TargetContext>()
@@ -263,8 +266,9 @@ export function validateSetupDraft(draft: TournamentSetupDraft): SetupIssue[] {
 export function mapConfigIssuesToSetupIssues(
   draft: TournamentSetupDraft,
   issues: ConfigValidationIssue[],
+  compiledSnapshot?: TournamentConfigSnapshot,
 ): SetupIssue[] {
-  const targetContextMap = buildTargetContextMap(draft)
+  const targetContextMap = buildTargetContextMap(draft, compiledSnapshot)
 
   return issues.map((issue) => {
     const context = issue.targetId ? targetContextMap.get(issue.targetId) : undefined

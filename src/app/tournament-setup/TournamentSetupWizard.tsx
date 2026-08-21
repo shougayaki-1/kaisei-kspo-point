@@ -6,7 +6,9 @@ import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
-import type { TournamentConfigSnapshot } from '../../config/tournament-config'
+import { validateTournamentConfig, type TournamentConfigSnapshot } from '../../config/tournament-config'
+import { compileTournamentSetup } from '../../config/setup/setup-compiler'
+import { mapConfigIssuesToSetupIssues, validateSetupDraft, type SetupIssue } from '../../config/setup/setup-validation'
 import type {
   SetupDraftRepository,
   SetupStep,
@@ -16,9 +18,11 @@ import type {
 import { BasicStep } from './BasicStep'
 import { CompetitionStep } from './CompetitionStep'
 import { ScheduleStep } from './ScheduleStep'
+import { ScoringReviewStep } from './ScoringReviewStep'
 import { SetupProgress, SETUP_STEPS } from './SetupProgress'
 import { TemplateStep } from './TemplateStep'
 import { TeamsStep } from './TeamsStep'
+import { FinalCheckStep } from './FinalCheckStep'
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
 
@@ -31,6 +35,34 @@ export interface TournamentSetupWizardProps {
 interface PendingSave {
   id: number
   draft: TournamentSetupDraft
+}
+
+interface FinalCheckState {
+  snapshot?: TournamentConfigSnapshot
+  issues: SetupIssue[]
+}
+
+function mergeFinalCheckIssues(
+  setupIssues: SetupIssue[],
+  mappedDomainIssues: SetupIssue[],
+): SetupIssue[] {
+  return [
+    ...setupIssues,
+    ...mappedDomainIssues.filter((issue) => {
+      if (issue.code === 'EMPTY_LABEL' && issue.step === 'BASIC') {
+        return !setupIssues.some((setupIssue) => setupIssue.code === 'EMPTY_TOURNAMENT_NAME')
+      }
+
+      if (issue.code === 'EMPTY_RANK_POINTS') {
+        return !setupIssues.some((setupIssue) => (
+          setupIssue.code === 'SCORING_CONFIRMATION_REQUIRED'
+          && setupIssue.competitionKey === issue.competitionKey
+        ))
+      }
+
+      return true
+    }),
+  ]
 }
 
 function createId(prefix: string): string {
@@ -100,6 +132,7 @@ function saveStateText(state: SaveState): string | null {
 export function TournamentSetupWizard({
   repository,
   onCancel,
+  onReadyToApply,
 }: TournamentSetupWizardProps) {
   const [draft, setDraft] = useState<TournamentSetupDraft>(() => createDefaultDraft())
   const [saveState, setSaveState] = useState<SaveState>('idle')
@@ -215,6 +248,35 @@ export function TournamentSetupWizard({
 
   const saveText = saveStateText(saveState)
 
+  const finalCheck = useMemo<FinalCheckState>(() => {
+    const setupIssues = validateSetupDraft(draft)
+
+    try {
+      const snapshot = compileTournamentSetup(draft)
+      const domainIssues = validateTournamentConfig(snapshot)
+
+      return {
+        snapshot,
+        issues: mergeFinalCheckIssues(
+          setupIssues,
+          mapConfigIssuesToSetupIssues(draft, domainIssues, snapshot),
+        ),
+      }
+    } catch {
+      return {
+        issues: [
+          ...setupIssues,
+          {
+            severity: 'ERROR',
+            code: 'SETUP_COMPILATION_FAILED',
+            step: 'FINAL_CHECK',
+            message: '設定内容を作成できませんでした。入力内容を確認してください。',
+          },
+        ],
+      }
+    }
+  }, [draft])
+
   const goToStep = (step: SetupStep) => {
     updateDraft((nextDraft) => {
       nextDraft.currentStep = step
@@ -313,6 +375,18 @@ export function TournamentSetupWizard({
                 nextDraft.competitions = competitions
               })
             }}
+          />
+        )
+      case 'SCORING_REVIEW':
+        return <ScoringReviewStep competitions={draft.competitions} issues={finalCheck.issues} />
+      case 'FINAL_CHECK':
+        return (
+          <FinalCheckStep
+            snapshot={finalCheck.snapshot}
+            issues={finalCheck.issues}
+            disabled={controlsDisabled}
+            onFixIssue={(issue) => goToStep(issue.step)}
+            onReadyToApply={(snapshot) => onReadyToApply(snapshot, draft)}
           />
         )
       default:
