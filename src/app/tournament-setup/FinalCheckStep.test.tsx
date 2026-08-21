@@ -28,6 +28,17 @@ const snapshot = {
   scoringTestCases: [],
 } as unknown as TournamentConfigSnapshot
 
+function createDeferredPromise<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((innerResolve, innerReject) => {
+    resolve = innerResolve
+    reject = innerReject
+  })
+
+  return { promise, resolve, reject }
+}
+
 describe('FinalCheckStep', () => {
   it('requires acknowledgement of a warning before handing off the supplied snapshot', () => {
     const onReadyToApply = vi.fn()
@@ -132,7 +143,7 @@ describe('FinalCheckStep', () => {
     expect(onReadyToApply).not.toHaveBeenCalled()
   })
 
-  it('blocks invalid scoring tests and requires each failed test approval fingerprint before applying', async () => {
+  it('blocks invalid scoring tests and requires each failed test approval fingerprint before applying without legacy handoff', async () => {
     const failed = {
       testCaseId: 'test-1',
       status: 'FAIL' as const,
@@ -212,7 +223,125 @@ describe('FinalCheckStep', () => {
     expect(applyInput?.approvedTestFingerprints).toEqual(
       new Map([[failed.testCaseId, scoringTestResultFingerprint(failed)]]),
     )
-    await waitFor(() => expect(onReadyToApply).toHaveBeenCalledWith(nextSnapshot))
+    await waitFor(() => expect(service.applyApproved).toHaveBeenCalledOnce())
+    expect(onReadyToApply).not.toHaveBeenCalled()
+  })
+
+  it('runs exactly one preview, apply, and post-success notification across rapid clicks', async () => {
+    const previewDeferred = createDeferredPromise<ConfigApplyPreview>()
+    const applyDeferred = createDeferredPromise<ConfigApplyResult>()
+    const onReadyToApply = vi.fn()
+    const onApplied = vi.fn()
+    const flow: TournamentConfigApplyFlow = {
+      service: {
+        preview: vi.fn(() => previewDeferred.promise),
+        applyApproved: vi.fn((_input: ApprovedConfigApply) => applyDeferred.promise),
+      },
+      metadata: {
+        operator: '本部担当',
+        createdAt: '2026-08-21T10:00:00.000Z',
+        changeClass: 'SCORING',
+      },
+    }
+
+    render(
+      <FinalCheckStep
+        snapshot={snapshot}
+        issues={[]}
+        onFixIssue={vi.fn()}
+        onReadyToApply={onReadyToApply}
+        applyFlow={flow}
+        onApplied={onApplied}
+      />,
+    )
+
+    const button = screen.getByRole('button', { name: 'この内容で大会を作成する' })
+    fireEvent.click(button)
+    fireEvent.click(button)
+
+    expect(flow.service.preview).toHaveBeenCalledOnce()
+    expect(button).toBeDisabled()
+
+    const preview: ConfigApplyPreview = {
+      snapshot,
+      regressionResults: [],
+      disposition: 'READY',
+    }
+    previewDeferred.resolve(preview)
+    await waitFor(() => expect(flow.service.applyApproved).toHaveBeenCalledOnce())
+
+    fireEvent.click(button)
+    expect(flow.service.applyApproved).toHaveBeenCalledOnce()
+
+    const applied: ConfigApplyResult = {
+      applied: { version: 1, snapshot },
+      scoringTestApprovals: [],
+    }
+    applyDeferred.resolve(applied)
+    await waitFor(() => expect(onApplied).toHaveBeenCalledWith(applied))
+    expect(onReadyToApply).not.toHaveBeenCalled()
+  })
+
+  it('runs the legacy handoff exactly once across rapid clicks', () => {
+    const onReadyToApply = vi.fn()
+    render(
+      <FinalCheckStep
+        snapshot={snapshot}
+        issues={[]}
+        onFixIssue={vi.fn()}
+        onReadyToApply={onReadyToApply}
+      />,
+    )
+
+    const button = screen.getByRole('button', { name: 'この内容で大会を作成する' })
+    fireEvent.click(button)
+    fireEvent.click(button)
+
+    expect(onReadyToApply).toHaveBeenCalledOnce()
+    expect(onReadyToApply).toHaveBeenCalledWith(snapshot)
+  })
+
+  it('shows a retryable error when preview fails before applying', async () => {
+    const onApplied = vi.fn()
+    const applied: ConfigApplyResult = {
+      applied: { version: 1, snapshot },
+      scoringTestApprovals: [],
+    }
+    const flow: TournamentConfigApplyFlow = {
+      service: {
+        preview: vi.fn()
+          .mockRejectedValueOnce(new Error('preview unavailable'))
+          .mockResolvedValueOnce({ snapshot, regressionResults: [], disposition: 'READY' } satisfies ConfigApplyPreview),
+        applyApproved: vi.fn(async (_input: ApprovedConfigApply) => applied),
+      },
+      metadata: {
+        operator: '本部担当',
+        createdAt: '2026-08-21T10:00:00.000Z',
+        changeClass: 'SCORING',
+      },
+    }
+
+    render(
+      <FinalCheckStep
+        snapshot={snapshot}
+        issues={[]}
+        onFixIssue={vi.fn()}
+        onReadyToApply={vi.fn()}
+        applyFlow={flow}
+        onApplied={onApplied}
+      />,
+    )
+
+    const button = screen.getByRole('button', { name: 'この内容で大会を作成する' })
+    fireEvent.click(button)
+
+    expect(await screen.findByText('大会の作成に失敗しました。もう一度お試しください。')).toBeInTheDocument()
+    expect(button).toBeEnabled()
+
+    fireEvent.click(button)
+    await waitFor(() => expect(flow.service.preview).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(flow.service.applyApproved).toHaveBeenCalledOnce())
+    await waitFor(() => expect(onApplied).toHaveBeenCalledWith(applied))
   })
 
   it.each([

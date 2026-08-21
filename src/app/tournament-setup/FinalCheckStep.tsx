@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -54,6 +54,7 @@ export function FinalCheckStep({
   const [approvedTests, setApprovedTests] = useState<Map<string, string>>(() => new Map())
   const [applying, setApplying] = useState(false)
   const [applyError, setApplyError] = useState('')
+  const applyInFlightRef = useRef(false)
   const errors = useMemo(() => issues.filter((issue) => issue.severity === 'ERROR'), [issues])
   const warnings = useMemo(() => issues.filter((issue) => issue.severity === 'WARNING'), [issues])
   const warningSignature = useMemo(
@@ -78,47 +79,55 @@ export function FinalCheckStep({
   }, [warningSignature])
 
   useEffect(() => {
+    applyInFlightRef.current = false
+    setApplying(false)
     setRegressionPreview(undefined)
     setApprovedTests(new Map())
     setApplyError('')
   }, [snapshot])
 
   const applyCurrentSnapshot = async () => {
-    if (!snapshot || !canApply) return
-    if (!applyFlow) {
-      onReadyToApply(snapshot)
-      return
-    }
-
-    setApplyError('')
-    const preview = regressionPreview ?? await applyFlow.service.preview(snapshot)
-    if (!regressionPreview) {
-      setRegressionPreview(preview)
-      setApprovedTests(new Map())
-      if (preview.disposition !== 'READY') return
-    }
-
-    if (preview.disposition === 'BLOCKED') return
-    const previewFailures = preview.regressionResults.filter((result) => result.status === 'FAIL')
-    const previewFailuresApproved = previewFailures.every(
-      (result) => approvedTests.get(result.testCaseId) === scoringTestResultFingerprint(result),
-    )
-    if (!previewFailuresApproved) return
-
+    if (!snapshot || !canApply || applyInFlightRef.current) return
+    applyInFlightRef.current = true
     setApplying(true)
+    setApplyError('')
+    let canRetry = true
     try {
+      if (!applyFlow) {
+        canRetry = false
+        onReadyToApply(snapshot)
+        return
+      }
+
+      const preview = regressionPreview ?? await applyFlow.service.preview(snapshot)
+      if (!regressionPreview) {
+        setRegressionPreview(preview)
+        setApprovedTests(new Map())
+        if (preview.disposition !== 'READY') return
+      }
+
+      if (preview.disposition === 'BLOCKED') return
+      const previewFailures = preview.regressionResults.filter((result) => result.status === 'FAIL')
+      const previewFailuresApproved = previewFailures.every(
+        (result) => approvedTests.get(result.testCaseId) === scoringTestResultFingerprint(result),
+      )
+      if (!previewFailuresApproved) return
+
       const applied = await applyFlow.service.applyApproved({
         preview,
         metadata: applyFlow.metadata,
         approvedTestFingerprints: approvedTests,
         approvedAt: new Date().toISOString(),
       })
-      if (onApplied) onApplied(applied)
-      else onReadyToApply(snapshot)
+      canRetry = false
+      onApplied?.(applied)
     } catch {
       setApplyError('大会の作成に失敗しました。もう一度お試しください。')
     } finally {
-      setApplying(false)
+      if (canRetry) {
+        applyInFlightRef.current = false
+        setApplying(false)
+      }
     }
   }
 
