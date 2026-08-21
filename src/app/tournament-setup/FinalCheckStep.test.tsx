@@ -225,6 +225,22 @@ describe('FinalCheckStep', () => {
     )
     await waitFor(() => expect(service.applyApproved).toHaveBeenCalledOnce())
     expect(onReadyToApply).not.toHaveBeenCalled()
+    expect(await screen.findByText('大会を作成しました。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '大会を作成しました' })).toBeDisabled()
+
+    view.rerender(
+      <FinalCheckStep
+        snapshot={{ ...nextSnapshot }}
+        issues={[]}
+        onFixIssue={vi.fn()}
+        onReadyToApply={onReadyToApply}
+        applyFlow={flow}
+      />,
+    )
+
+    await waitFor(() => expect(screen.queryByText('大会を作成しました。')).not.toBeInTheDocument())
+    expect(screen.getByRole('button', { name: 'この内容で大会を作成する' })).toBeEnabled()
+    expect(onReadyToApply).not.toHaveBeenCalled()
   })
 
   it('runs exactly one preview, apply, and post-success notification across rapid clicks', async () => {
@@ -342,6 +358,8 @@ describe('FinalCheckStep', () => {
     await waitFor(() => expect(flow.service.preview).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(flow.service.applyApproved).toHaveBeenCalledOnce())
     await waitFor(() => expect(onApplied).toHaveBeenCalledWith(applied))
+    expect(screen.queryByText('大会の作成に失敗しました。もう一度お試しください。')).not.toBeInTheDocument()
+    expect(screen.getByText('大会を作成しました。')).toBeInTheDocument()
   })
 
   it.each([

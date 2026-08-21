@@ -54,6 +54,7 @@ export function FinalCheckStep({
   const [approvedTests, setApprovedTests] = useState<Map<string, string>>(() => new Map())
   const [applying, setApplying] = useState(false)
   const [applyError, setApplyError] = useState('')
+  const [applySuccess, setApplySuccess] = useState(false)
   const applyInFlightRef = useRef(false)
   const errors = useMemo(() => issues.filter((issue) => issue.severity === 'ERROR'), [issues])
   const warnings = useMemo(() => issues.filter((issue) => issue.severity === 'WARNING'), [issues])
@@ -84,6 +85,7 @@ export function FinalCheckStep({
     setRegressionPreview(undefined)
     setApprovedTests(new Map())
     setApplyError('')
+    setApplySuccess(false)
   }, [snapshot])
 
   const applyCurrentSnapshot = async () => {
@@ -91,6 +93,7 @@ export function FinalCheckStep({
     applyInFlightRef.current = true
     setApplying(true)
     setApplyError('')
+    setApplySuccess(false)
     let canRetry = true
     try {
       if (!applyFlow) {
@@ -121,6 +124,7 @@ export function FinalCheckStep({
       })
       canRetry = false
       onApplied?.(applied)
+      setApplySuccess(true)
     } catch {
       setApplyError('大会の作成に失敗しました。もう一度お試しください。')
     } finally {
@@ -226,6 +230,7 @@ export function FinalCheckStep({
       ) : null}
 
       {applyError ? <Alert severity="error">{applyError}</Alert> : null}
+      {applySuccess ? <Alert severity="success">大会を作成しました。</Alert> : null}
 
       <Box>
         <Button
@@ -233,7 +238,7 @@ export function FinalCheckStep({
           disabled={!canApply}
           onClick={() => { void applyCurrentSnapshot() }}
         >
-          {failedResults.length > 0 ? '承認して設定を適用' : 'この内容で大会を作成する'}
+          {applySuccess ? '大会を作成しました' : failedResults.length > 0 ? '承認して設定を適用' : 'この内容で大会を作成する'}
         </Button>
       </Box>
     </Stack>
