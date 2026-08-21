@@ -58,6 +58,49 @@ const changeClasses: ConfigChangeClass[] = [
   'INPUT_SCHEMA',
 ]
 
+const inputTypeLabels: Record<InputField['type'], string> = {
+  NUMBER: '数値',
+  TIME: '時間',
+  RANK: '順位',
+  BOOLEAN: 'はい・いいえ',
+  SELECT: '選択肢',
+  PENALTY: 'ペナルティ',
+  WIN_LOSS: '勝敗',
+  SPECIAL: '特殊入力',
+}
+
+const inputScopeLabels: Record<InputScope, string> = {
+  PER_COURT: 'コートごと',
+  WHOLE_SLOT: '展開全体',
+  CUSTOM_GROUP: '指定グループ',
+}
+
+const rankingDirectionLabels: Record<RankingDirection, string> = {
+  HIGHER_IS_BETTER: '大きい値が上位',
+  LOWER_IS_BETTER: '小さい値が上位',
+}
+
+const tieRuleLabels: Record<TieAwardRule, string> = {
+  AVERAGE_OCCUPIED_PLACES: '同順位の平均点を配分',
+  SAME_RANK_SCORE: '同順位は同じ得点',
+}
+
+const aggregationRuleLabels: Record<AggregationRule, string> = {
+  SUM: '合計',
+  AVERAGE: '平均',
+  BEST_N: '上位の結果を採用',
+  FINAL_ONLY: '最終結果のみ',
+  WIN_POINTS: '勝ち点',
+  CUSTOM: '個別設定',
+}
+
+const changeClassLabels: Record<ConfigChangeClass, string> = {
+  DISPLAY_ONLY: '表示のみ',
+  SCHEDULE: '時程',
+  SCORING: '得点ルール',
+  INPUT_SCHEMA: '入力項目',
+}
+
 function optionalDecimalText(value: string): string | undefined {
   if (value.trim() === '') return undefined
   return value.trim()
@@ -98,6 +141,7 @@ export function TournamentConfigEditor({
   const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(Boolean(tournamentId))
   const [changeClass, setChangeClass] = useState<ConfigChangeClass>('SCORING')
+  const [expandedCompetitionIds, setExpandedCompetitionIds] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     let cancelled = false
@@ -301,11 +345,27 @@ export function TournamentConfigEditor({
             const slots = draft.scheduleSlots.filter(
               (slot) => slot.competitionId === competition.competitionId,
             )
+            const competitionKey = String(competition.competitionId)
+            const expanded = expandedCompetitionIds.has(competitionKey)
 
             return (
-              <article className="config-card" key={competition.competitionId}>
-                <div className="section-heading">
-                  <h4>競技 {competitionIndex + 1}</h4>
+              <article className="config-card competition-card" key={competition.competitionId}>
+                <div className="competition-summary">
+                  <button
+                    type="button"
+                    className="competition-toggle"
+                    aria-expanded={expanded}
+                    onClick={() => setExpandedCompetitionIds((current) => {
+                      const next = new Set(current)
+                      if (next.has(competitionKey)) next.delete(competitionKey)
+                      else next.add(competitionKey)
+                      return next
+                    })}
+                  >
+                    <span>競技 {competitionIndex + 1}</span>
+                    <strong>{competition.name || '名称未設定'}</strong>
+                    <span aria-hidden="true">{expanded ? '閉じる' : '開く'}</span>
+                  </button>
                   <button
                     type="button"
                     onClick={() => {
@@ -321,6 +381,8 @@ export function TournamentConfigEditor({
                   </button>
                 </div>
 
+                {expanded && (
+                  <>
                 <div className="config-grid two-columns">
                   <label>
                     競技名 {competitionIndex + 1}
@@ -345,7 +407,7 @@ export function TournamentConfigEditor({
                         if (target) target.defaultInputScope = event.target.value as InputScope
                       })}
                     >
-                      {inputScopes.map((scope) => <option key={scope} value={scope}>{scope}</option>)}
+                      {inputScopes.map((scope) => <option key={scope} value={scope}>{inputScopeLabels[scope]}</option>)}
                     </select>
                   </label>
                 </div>
@@ -456,7 +518,7 @@ export function TournamentConfigEditor({
                                     replaceFieldType(field, event.target.value as InputField['type']),
                                   )}
                                 >
-                                  {inputTypes.map((type) => <option key={type} value={type}>{type}</option>)}
+                                  {inputTypes.map((type) => <option key={type} value={type}>{inputTypeLabels[type]}</option>)}
                                 </select>
                               </label>
                             </div>
@@ -622,7 +684,7 @@ export function TournamentConfigEditor({
                             if (target) target.rankingRule.direction = event.target.value as RankingDirection
                           })}
                         >
-                          {rankingDirections.map((value) => <option key={value} value={value}>{value}</option>)}
+                          {rankingDirections.map((value) => <option key={value} value={value}>{rankingDirectionLabels[value]}</option>)}
                         </select>
                       </label>
                       <label>
@@ -636,7 +698,7 @@ export function TournamentConfigEditor({
                             if (target) target.tieRule = event.target.value as TieAwardRule
                           })}
                         >
-                          {tieRules.map((value) => <option key={value} value={value}>{value}</option>)}
+                          {tieRules.map((value) => <option key={value} value={value}>{tieRuleLabels[value]}</option>)}
                         </select>
                       </label>
                       <label>
@@ -650,7 +712,7 @@ export function TournamentConfigEditor({
                             if (target) target.aggregationRule = event.target.value as AggregationRule
                           })}
                         >
-                          {aggregationRules.map((value) => <option key={value} value={value}>{value}</option>)}
+                          {aggregationRules.map((value) => <option key={value} value={value}>{aggregationRuleLabels[value]}</option>)}
                         </select>
                       </label>
                     </div>
@@ -881,7 +943,7 @@ export function TournamentConfigEditor({
                                     if (target) target.inputScope = event.target.value as InputScope
                                   })}
                                 >
-                                  {inputScopes.map((scope) => <option key={scope} value={scope}>{scope}</option>)}
+                                  {inputScopes.map((scope) => <option key={scope} value={scope}>{inputScopeLabels[scope]}</option>)}
                                 </select>
                               </label>
                             </div>
@@ -891,6 +953,8 @@ export function TournamentConfigEditor({
                     )
                   })}
                 </div>
+                  </>
+                )}
               </article>
             )
           })}
@@ -919,7 +983,7 @@ export function TournamentConfigEditor({
         <label>
           変更区分
           <select value={changeClass} onChange={(event) => setChangeClass(event.target.value as ConfigChangeClass)}>
-            {changeClasses.map((value) => <option key={value} value={value}>{value}</option>)}
+            {changeClasses.map((value) => <option key={value} value={value}>{changeClassLabels[value]}</option>)}
           </select>
         </label>
         <button type="button" onClick={() => {

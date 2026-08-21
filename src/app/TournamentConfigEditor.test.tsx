@@ -33,6 +33,10 @@ function createTournament() {
   fireEvent.click(screen.getByRole('button', { name: '新しい大会を作成' }))
 }
 
+function expandFirstCompetition() {
+  fireEvent.click(screen.getByRole('button', { name: /競技 1/ }))
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
 })
@@ -67,6 +71,7 @@ describe('TournamentConfigEditor', () => {
     createTournament()
 
     fireEvent.click(screen.getByRole('button', { name: '競技を追加' }))
+    expandFirstCompetition()
     fireEvent.change(screen.getByLabelText('競技名 1'), { target: { value: '玉入れ' } })
     fireEvent.click(screen.getByRole('button', { name: '入力項目を追加' }))
 
@@ -77,10 +82,29 @@ describe('TournamentConfigEditor', () => {
     expect(screen.getByLabelText('項目名 1')).toHaveValue('個数')
   })
 
+  it('keeps each competition collapsed by default and shows Japanese input labels after opening it', () => {
+    render(<TournamentConfigEditor repository={repository()} operatorName="本部担当" />)
+    createTournament()
+    fireEvent.click(screen.getByRole('button', { name: '競技を追加' }))
+
+    const competition = screen.getByRole('button', { name: /競技 1.*新しい競技/ })
+    expect(competition).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByLabelText('標準入力範囲')).not.toBeInTheDocument()
+
+    fireEvent.click(competition)
+    expect(competition).toHaveAttribute('aria-expanded', 'true')
+    fireEvent.change(screen.getByLabelText('競技名 1'), { target: { value: '玉入れ' } })
+    expect(screen.getByLabelText('標準入力範囲')).toHaveDisplayValue('展開全体')
+
+    fireEvent.click(screen.getByRole('button', { name: '入力項目を追加' }))
+    expect(screen.getByLabelText('入力形式 1')).toHaveDisplayValue('数値')
+  })
+
   it('adds a schedule slot, court run, and scoring session for a competition', () => {
     render(<TournamentConfigEditor repository={repository()} operatorName="本部担当" />)
     createTournament()
     fireEvent.click(screen.getByRole('button', { name: '競技を追加' }))
+    expandFirstCompetition()
 
     fireEvent.click(screen.getByRole('button', { name: '展開を追加' }))
     expect(screen.getByLabelText('展開名 1')).toBeInTheDocument()
@@ -125,6 +149,7 @@ describe('TournamentConfigEditor', () => {
     render(<TournamentConfigEditor repository={repo} operatorName="本部担当" />)
     createTournament()
     fireEvent.click(screen.getByRole('button', { name: '競技を追加' }))
+    expandFirstCompetition()
     fireEvent.click(screen.getByRole('button', { name: '入力項目を追加' }))
 
     fireEvent.change(screen.getByLabelText('最小値 1'), { target: { value: '10' } })

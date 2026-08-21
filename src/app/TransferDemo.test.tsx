@@ -4,6 +4,14 @@ import type { BatchId, DeviceId, RevisionId } from '../domain/ids'
 import type { TransferProgress } from '../transfer/receiver'
 import { TransferDemo, type TransferDemoServices } from './TransferDemo'
 
+const decodeFromVideoDevice = vi.fn(async () => ({ stop: vi.fn() }))
+
+vi.mock('@zxing/browser', () => ({
+  BrowserQRCodeReader: class {
+    decodeFromVideoDevice = decodeFromVideoDevice
+  },
+}))
+
 const deviceId = 'device-1' as DeviceId
 const batchId = 'batch-1' as BatchId
 const revisionId = 'revision-1' as RevisionId
@@ -43,6 +51,16 @@ function services(overrides: Partial<TransferDemoServices> = {}): TransferDemoSe
 }
 
 describe('TransferDemo', () => {
+  it('starts a camera scanner for Host QR reception', async () => {
+    const service = services()
+    render(<TransferDemo mode="HOST" deviceId={deviceId} services={service} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'カメラを起動' }))
+
+    await waitFor(() => expect(decodeFromVideoDevice).toHaveBeenCalledOnce())
+    expect(screen.getByText('カメラで読み取り中です。QRコードを枠内に映してください。')).toBeInTheDocument()
+  })
+
   it('keeps Court QR page navigation manual', async () => {
     const service = services()
     render(<TransferDemo mode="COURT" deviceId={deviceId} services={service} />)

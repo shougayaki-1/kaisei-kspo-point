@@ -71,7 +71,7 @@ describe('DisplayDashboard', () => {
     display.unmount()
 
     render(<HostScoringDashboard service={hostService} />)
-    expect(await screen.findByText(/Configured Red: 7.5/)).toBeInTheDocument()
+    expect(await screen.findByText('合計 7.5 点')).toBeInTheDocument()
     expect(hostService.loadAuthoritativeState).toHaveBeenCalledOnce()
   })
 

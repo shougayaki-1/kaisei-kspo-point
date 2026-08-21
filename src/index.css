@@ -140,6 +140,116 @@ label {
   box-shadow: 0 1px 2px rgb(60 64 67 / 0.08);
 }
 
+.scoring-dashboard {
+  display: grid;
+  gap: 1.25rem;
+  padding: 1.25rem;
+  border: 1px solid #e1e7f0;
+  border-radius: 1.25rem;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgb(60 64 67 / 0.08);
+}
+
+.scoring-dashboard-heading,
+.competition-summary,
+.event-score-list li,
+.standings-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
+.scoring-dashboard-heading h2,
+.scoring-dashboard-heading p,
+.standings-card h3,
+.event-score-section h3,
+.event-score-card h4 {
+  margin: 0;
+}
+
+.scoring-dashboard-heading > div {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.config-version {
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  background: #edf4ff;
+  color: #0842a0;
+  font-weight: 700;
+}
+
+.standings-card,
+.event-score-card {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid #dbe3ec;
+  border-radius: 1rem;
+  background: #ffffff;
+}
+
+.standings-list,
+.event-score-list {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.standings-list li {
+  padding: 0.75rem;
+  border-radius: 0.75rem;
+  background: #f8fafd;
+}
+
+.standing-rank {
+  min-width: 3rem;
+  color: #0842a0;
+  font-weight: 800;
+}
+
+.event-score-section {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.event-score-list li {
+  padding-top: 0.65rem;
+  border-top: 1px solid #e1e7f0;
+}
+
+.event-score-list li:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.event-score-list li > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.calculation-trace,
+.result-projection-details {
+  padding: 0.75rem;
+  border: 1px solid #dbe3ec;
+  border-radius: 0.75rem;
+  background: #f8fafd;
+}
+
+.result-projection-details summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.result-projection {
+  margin-top: 0.75rem;
+}
+
 .transfer-panel h2,
 .transfer-panel p,
 .config-panel h2,
@@ -173,6 +283,28 @@ label {
 
 .config-card.nested {
   background: #ffffff;
+}
+
+.competition-card {
+  gap: 1rem;
+}
+
+.competition-summary {
+  align-items: stretch;
+}
+
+.competition-toggle {
+  display: flex;
+  flex: 1 1 18rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  text-align: left;
+}
+
+.competition-toggle strong {
+  flex: 1;
+  color: #202124;
 }
 
 .config-heading,
@@ -300,6 +432,33 @@ fieldset {
   gap: 0.75rem;
   padding-top: 0.75rem;
   border-top: 1px solid #dbe3ec;
+}
+
+.camera-scanner,
+.camera-preview {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.camera-scanner {
+  padding: 1rem;
+  border: 1px solid #dbe3ec;
+  border-radius: 1rem;
+  background: #f8fafd;
+}
+
+.camera-scanner h3,
+.camera-scanner p,
+.camera-preview p {
+  margin: 0;
+}
+
+.camera-preview video {
+  width: min(100%, 34rem);
+  max-height: 24rem;
+  border-radius: 0.75rem;
+  background: #202124;
+  justify-self: center;
 }
 
 .scoring-simulator,

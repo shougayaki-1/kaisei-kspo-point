@@ -27,6 +27,7 @@ describe('TournamentConfigEditor exact decimal config boundary', () => {
     fireEvent.change(screen.getByLabelText('新規大会名'), { target: { value: 'Phase 1' } })
     fireEvent.click(screen.getByRole('button', { name: '新しい大会を作成' }))
     fireEvent.click(screen.getByRole('button', { name: '競技を追加' }))
+    fireEvent.click(screen.getByRole('button', { name: /競技 1/ }))
     fireEvent.click(screen.getByRole('button', { name: '入力項目を追加' }))
 
     fireEvent.change(screen.getByLabelText('最小値 1'), { target: { value: '0.10' } })

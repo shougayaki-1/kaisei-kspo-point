@@ -36,7 +36,7 @@ describe('HostScoringDashboard', () => {
   it('shows current ConfigVersion, configured event/team standings and unresolved conflict state', async () => {
     const service = { loadAuthoritativeState: vi.fn().mockResolvedValue(state()) }
     render(<HostScoringDashboard service={service} />)
-    expect(await screen.findByText(/config-v2/)).toBeInTheDocument()
+    expect(await screen.findByText('設定 v2')).toBeInTheDocument()
     expect(screen.getByText('Configured Event')).toBeInTheDocument()
     expect(screen.getByText(/Configured Red/)).toBeInTheDocument()
     expect(screen.getByText(/UNRESOLVED/)).toBeInTheDocument()
@@ -44,11 +44,21 @@ describe('HostScoringDashboard', () => {
     expect(screen.getByText(/right/)).toBeInTheDocument()
     expect(screen.getByText(/common-base/)).toBeInTheDocument()
   })
+
+  it('presents aggregate rankings and each event score in Japanese score cards', async () => {
+    const service = { loadAuthoritativeState: vi.fn().mockResolvedValue(state()) }
+    render(<HostScoringDashboard service={service} />)
+
+    expect(await screen.findByRole('heading', { name: '得点・順位' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '総合順位' })).toBeInTheDocument()
+    expect(screen.getByText('合計 7.5 点')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '競技別得点' })).toBeInTheDocument()
+  })
   it('lets the Host operator inspect production Calculation Trace without recomputing scoring in React', async () => {
     const service = { loadAuthoritativeState: vi.fn().mockResolvedValue(state()) }
     render(<HostScoringDashboard service={service} />)
     await screen.findByText('Configured Event')
-    fireEvent.click(screen.getByRole('button', { name: /Calculation Trace/ }))
+    fireEvent.click(screen.getByRole('button', { name: '計算過程を表示' }))
     expect(screen.getByText(/比較値: 1\/3/)).toBeInTheDocument()
     expect(screen.getByText(/ラウンド得点を合計/)).toBeInTheDocument()
   })

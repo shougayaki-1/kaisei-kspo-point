@@ -128,6 +128,10 @@ function repository(snapshot: TournamentConfigSnapshot) {
   } satisfies Pick<ConfigRepository, 'loadCurrent' | 'previewRegression' | 'apply'>
 }
 
+function expandConfiguredCompetition() {
+  fireEvent.click(screen.getByRole('button', { name: /競技 1.*玉入れ/ }))
+}
+
 describe('TournamentConfigEditor scoring regression integration', () => {
   it('shows the scoring simulator for the currently applied competition', async () => {
     render(
@@ -152,6 +156,7 @@ describe('TournamentConfigEditor scoring regression integration', () => {
     )
 
     await screen.findByText('Config v1')
+    expandConfiguredCompetition()
     fireEvent.change(screen.getByLabelText('得点 1'), { target: { value: '50' } })
     fireEvent.change(screen.getByLabelText('得点 2'), { target: { value: '30' } })
     fireEvent.click(screen.getByRole('button', { name: '設定を適用' }))
@@ -189,6 +194,7 @@ describe('TournamentConfigEditor scoring regression integration', () => {
     )
 
     await screen.findByText('Config v1')
+    expandConfiguredCompetition()
     fireEvent.change(screen.getByLabelText('得点 1'), { target: { value: '50' } })
     fireEvent.click(screen.getByRole('button', { name: '設定を適用' }))
 
@@ -218,6 +224,7 @@ describe('TournamentConfigEditor scoring regression integration', () => {
     )
 
     await screen.findByText('Config v1')
+    expandConfiguredCompetition()
     fireEvent.change(screen.getByLabelText('変更区分'), { target: { value: 'DISPLAY_ONLY' } })
     fireEvent.change(screen.getByLabelText('得点 1'), { target: { value: '50' } })
     fireEvent.click(screen.getByRole('button', { name: '設定を適用' }))
@@ -237,6 +244,7 @@ describe('TournamentConfigEditor scoring regression integration', () => {
     )
 
     await screen.findByText('Config v1')
+    expandConfiguredCompetition()
     fireEvent.change(screen.getByLabelText('得点 1'), { target: { value: '50' } })
     fireEvent.click(screen.getByRole('button', { name: '設定を適用' }))
 
