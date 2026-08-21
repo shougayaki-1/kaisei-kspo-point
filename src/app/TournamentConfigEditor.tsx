@@ -4,18 +4,18 @@ import type { ExactValue } from '../domain/exact-decimal'
 import type { TournamentConfigSnapshot } from '../config/tournament-config'
 import {
   scoringTestResultFingerprint,
-  type ScoringTestRunResult,
 } from '../config/scoring-test-case'
 import type {
   ApplyConfigMetadata,
   ConfigRepository,
-  ScoringTestApproval,
 } from '../db/config-repository'
 import { ScoringSimulatorPanel } from './ScoringSimulatorPanel'
 import { TournamentConfigEditor as TournamentConfigEditorBase } from './TournamentConfigEditorBase'
-
-type RegressionAwareConfigRepository = Pick<ConfigRepository, 'loadCurrent' | 'apply'> &
-  Partial<Pick<ConfigRepository, 'previewRegression'>>
+import {
+  createTournamentConfigApplyService,
+  type ConfigApplyPreview,
+  type RegressionAwareConfigRepository,
+} from './tournament-setup/tournament-config-apply-service'
 
 export interface TournamentConfigEditorProps {
   repository: RegressionAwareConfigRepository
@@ -24,30 +24,14 @@ export interface TournamentConfigEditorProps {
 }
 
 interface PendingRegressionReview {
-  snapshot: TournamentConfigSnapshot
+  preview: ConfigApplyPreview
   metadata: ApplyConfigMetadata
-  results: ScoringTestRunResult[]
 }
 
 function cloneSnapshot(snapshot: TournamentConfigSnapshot): TournamentConfigSnapshot {
   const cloned = structuredClone(snapshot)
   cloned.scoringTestCases ??= []
   return cloned
-}
-
-function scoringProfilesFingerprint(snapshot: TournamentConfigSnapshot | null): string {
-  if (!snapshot) return '[]'
-  return JSON.stringify(
-    [...snapshot.scoringProfiles].sort((left, right) =>
-      left.scoringProfileId.localeCompare(right.scoringProfileId)),
-  )
-}
-
-function scoringProfilesChanged(
-  current: TournamentConfigSnapshot | null,
-  next: TournamentConfigSnapshot,
-): boolean {
-  return scoringProfilesFingerprint(current) !== scoringProfilesFingerprint(next)
 }
 
 function formatDiffValue(value: ExactValue[] | ExactValue): string {
@@ -66,8 +50,12 @@ export function TournamentConfigEditor({
   const [editorGeneration, setEditorGeneration] = useState(0)
   const [integrationMessage, setIntegrationMessage] = useState('')
 
-  const previewRegression = async (snapshot: TournamentConfigSnapshot) => (
-    repository.previewRegression ? repository.previewRegression(snapshot) : []
+  const applyService = useMemo(
+    () => createTournamentConfigApplyService({
+      repository,
+      getCurrentSnapshot: () => appliedSnapshotRef.current,
+    }),
+    [repository],
   )
 
   const rememberAppliedSnapshot = (snapshot: TournamentConfigSnapshot) => {
@@ -85,44 +73,45 @@ export function TournamentConfigEditor({
     },
     apply: async (snapshot, metadata) => {
       const normalized = cloneSnapshot(snapshot)
-      const regressionResults = await previewRegression(normalized)
-      const invalid = regressionResults.filter((result) => result.status === 'INVALID')
-      if (invalid.length > 0) {
-        setPendingReview({ snapshot: normalized, metadata, results: regressionResults })
+      const preview = await applyService.preview(normalized)
+      if (preview.reviewReason === 'INVALID') {
+        setPendingReview({ preview, metadata })
         setApprovedTests(new Map())
         throw new Error('得点計算テストに無効なケースがあります。')
       }
 
-      const failed = regressionResults.filter((result) => result.status === 'FAIL')
-      if (failed.length > 0) {
-        setPendingReview({ snapshot: normalized, metadata, results: regressionResults })
+      if (preview.reviewReason === 'FAIL') {
+        setPendingReview({ preview, metadata })
         setApprovedTests(new Map())
         throw new Error('得点計算テストの確認が必要です。')
       }
 
-      const shouldStageScoringReview = Boolean(repository.previewRegression)
-        && scoringProfilesChanged(appliedSnapshotRef.current, normalized)
-      if (shouldStageScoringReview) {
-        setPendingReview({ snapshot: normalized, metadata, results: regressionResults })
+      if (preview.reviewReason === 'SCORING_PROFILE_CHANGE') {
+        setPendingReview({ preview, metadata })
         setApprovedTests(new Map())
         throw new Error('得点ルールを計算テストで確認してください。')
       }
 
-      const applied = await repository.apply(normalized, metadata)
-      rememberAppliedSnapshot(applied.snapshot)
+      const applied = await applyService.applyApproved({
+        preview,
+        metadata,
+        approvedTestFingerprints: new Map(),
+        approvedAt: new Date().toISOString(),
+      })
+      rememberAppliedSnapshot(applied.applied.snapshot)
       setPendingReview(null)
       setApprovedTests(new Map())
       setIntegrationMessage('')
-      return applied
+      return applied.applied
     },
-  }), [repository])
+  }), [applyService])
 
-  const failedResults = pendingReview?.results.filter((result) => result.status === 'FAIL') ?? []
-  const invalidResults = pendingReview?.results.filter((result) => result.status === 'INVALID') ?? []
+  const failedResults = pendingReview?.preview.regressionResults.filter((result) => result.status === 'FAIL') ?? []
+  const invalidResults = pendingReview?.preview.regressionResults.filter((result) => result.status === 'INVALID') ?? []
   const allFailuresApproved = failedResults.length > 0 && failedResults.every(
     (result) => approvedTests.get(result.testCaseId) === scoringTestResultFingerprint(result),
   )
-  const simulatorSnapshot = pendingReview?.snapshot ?? currentSnapshot
+  const simulatorSnapshot = pendingReview?.preview.snapshot ?? currentSnapshot
 
   const returnToEditing = () => {
     setPendingReview(null)
@@ -135,25 +124,20 @@ export function TournamentConfigEditor({
     if (failedResults.length > 0 && !allFailuresApproved) return
 
     const now = new Date().toISOString()
-    const approvals: ScoringTestApproval[] = failedResults.map((result) => ({
-      testCaseId: result.testCaseId,
-      actualFingerprint: scoringTestResultFingerprint(result),
-      operator: operatorName,
-      approvedAt: now,
-    }))
-
     try {
-      const applied = await repository.apply(pendingReview.snapshot, {
-        ...pendingReview.metadata,
-        scoringTestApprovals: approvals,
+      const applied = await applyService.applyApproved({
+        preview: pendingReview.preview,
+        metadata: pendingReview.metadata,
+        approvedTestFingerprints: approvedTests,
+        approvedAt: now,
       })
-      rememberAppliedSnapshot(applied.snapshot)
+      rememberAppliedSnapshot(applied.applied.snapshot)
       setPendingReview(null)
       setApprovedTests(new Map())
       setIntegrationMessage(
-        approvals.length > 0
-          ? `Config v${applied.version} を適用しました。意図した得点変更 ${approvals.length}件を承認しました。`
-          : `Config v${applied.version} を適用しました。`,
+        applied.scoringTestApprovals.length > 0
+          ? `Config v${applied.applied.version} を適用しました。意図した得点変更 ${applied.scoringTestApprovals.length}件を承認しました。`
+          : `Config v${applied.applied.version} を適用しました。`,
       )
       setEditorGeneration((generation) => generation + 1)
     } catch (error) {
@@ -183,13 +167,12 @@ export function TournamentConfigEditor({
   ) => {
     if (!pendingReview) return false
 
-    const nextSnapshot = cloneSnapshot(pendingReview.snapshot)
+    const nextSnapshot = cloneSnapshot(pendingReview.preview.snapshot)
     update(nextSnapshot)
-    const results = await previewRegression(nextSnapshot)
+    const preview = await applyService.preview(nextSnapshot)
     setPendingReview({
       ...pendingReview,
-      snapshot: nextSnapshot,
-      results,
+      preview,
     })
     setApprovedTests(new Map())
     setIntegrationMessage('未適用の設定に得点テストを反映しました。')
@@ -226,7 +209,7 @@ export function TournamentConfigEditor({
               <p>保存済みテストの期待値が変化しました。意図した変更だけを個別に承認してください。</p>
               <div className="config-stack">
                 {failedResults.map((result) => {
-                  const testCase = pendingReview.snapshot.scoringTestCases.find(
+                  const testCase = pendingReview.preview.snapshot.scoringTestCases.find(
                     (item) => item.testCaseId === result.testCaseId,
                   )
                   const fingerprint = scoringTestResultFingerprint(result)

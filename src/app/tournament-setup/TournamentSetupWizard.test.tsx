@@ -5,6 +5,11 @@ import type {
   TournamentSetupDraft,
 } from '../../config/setup/setup-types'
 import { TournamentSetupWizard } from './TournamentSetupWizard'
+import type {
+  ConfigApplyPreview,
+  ConfigApplyResult,
+  TournamentConfigApplyFlow,
+} from './tournament-config-apply-service'
 
 const compileSnapshotSpy = vi.hoisted(() => vi.fn())
 
@@ -388,5 +393,51 @@ describe('TournamentSetupWizard', () => {
 
     expect(compileSnapshotSpy).toHaveBeenCalledTimes(compileCount)
     expect(onReadyToApply.mock.calls[0]?.[0]).toBe(renderedSnapshot)
+  })
+
+  it('passes an injected apply flow through the final check and reports its applied result without legacy handoff', async () => {
+    const draft = createReviewDraft('FINAL_CHECK')
+    const { repository } = createRepository(draft)
+    const onReadyToApply = vi.fn()
+    const onApplied = vi.fn()
+    const applyFlow: TournamentConfigApplyFlow = {
+      service: {
+        preview: vi.fn(async (snapshot) => ({
+          snapshot,
+          regressionResults: [],
+          disposition: 'READY',
+        } satisfies ConfigApplyPreview)),
+        applyApproved: vi.fn(async (input) => ({
+          applied: { version: 1, snapshot: input.preview.snapshot },
+          scoringTestApprovals: [],
+        } satisfies ConfigApplyResult)),
+      },
+      metadata: {
+        operator: '本部担当',
+        createdAt: '2026-08-21T10:00:00.000Z',
+        changeClass: 'SCORING',
+      },
+    }
+
+    render(
+      <TournamentSetupWizard
+        repository={repository}
+        onCancel={vi.fn()}
+        onReadyToApply={onReadyToApply}
+        applyFlow={applyFlow}
+        onApplied={onApplied}
+      />,
+    )
+
+    await screen.findByText('大会情報')
+    const renderedSnapshot = compileSnapshotSpy.mock.calls.at(-1)?.[0]
+    fireEvent.click(screen.getByRole('button', { name: 'この内容で大会を作成する' }))
+
+    await waitFor(() => expect(applyFlow.service.preview).toHaveBeenCalledWith(renderedSnapshot))
+    await waitFor(() => expect(applyFlow.service.applyApproved).toHaveBeenCalledOnce())
+    expect(onApplied).toHaveBeenCalledWith(expect.objectContaining({
+      applied: expect.objectContaining({ snapshot: renderedSnapshot }),
+    }), expect.objectContaining({ draftId: draft.draftId }))
+    expect(onReadyToApply).not.toHaveBeenCalled()
   })
 })

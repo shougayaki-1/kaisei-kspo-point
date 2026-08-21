@@ -131,6 +131,8 @@ describe('TournamentConfigApplyService', () => {
     const service = createTournamentConfigApplyService({ repository: repo, getCurrentSnapshot: () => current })
     const preview = await service.preview(current)
 
+    expect(preview.snapshot).toBe(current)
+    expect(repo.previewRegression).toHaveBeenCalledWith(current)
     expect(preview.disposition).toBe('READY')
     await service.applyApproved({
       preview,

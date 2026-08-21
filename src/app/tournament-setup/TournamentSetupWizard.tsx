@@ -23,6 +23,10 @@ import { SetupProgress, SETUP_STEPS } from './SetupProgress'
 import { TemplateStep } from './TemplateStep'
 import { TeamsStep } from './TeamsStep'
 import { FinalCheckStep } from './FinalCheckStep'
+import type {
+  ConfigApplyResult,
+  TournamentConfigApplyFlow,
+} from './tournament-config-apply-service'
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
 
@@ -30,6 +34,8 @@ export interface TournamentSetupWizardProps {
   repository: SetupDraftRepository
   onCancel: () => void
   onReadyToApply: (snapshot: TournamentConfigSnapshot, draft: TournamentSetupDraft) => void
+  applyFlow?: TournamentConfigApplyFlow
+  onApplied?: (result: ConfigApplyResult, draft: TournamentSetupDraft) => void
 }
 
 interface PendingSave {
@@ -133,6 +139,8 @@ export function TournamentSetupWizard({
   repository,
   onCancel,
   onReadyToApply,
+  applyFlow,
+  onApplied,
 }: TournamentSetupWizardProps) {
   const [draft, setDraft] = useState<TournamentSetupDraft>(() => createDefaultDraft())
   const [saveState, setSaveState] = useState<SaveState>('idle')
@@ -397,6 +405,8 @@ export function TournamentSetupWizard({
             disabled={controlsDisabled}
             onFixIssue={(issue) => goToStep(issue.step, issue.competitionKey)}
             onReadyToApply={(snapshot) => onReadyToApply(snapshot, draft)}
+            applyFlow={applyFlow}
+            onApplied={onApplied ? (result) => onApplied(result, draft) : undefined}
           />
         )
       default:
