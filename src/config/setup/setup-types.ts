@@ -1,5 +1,6 @@
 import type { TournamentConfigSnapshot } from '../tournament-config'
 import type { TournamentId } from '../../domain/ids'
+import type { CompetitionSetupTemplate } from './template-schema'
 
 export type SetupStep =
   | 'BASIC'
@@ -15,9 +16,15 @@ export interface SetupTeamDraft {
   name: string
 }
 
-export interface SetupCompetitionDraft {
-  competitionKey: string
-  name: string
+export interface SetupCustomCourtGroupDraft {
+  groupKey: string
+  label: string
+  round: number
+  courtIndexes: number[]
+}
+
+export interface SetupCompetitionDraft extends CompetitionSetupTemplate {
+  customGroups?: SetupCustomCourtGroupDraft[]
 }
 
 export interface TournamentSetupDraft {

@@ -1,24 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import type { TournamentSetupDraft, SetupCompetitionDraft } from './setup-types'
-import type { CompetitionSetupTemplate } from './template-schema'
+import type {
+  TournamentSetupDraft,
+  SetupCompetitionDraft,
+  SetupCustomCourtGroupDraft,
+} from './setup-types'
 import { validateTournamentConfig } from '../tournament-config'
 import { compileTournamentSetup } from './setup-compiler'
-
-interface CustomCourtGroupDraft {
-  groupKey: string
-  label: string
-  round: number
-  courtIndexes: number[]
-}
-
-type CompilerCompetitionDraft = SetupCompetitionDraft &
-  CompetitionSetupTemplate & {
-    customGroups?: CustomCourtGroupDraft[]
-  }
-
-type CompilerReadyDraft = Omit<TournamentSetupDraft, 'competitions'> & {
-  competitions: CompilerCompetitionDraft[]
-}
 
 function rankPoints(count: number): Record<number, number> {
   return Object.fromEntries(
@@ -26,8 +13,35 @@ function rankPoints(count: number): Record<number, number> {
   )
 }
 
+function buildCompetitionDraft(
+  competition: Partial<SetupCompetitionDraft> = {},
+): SetupCompetitionDraft {
+  const teams = [
+    { teamKey: 'team-red', name: '赤組' },
+    { teamKey: 'team-blue', name: '青組' },
+    { teamKey: 'team-yellow', name: '黄組' },
+    { teamKey: 'team-green', name: '緑組' },
+  ]
+
+  return {
+    competitionKey: 'competition-quantity',
+    name: '玉運び',
+    competitionKind: 'QUANTITY',
+    inputGrouping: 'WHOLE_ROUND',
+    rounds: 1,
+    courts: 4,
+    groupsPerTeam: 1,
+    scoring: {
+      inputType: 'NUMBER',
+      rankingDirection: 'HIGHER',
+      rankPoints: rankPoints(teams.length),
+    },
+    ...competition,
+  }
+}
+
 function buildDraft(
-  competition: Partial<CompilerCompetitionDraft> = {},
+  competition: Partial<SetupCompetitionDraft> = {},
 ): TournamentSetupDraft {
   const teams = [
     { teamKey: 'team-red', name: '赤組' },
@@ -36,7 +50,7 @@ function buildDraft(
     { teamKey: 'team-green', name: '緑組' },
   ]
 
-  const draft: CompilerReadyDraft = {
+  return {
     draftFormatVersion: 1,
     draftId: 'draft-1',
     createdAt: '2026-08-21T09:00:00+09:00',
@@ -52,24 +66,8 @@ function buildDraft(
       templateId: 'generic-quantity-v1',
       templateVersion: 1,
     },
-    competitions: [{
-      competitionKey: 'competition-quantity',
-      name: '玉運び',
-      competitionKind: 'QUANTITY',
-      inputGrouping: 'WHOLE_ROUND',
-      rounds: 1,
-      courts: 4,
-      groupsPerTeam: 1,
-      scoring: {
-        inputType: 'NUMBER',
-        rankingDirection: 'HIGHER',
-        rankPoints: rankPoints(teams.length),
-      },
-      ...competition,
-    }],
+    competitions: [buildCompetitionDraft(competition)],
   }
-
-  return draft as TournamentSetupDraft
 }
 
 function createIdFactory() {
@@ -226,7 +224,7 @@ describe('compileTournamentSetup', () => {
           round: 1,
           courtIndexes: [3],
         },
-      ],
+      ] satisfies SetupCustomCourtGroupDraft[],
     }), {
       createId: createIdFactory(),
     })
@@ -238,6 +236,21 @@ describe('compileTournamentSetup', () => {
     ])
     expect(snapshot.scoringSessions.map((session) => session.courtRunIds.length)).toEqual([2, 1])
     expect(snapshot.scoringSessions.every((session) => session.inputScope === 'CUSTOM_GROUP')).toBe(true)
+    expectNoValidationErrors(snapshot)
+  })
+
+  it('keeps every competition entry in the schedule when one court must host multiple entries', () => {
+    const snapshot = compileTournamentSetup(buildDraft({
+      courts: 1,
+      rounds: 1,
+    }), {
+      createId: createIdFactory(),
+    })
+
+    expect(snapshot.courtRuns).toHaveLength(1)
+    expect(snapshot.courtRuns[0]?.participantEntryIds).toEqual(
+      snapshot.competitionEntries.map((entry) => entry.entryId),
+    )
     expectNoValidationErrors(snapshot)
   })
 })

@@ -6,6 +6,7 @@ import {
   configEditDraftKey,
   SetupDraftRepository,
 } from './setup-draft-repository'
+import type { TournamentSetupDraft } from './setup-types'
 
 const openDatabases: AppDatabase[] = []
 const databaseNames = new Set<string>()
@@ -17,7 +18,7 @@ function open(name: string): AppDatabase {
   return db
 }
 
-function setupDraft() {
+function setupDraft(): TournamentSetupDraft {
   return {
     draftFormatVersion: 1 as const,
     draftId: 'draft-setup-1',
@@ -43,6 +44,16 @@ function setupDraft() {
       {
         competitionKey: 'competition-1',
         name: '玉入れ',
+        competitionKind: 'RANKING',
+        inputGrouping: 'WHOLE_ROUND',
+        rounds: 1,
+        courts: 1,
+        groupsPerTeam: 1,
+        scoring: {
+          inputType: 'RANK',
+          rankingDirection: 'MANUAL',
+          rankPoints: {},
+        },
       },
     ],
   }
@@ -120,6 +131,16 @@ describe('SetupDraftRepository', () => {
         {
           competitionKey: 'competition-1',
           name: '玉入れ',
+          competitionKind: 'RANKING',
+          inputGrouping: 'WHOLE_ROUND',
+          rounds: 1,
+          courts: 1,
+          groupsPerTeam: 1,
+          scoring: {
+            inputType: 'RANK',
+            rankingDirection: 'MANUAL',
+            rankPoints: {},
+          },
         },
       ],
     })

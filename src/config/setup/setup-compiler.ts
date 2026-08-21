@@ -13,23 +13,6 @@ import type { InputScope } from '../../domain/tournament'
 import type { InputField, InputSchema } from '../input-schema'
 import type { TournamentConfigSnapshot } from '../tournament-config'
 import type { SetupCompetitionDraft, SetupTeamDraft, TournamentSetupDraft } from './setup-types'
-import type { CompetitionSetupTemplate } from './template-schema'
-
-interface CustomCourtGroupDraft {
-  groupKey: string
-  label: string
-  round: number
-  courtIndexes: number[]
-}
-
-type CompilerCompetitionDraft = SetupCompetitionDraft &
-  CompetitionSetupTemplate & {
-    customGroups?: CustomCourtGroupDraft[]
-  }
-
-type CompilerReadyDraft = Omit<TournamentSetupDraft, 'competitions'> & {
-  competitions: CompilerCompetitionDraft[]
-}
 
 interface TeamCompileResult {
   teams: TournamentConfigSnapshot['teams']
@@ -67,7 +50,7 @@ function groupSuffix(index: number): string {
   return String(index + 1)
 }
 
-function toInputScope(grouping: CompilerCompetitionDraft['inputGrouping']): InputScope {
+function toInputScope(grouping: SetupCompetitionDraft['inputGrouping']): InputScope {
   switch (grouping) {
     case 'PER_COURT':
       return 'PER_COURT'
@@ -79,7 +62,7 @@ function toInputScope(grouping: CompilerCompetitionDraft['inputGrouping']): Inpu
 }
 
 function toRankingDirection(
-  draft: CompilerCompetitionDraft,
+  draft: SetupCompetitionDraft,
 ): 'HIGHER_IS_BETTER' | 'LOWER_IS_BETTER' {
   if (draft.scoring.rankingDirection === 'LOWER') return 'LOWER_IS_BETTER'
   if (draft.scoring.rankingDirection === 'HIGHER') return 'HIGHER_IS_BETTER'
@@ -114,7 +97,7 @@ function compileCompetitionEntries(
   teams: SetupTeamDraft[],
   teamIdsByKey: Map<string, TeamId>,
   competitionId: CompetitionId,
-  draft: CompilerCompetitionDraft,
+  draft: SetupCompetitionDraft,
   options: SetupCompilerOptions,
 ): CompetitionEntryCompileResult {
   const competitionEntries: TournamentConfigSnapshot['competitionEntries'] = []
@@ -148,16 +131,17 @@ function compileCompetitionEntries(
 
 function compileSchedule(
   competitionId: CompetitionId,
-  draft: CompilerCompetitionDraft,
+  draft: SetupCompetitionDraft,
   entryIds: CompetitionEntryId[],
   options: SetupCompilerOptions,
 ): ScheduleCompileResult {
   const scheduleSlots: TournamentConfigSnapshot['scheduleSlots'] = []
   const courtRuns: TournamentConfigSnapshot['courtRuns'] = []
   const scoringSessions: TournamentConfigSnapshot['scoringSessions'] = []
-  const slotRunIds = new Map<number, CourtRunId[]>()
+  const totalRuns = draft.rounds * draft.courts
 
   let entryIndex = 0
+  let runSequenceIndex = 0
 
   for (let roundIndex = 0; roundIndex < draft.rounds; roundIndex += 1) {
     const round = roundIndex + 1
@@ -172,9 +156,15 @@ function compileSchedule(
 
     for (let courtIndex = 0; courtIndex < draft.courts; courtIndex += 1) {
       const courtRunId = options.createId<CourtRunId>()
-      const participantEntryIds = entryIndex < entryIds.length
-        ? [entryIds[entryIndex++]!]
-        : []
+      const remainingEntries = entryIds.length - entryIndex
+      const remainingRuns = totalRuns - runSequenceIndex
+      const participantCount = remainingEntries > 0
+        ? Math.ceil(remainingEntries / remainingRuns)
+        : 0
+      const participantEntryIds = entryIds.slice(entryIndex, entryIndex + participantCount)
+
+      entryIndex += participantCount
+      runSequenceIndex += 1
 
       courtRuns.push({
         courtRunId,
@@ -184,8 +174,6 @@ function compileSchedule(
       })
       runIds.push(courtRunId)
     }
-
-    slotRunIds.set(round, runIds)
 
     if (draft.inputGrouping === 'WHOLE_ROUND') {
       scoringSessions.push({
@@ -242,7 +230,7 @@ function compileSchedule(
 
 function compileInputSchema(
   competitionId: CompetitionId,
-  draft: CompilerCompetitionDraft,
+  draft: SetupCompetitionDraft,
   options: SetupCompilerOptions,
 ): InputSchema {
   let field: InputField
@@ -293,7 +281,7 @@ function compileInputSchema(
 
 function compileScoringProfile(
   competitionId: CompetitionId,
-  draft: CompilerCompetitionDraft,
+  draft: SetupCompetitionDraft,
   options: SetupCompilerOptions,
 ) {
   return {
@@ -320,15 +308,14 @@ export function compileTournamentSetup(
     ...defaultOptions,
     ...options,
   }
-  const compilerDraft = draft as CompilerReadyDraft
   const tournamentId = resolvedOptions.createId<TournamentId>()
-  const compiledTeams = compileTeams(compilerDraft.teams, tournamentId, resolvedOptions)
+  const compiledTeams = compileTeams(draft.teams, tournamentId, resolvedOptions)
 
   const snapshot: TournamentConfigSnapshot = {
     tournament: {
       tournamentId,
-      name: compilerDraft.tournament.name,
-      ...(compilerDraft.tournament.eventDate ? { eventDate: compilerDraft.tournament.eventDate } : {}),
+      name: draft.tournament.name,
+      ...(draft.tournament.eventDate ? { eventDate: draft.tournament.eventDate } : {}),
       currentConfigVersion: 0,
     },
     teams: compiledTeams.teams,
@@ -342,7 +329,7 @@ export function compileTournamentSetup(
     scoringTestCases: [],
   }
 
-  for (const competitionDraft of compilerDraft.competitions) {
+  for (const competitionDraft of draft.competitions) {
     const competitionId = resolvedOptions.createId<CompetitionId>()
 
     snapshot.competitions.push({
@@ -353,7 +340,7 @@ export function compileTournamentSetup(
     })
 
     const entries = compileCompetitionEntries(
-      compilerDraft.teams,
+      draft.teams,
       compiledTeams.teamIdsByKey,
       competitionId,
       competitionDraft,
