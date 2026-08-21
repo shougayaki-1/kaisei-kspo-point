@@ -43,7 +43,7 @@ A Court device can already ingest those frames and activate the imported version
 - A fresh Court device must not show production scoring controls until a tournament configuration is active.
 - Headquarters must expose one common configuration-transfer experience for all Court devices.
 - The same Headquarters transfer can initialize Court 1, Court 2, Court 3, Court 4, replacement devices, and spare devices.
-- Court assignment is selected on the Court device after configuration import; it is not encoded as a device-specific configuration payload.
+- Court responsibility is selected on the Court device after configuration import; it is not encoded as a device-specific configuration payload.
 - A configuration that fits in one QR frame is shown as one QR code.
 - A configuration that requires multiple frames is shown as one automatically cycling QR display, so the operator performs one continuous scan session.
 - Existing `CONFIG_UPDATE` validation, versioning, and persistence rules remain authoritative.
@@ -90,17 +90,19 @@ The stage design uses 1920x1080 as the visual reference coordinate system, while
 
 ### 5.3 Fullscreen
 
-Selecting Display mode should attempt `requestFullscreen()` from the user gesture that opens Display mode when the Fullscreen API is available.
+Selecting Display mode must attempt `requestFullscreen()` from the user gesture that opens Display mode when the Fullscreen API is available.
 
 Fullscreen failure is non-fatal. The app continues in the same 16:9 fitted stage inside the browser viewport.
 
 The app must not require fullscreen permission to display standings.
 
-### 5.4 Standings layout
+### 5.4 Display state and standings layout
+
+The display service must expose the tournament name together with the existing authoritative scoring state. The name is derived from the active tournament/configuration snapshot; Display mode must not infer a title from a hard-coded constant.
 
 The primary view contains:
 
-- tournament title or configured event title,
+- tournament name,
 - prominent `総合順位` heading,
 - current ConfigVersion indicator in secondary visual weight,
 - ranked team rows,
@@ -114,7 +116,7 @@ The layout must handle the configured number of teams without vertical overflow.
 
 ### 5.5 Refresh behavior
 
-`DisplayDashboard` continues reading `HostScoringState` from `loadAuthoritativeState()` on the existing refresh interval.
+`DisplayDashboard` continues reading authoritative state on the existing refresh interval.
 
 If a refresh fails after at least one successful state load, the previous standings remain visible and a small update-warning indicator is shown. A transient read failure must not blank the public display.
 
@@ -122,19 +124,19 @@ If a refresh fails after at least one successful state load, the previous standi
 
 ### 6.1 Court entry gate
 
-On entering Court mode, the app determines whether a valid active tournament configuration exists locally.
+On entering Court mode, the app determines whether a valid active tournament configuration exists locally and whether local Court responsibility has been selected.
 
 There are three states:
 
 1. `UNCONFIGURED`: no imported/active tournament configuration is available.
-2. `CONFIGURED_UNASSIGNED`: configuration is active, but this device has not selected its Court assignment.
-3. `READY`: configuration is active and the device has an assignment.
+2. `CONFIGURED_UNASSIGNED`: configuration is active, but this device has not selected a valid responsibility.
+3. `READY`: configuration is active and the device has a valid responsibility.
 
 Production scoring UI is rendered only in `READY`.
 
 `UNCONFIGURED` renders the configuration scanner first.
 
-`CONFIGURED_UNASSIGNED` renders Court assignment selection first.
+`CONFIGURED_UNASSIGNED` renders responsibility selection first.
 
 ### 6.2 Headquarters distribution screen
 
@@ -158,7 +160,7 @@ The requirement is one operator scan session, not necessarily one physical QR sy
 
 If `frames.length === 1`, Headquarters displays a static QR.
 
-If `frames.length > 1`, Headquarters automatically cycles through the QR frames in a loop. The default cycle interval should be long enough for stable camera recognition and short enough for quick setup; the implementation plan should start from approximately 700-1000 ms per frame and validate this with real-device testing.
+If `frames.length > 1`, Headquarters automatically cycles through the QR frames in a loop at a default interval of 900 ms per frame. The interval may later be tuned from real-device evidence, but the initial implementation and automated timer tests use 900 ms.
 
 The Court scanner stores each unique frame using the existing transfer repository and displays progress such as `3 / 5 読み取り済み`.
 
@@ -172,7 +174,7 @@ The current application already decodes QR codes with ZXing but does not provide
 
 Introduce a small QR-rendering abstraction that receives an encoded frame string and renders a high-contrast QR symbol suitable for another device camera.
 
-The implementation should use a mature QR encoding library rather than a custom QR algorithm. The component must provide sufficient quiet zone and render at a size appropriate for a laptop/tablet Headquarters screen.
+The implementation must use a mature QR encoding library rather than a custom QR algorithm. The component must provide sufficient quiet zone and render at a size appropriate for a laptop/tablet Headquarters screen.
 
 Transfer payload encoding remains unchanged; the new renderer only converts the existing encoded frame string into a visual QR symbol.
 
@@ -183,14 +185,14 @@ Reuse the existing browser camera-scanning pattern already used by Headquarters 
 The Court bootstrap scanner:
 
 - requests camera permission only after an explicit user action,
-- feeds decoded text to `ConfigUpdatePanel`/config-update service semantics,
+- feeds decoded text to the existing config-update service semantics,
 - accepts frames in any order,
 - ignores duplicate frames safely,
 - persists partial progress so an accidental view change does not lose already scanned parts,
 - shows received/total progress,
 - automatically proceeds to validation when complete.
 
-Manual text entry may remain as a secondary recovery path but is not the primary UI.
+Manual text entry remains available only as a secondary recovery path and is visually subordinate to camera scanning.
 
 ### 6.6 Import review and activation
 
@@ -205,19 +207,38 @@ The user selects `この大会を使用` to activate the imported ConfigVersion.
 
 Activation continues through the existing config repository activation path and records operator/device metadata.
 
-### 6.7 Court assignment
+### 6.7 Local Court responsibility
 
-After activation, the device selects which Court responsibility it is handling.
+After activation, the device selects the scoring responsibility it is handling. This local choice must support both normal per-court operation and scoring sessions that span multiple CourtRuns.
 
-The assignment UI is derived from the active configuration. It must not create or modify tournament configuration records.
+The responsibility picker is derived entirely from the active configuration:
 
-Assignment is local device preference/state. It filters the scoring-session choices shown to the operator so the device primarily presents sessions relevant to its selected Court/CourtRun responsibility.
+- distinct `courtLabel` values are shown as quick assignment choices for ordinary per-court operation,
+- selecting a court label selects the scoring sessions whose CourtRuns include that label,
+- scoring sessions with `WHOLE_SLOT` or `CUSTOM_GROUP` input scope, or sessions spanning multiple court labels, are shown as explicit session-level responsibility choices rather than being automatically assigned to every matching court,
+- the final local responsibility is stored as an explicit set of allowed `ScoringSessionId` values.
 
-The operator can change assignment later from Court mode settings without re-importing the tournament configuration.
+This prevents grouped/multi-court sessions from appearing simultaneously as production responsibilities on every Court device by accident.
 
-A replacement device therefore uses the same Headquarters configuration QR session, activates the same ConfigVersion, and selects the failed device's Court assignment.
+The local assignment is persisted separately from tournament configuration as a device preference keyed by `tournamentId`. It must not create or modify ConfigVersion records.
 
-### 6.8 Later configuration updates
+`CourtScoringSession.listSessions()` is filtered by the locally allowed `ScoringSessionId` set. The underlying configuration and scoring definitions remain unchanged.
+
+The operator can change local responsibility later from Court mode settings without re-importing the tournament configuration.
+
+A replacement device therefore uses the same Headquarters configuration QR session, activates the same ConfigVersion, and selects the required responsibility locally.
+
+### 6.8 Assignment validity after configuration updates
+
+After activating a newer ConfigVersion, the app validates the stored local responsibility against the new active set of `ScoringSessionId` values.
+
+If every stored session still exists, the assignment remains valid.
+
+If any stored session no longer exists, or if the stored assignment is empty, the Court device returns to `CONFIGURED_UNASSIGNED` and requires responsibility selection before production scoring resumes.
+
+This validation occurs after activation and before rendering scoring controls.
+
+### 6.9 Later configuration updates
 
 When Headquarters creates Config v2 or later, the same distribution mechanism is reused.
 
@@ -246,7 +267,8 @@ Scoring must never silently switch to a newly scanned configuration before activ
 → `importVersion`
 → `operator review`
 → `activate`
-→ `select Court assignment`
+→ `select local responsibility`
+→ `persist allowed ScoringSessionIds`
 → `CourtScoringSession`.
 
 ### Court result return
@@ -264,7 +286,8 @@ The existing result path is unchanged:
 - Every configuration frame continues to carry tournament and transfer identifiers through the existing frame format.
 - Complete payload validation remains mandatory before import.
 - Imported configuration remains inactive until explicit activation.
-- A Court device must not permit production result entry without an active configuration.
+- A Court device must not permit production result entry without an active configuration and a valid local responsibility.
+- Local responsibility state must never mutate ConfigVersion data.
 - A configuration update must not destroy previously saved result/revision history.
 - Result transfer must continue rejecting mismatched tournaments.
 - Display mode is read-only and must not expose controls that mutate scoring state.
@@ -303,17 +326,21 @@ Add coverage for:
 
 - Display mode omits normal operator chrome.
 - 16:9 stage class/structure is rendered only in Display mode.
+- display state includes the active tournament name.
 - display refresh keeps previous state after a later load error.
 - fresh Court mode renders bootstrap scanner instead of scoring controls.
-- configured-but-unassigned Court mode renders assignment selection.
+- configured-but-unassigned Court mode renders responsibility selection.
 - ready Court mode renders scoring controls.
 - Headquarters distribution exports the active version.
 - single-frame configuration renders one static QR.
-- multi-frame configuration cycles frames and reports index/total.
+- multi-frame configuration cycles frames at the configured interval and reports index/total.
 - Court scanner accepts out-of-order frames and duplicates.
 - complete scan transitions to configuration review.
-- activation transitions to assignment.
-- assignment filters scoring-session choices without mutating ConfigVersion data.
+- activation transitions to responsibility selection.
+- court-label quick assignment resolves to the expected ScoringSession IDs.
+- whole-slot/custom-group or multi-court sessions require explicit session-level assignment.
+- local assignment filters scoring-session choices without mutating ConfigVersion data.
+- invalidated assignment after a new ConfigVersion returns the device to `CONFIGURED_UNASSIGNED`.
 - later ConfigVersion import remains inactive until explicit activation.
 
 ### Integration tests
@@ -324,10 +351,10 @@ Add an end-to-end service/component integration test that performs:
 2. export the active ConfigVersion,
 3. ingest all exported frames into a separate Court database,
 4. activate the imported version,
-5. select a Court assignment,
+5. select local Court responsibility,
 6. confirm production Court scoring sessions become available.
 
-Also verify that the same exported ConfigVersion initializes two independent Court databases with different local Court assignments.
+Also verify that the same exported ConfigVersion initializes two independent Court databases with different local responsibilities.
 
 ### Manual real-device verification
 
@@ -339,7 +366,7 @@ Before event-day acceptance, verify on at least:
 - one projector/TV at 16:9,
 - one non-16:9 viewport.
 
-For multi-frame QR, verify reliable continuous scanning at normal viewing distance and tune frame interval/QR size based on observed recognition stability.
+For multi-frame QR, verify reliable continuous scanning at normal viewing distance and tune frame interval/QR size only if evidence shows the 900 ms default is unreliable.
 
 ## 11. Acceptance Criteria
 
@@ -351,7 +378,8 @@ The work is complete when all of the following are true:
 - Headquarters presents the active configuration as a real QR code rather than only encoded text.
 - All Court devices can initialize from the same Headquarters distribution.
 - The operator performs one continuous scanning action even when the transfer requires multiple QR frames.
-- Court assignment is selected locally after import and can differ between devices using the same ConfigVersion.
+- Court responsibility is selected locally after import and can differ between devices using the same ConfigVersion.
+- Grouped/multi-court scoring sessions can be assigned explicitly without being forced onto every Court device.
 - Existing QR result transfer and ACK behavior remains intact.
 - Existing config validation/version integrity remains intact.
-- Automated tests cover bootstrap gating, QR distribution/import, assignment, and 16:9 display behavior.
+- Automated tests cover bootstrap gating, QR distribution/import, responsibility assignment, update invalidation, and 16:9 display behavior.
