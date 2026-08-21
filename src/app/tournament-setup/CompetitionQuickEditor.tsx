@@ -26,6 +26,8 @@ export function CompetitionQuickEditor({
   onChange,
 }: CompetitionQuickEditorProps) {
   const supportsRankingDirection = competition.competitionKind === 'TIME' || competition.competitionKind === 'QUANTITY'
+  const supportedQuickGrouping =
+    competition.inputGrouping === 'PER_COURT' ? 'PER_COURT' : 'WHOLE_ROUND'
 
   return (
     <Stack spacing={2}>
@@ -79,7 +81,7 @@ export function CompetitionQuickEditor({
       <FormControl component="fieldset" disabled={disabled}>
         <FormLabel>入力のまとめ方</FormLabel>
         <RadioGroup
-          value={competition.inputGrouping}
+          value={supportedQuickGrouping}
           onChange={(event) => onChange({
             ...competition,
             inputGrouping: event.target.value as SetupCompetitionDraft['inputGrouping'],
@@ -87,7 +89,6 @@ export function CompetitionQuickEditor({
         >
           <FormControlLabel value="WHOLE_ROUND" control={<Radio />} label="同じ回をまとめて入力" />
           <FormControlLabel value="PER_COURT" control={<Radio />} label="コートごとに入力" />
-          <FormControlLabel value="CUSTOM_GROUP" control={<Radio />} label="任意のコートをまとめて入力" />
         </RadioGroup>
       </FormControl>
     </Stack>

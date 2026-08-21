@@ -84,6 +84,10 @@ function cloneCompetitions(
   return structuredClone(competitions) as SetupCompetitionDraft[]
 }
 
+function cloneCompetition(competition: SetupCompetitionDraft): SetupCompetitionDraft {
+  return structuredClone(competition)
+}
+
 function readImportedTemplates(): TournamentSetupTemplateFile[] {
   if (typeof window === 'undefined') return []
 
@@ -130,6 +134,25 @@ function mergeImportedTemplates(
   )
 
   return [...filteredTemplates, nextTemplate]
+}
+
+function mergeSelectedCompetitions(
+  template: TournamentSetupTemplateFile,
+  currentCompetitions: SetupCompetitionDraft[],
+  selectedCompetitionKeys: Set<string>,
+): SetupCompetitionDraft[] {
+  const currentCompetitionsByKey = new Map(
+    currentCompetitions.map((competition) => [competition.competitionKey, competition] as const),
+  )
+
+  return template.competitions.flatMap((templateCompetition) => {
+    if (!selectedCompetitionKeys.has(templateCompetition.competitionKey)) return []
+
+    const currentCompetition = currentCompetitionsByKey.get(templateCompetition.competitionKey)
+    if (currentCompetition) return [cloneCompetition(currentCompetition)]
+
+    return [cloneCompetitions([templateCompetition])[0]!]
+  })
 }
 
 function renderTemplateDescription(template: TournamentSetupTemplateFile): string {
@@ -270,8 +293,11 @@ export function TemplateStep({
       nextSelectedKeys.delete(competitionKey)
     }
 
-    const nextCompetitions = cloneCompetitions(activeTemplate.template.competitions).filter((competition) =>
-      nextSelectedKeys.has(competition.competitionKey))
+    const nextCompetitions = mergeSelectedCompetitions(
+      activeTemplate.template,
+      competitions,
+      nextSelectedKeys,
+    )
 
     onTemplateChange(templateSource, nextCompetitions)
   }

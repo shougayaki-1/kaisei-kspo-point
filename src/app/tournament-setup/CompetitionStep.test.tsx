@@ -52,6 +52,7 @@ describe('CompetitionStep', () => {
     expect(container).not.toHaveTextContent('InputSchema')
     expect(container).not.toHaveTextContent('CompetitionEntry')
     expect(container).not.toHaveTextContent('ScoringSession')
+    expect(screen.queryByLabelText('任意のコートをまとめて入力')).not.toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('記録の表示名'), {
       target: { value: '合計玉数' },

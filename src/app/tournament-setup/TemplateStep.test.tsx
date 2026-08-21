@@ -4,11 +4,19 @@ import { useState } from 'react'
 import type { SetupCompetitionDraft, TournamentSetupDraft } from '../../config/setup/setup-types'
 import { TemplateStep } from './TemplateStep'
 
-function TemplateStepHarness() {
-  const [templateSource, setTemplateSource] = useState<TournamentSetupDraft['templateSource']>({
-    type: 'NONE',
-  })
-  const [competitions, setCompetitions] = useState<SetupCompetitionDraft[]>([])
+interface TemplateStepHarnessProps {
+  initialTemplateSource?: TournamentSetupDraft['templateSource']
+  initialCompetitions?: SetupCompetitionDraft[]
+}
+
+function TemplateStepHarness({
+  initialTemplateSource = { type: 'NONE' },
+  initialCompetitions = [],
+}: TemplateStepHarnessProps) {
+  const [templateSource, setTemplateSource] = useState<TournamentSetupDraft['templateSource']>(
+    initialTemplateSource,
+  )
+  const [competitions, setCompetitions] = useState<SetupCompetitionDraft[]>(initialCompetitions)
 
   return (
     <>
@@ -24,6 +32,7 @@ function TemplateStepHarness() {
         {JSON.stringify({
           templateSource,
           competitionKeys: competitions.map((competition) => competition.competitionKey),
+          competitions,
         })}
       </output>
     </>
@@ -34,6 +43,7 @@ function readState() {
   return JSON.parse(screen.getByLabelText('template-state').textContent ?? '{}') as {
     templateSource: TournamentSetupDraft['templateSource']
     competitionKeys: string[]
+    competitions: SetupCompetitionDraft[]
   }
 }
 
@@ -55,7 +65,7 @@ describe('TemplateStep', () => {
 
     expect(screen.getByRole('checkbox', { name: '大玉運び' })).toBeChecked()
     expect(screen.getByRole('checkbox', { name: '全員リレー' })).toBeChecked()
-    expect(readState()).toEqual({
+    expect(readState()).toMatchObject({
       templateSource: {
         type: 'BUILT_IN',
         templateId: 'sports-festival-2026',
@@ -134,5 +144,84 @@ describe('TemplateStep', () => {
       expect(readState().competitionKeys).toEqual(['ball-carry', 'relay'])
     })
     expect(screen.queryByRole('radio', { name: '壊れたテンプレート' })).not.toBeInTheDocument()
+  })
+
+  it('preserves edited competitions that stay selected when another template competition is toggled', () => {
+    render(
+      <TemplateStepHarness
+        initialTemplateSource={{
+          type: 'BUILT_IN',
+          templateId: 'sports-festival-2026',
+          templateVersion: 1,
+        }}
+        initialCompetitions={[
+          {
+            competitionKey: 'ball-carry',
+            name: '編集済み大玉運び',
+            competitionKind: 'QUANTITY',
+            inputGrouping: 'PER_COURT',
+            rounds: 1,
+            courts: 2,
+            groupsPerTeam: 3,
+            scoring: {
+              inputType: 'NUMBER',
+              rankingDirection: 'LOWER',
+              rankPoints: {},
+            },
+          },
+          {
+            competitionKey: 'relay',
+            name: '全員リレー',
+            competitionKind: 'TIME',
+            inputGrouping: 'PER_COURT',
+            rounds: 1,
+            courts: 4,
+            groupsPerTeam: 1,
+            scoring: {
+              inputType: 'TIME',
+              rankingDirection: 'LOWER',
+              rankPoints: {},
+            },
+          },
+        ]}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('checkbox', { name: '全員リレー' }))
+
+    expect(readState().competitions).toEqual([
+      expect.objectContaining({
+        competitionKey: 'ball-carry',
+        name: '編集済み大玉運び',
+        inputGrouping: 'PER_COURT',
+        groupsPerTeam: 3,
+        scoring: expect.objectContaining({
+          rankingDirection: 'LOWER',
+        }),
+      }),
+    ])
+
+    fireEvent.click(screen.getByRole('checkbox', { name: '全員リレー' }))
+
+    expect(readState().competitions).toEqual([
+      expect.objectContaining({
+        competitionKey: 'ball-carry',
+        name: '編集済み大玉運び',
+        inputGrouping: 'PER_COURT',
+        groupsPerTeam: 3,
+        scoring: expect.objectContaining({
+          rankingDirection: 'LOWER',
+        }),
+      }),
+      expect.objectContaining({
+        competitionKey: 'relay',
+        name: '全員リレー',
+        inputGrouping: 'PER_COURT',
+        groupsPerTeam: 1,
+        scoring: expect.objectContaining({
+          rankingDirection: 'LOWER',
+        }),
+      }),
+    ])
   })
 })
