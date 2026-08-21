@@ -5,6 +5,7 @@ import Typography from '@mui/material/Typography'
 export interface BasicStepProps {
   name: string
   eventDate?: string
+  disabled?: boolean
   onNameChange: (value: string) => void
   onEventDateChange: (value: string) => void
 }
@@ -12,6 +13,7 @@ export interface BasicStepProps {
 export function BasicStep({
   name,
   eventDate,
+  disabled = false,
   onNameChange,
   onEventDateChange,
 }: BasicStepProps) {
@@ -26,6 +28,7 @@ export function BasicStep({
       <TextField
         label="大会名"
         value={name}
+        disabled={disabled}
         onChange={(event) => onNameChange(event.target.value)}
         fullWidth
       />
@@ -33,6 +36,7 @@ export function BasicStep({
         label="開催日"
         type="date"
         value={eventDate ?? ''}
+        disabled={disabled}
         onChange={(event) => onEventDateChange(event.target.value)}
         fullWidth
         slotProps={{ inputLabel: { shrink: true } }}

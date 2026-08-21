@@ -208,6 +208,7 @@ export function TournamentSetupWizard({
 
   const canGoBack = activeStep > 0
   const canGoNext = activeStep < SETUP_STEPS.length - 1
+  const controlsDisabled = !hydrated
 
   const saveText = saveStateText(saveState)
 
@@ -238,6 +239,7 @@ export function TournamentSetupWizard({
           <BasicStep
             name={draft.tournament.name}
             eventDate={draft.tournament.eventDate}
+            disabled={controlsDisabled}
             onNameChange={(value) => {
               updateDraft((nextDraft) => {
                 nextDraft.tournament.name = value
@@ -254,6 +256,7 @@ export function TournamentSetupWizard({
         return (
           <TeamsStep
             teams={draft.teams}
+            disabled={controlsDisabled}
             onTeamCountChange={(count) => {
               updateDraft((nextDraft) => {
                 nextDraft.teams = resizeTeams(nextDraft.teams, count)
@@ -289,6 +292,9 @@ export function TournamentSetupWizard({
           </Typography>
         </div>
         <Stack spacing={1} sx={{ alignItems: 'flex-end' }}>
+          {!hydrated ? (
+            <Typography role="status">読み込み中…</Typography>
+          ) : null}
           {saveText ? <Typography role="status">{saveText}</Typography> : null}
           {saveState === 'error' ? (
             <Alert severity="error" role="alert">保存に失敗</Alert>
@@ -313,10 +319,10 @@ export function TournamentSetupWizard({
           キャンセル
         </Button>
         <Stack direction="row" spacing={1}>
-          <Button variant="outlined" onClick={handleBack} disabled={!canGoBack}>
+          <Button variant="outlined" onClick={handleBack} disabled={controlsDisabled || !canGoBack}>
             戻る
           </Button>
-          <Button variant="contained" onClick={handleNext} disabled={!canGoNext}>
+          <Button variant="contained" onClick={handleNext} disabled={controlsDisabled || !canGoNext}>
             次へ
           </Button>
         </Stack>

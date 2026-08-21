@@ -5,12 +5,14 @@ import type { SetupTeamDraft } from '../../config/setup/setup-types'
 
 export interface TeamsStepProps {
   teams: SetupTeamDraft[]
+  disabled?: boolean
   onTeamCountChange: (count: number) => void
   onTeamNameChange: (index: number, value: string) => void
 }
 
 export function TeamsStep({
   teams,
+  disabled = false,
   onTeamCountChange,
   onTeamNameChange,
 }: TeamsStepProps) {
@@ -26,6 +28,7 @@ export function TeamsStep({
         label="チーム数"
         type="number"
         value={teams.length}
+        disabled={disabled}
         onChange={(event) => onTeamCountChange(Number.parseInt(event.target.value, 10) || 0)}
         slotProps={{ htmlInput: { min: 0 } }}
       />
@@ -35,6 +38,7 @@ export function TeamsStep({
             key={team.teamKey}
             label={`チーム名 ${index + 1}`}
             value={team.name}
+            disabled={disabled}
             onChange={(event) => onTeamNameChange(index, event.target.value)}
             fullWidth
           />

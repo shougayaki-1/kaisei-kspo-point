@@ -10,6 +10,17 @@ function cloneDraft(draft: TournamentSetupDraft | undefined): TournamentSetupDra
   return draft ? structuredClone(draft) : undefined
 }
 
+function createDeferredPromise<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((innerResolve, innerReject) => {
+    resolve = innerResolve
+    reject = innerReject
+  })
+
+  return { promise, resolve, reject }
+}
+
 function createRepository(initialDraft?: TournamentSetupDraft) {
   let storedDraft = cloneDraft(initialDraft)
 
@@ -30,7 +41,12 @@ function createRepository(initialDraft?: TournamentSetupDraft) {
   }
 }
 
-function openTeamsStep() {
+async function waitForHydration() {
+  await waitFor(() => expect(screen.queryByText('読み込み中…')).not.toBeInTheDocument())
+}
+
+async function openTeamsStep() {
+  await waitForHydration()
   fireEvent.click(screen.getByRole('button', { name: '次へ' }))
   expect(screen.getByLabelText('チーム数')).toBeInTheDocument()
 }
@@ -60,12 +76,14 @@ describe('TournamentSetupWizard', () => {
       <TournamentSetupWizard repository={repository} onCancel={vi.fn()} onReadyToApply={vi.fn()} />,
     )
 
+    await waitForHydration()
+
     fireEvent.change(screen.getByLabelText('大会名'), { target: { value: '開成運動交流祭' } })
 
     await waitFor(() => expect(repository.saveSetupDraft).toHaveBeenCalled())
     expect(readStoredDraft()?.tournament.name).toBe('開成運動交流祭')
 
-    openTeamsStep()
+    await openTeamsStep()
     fireEvent.change(screen.getByLabelText('チーム数'), { target: { value: '4' } })
 
     await waitFor(() => expect(screen.getByLabelText('チーム名 4')).toHaveValue('4組'))
@@ -78,12 +96,67 @@ describe('TournamentSetupWizard', () => {
     expect(screen.getByLabelText('チーム名 4')).toHaveValue('4組')
   })
 
+  it('keeps editable controls disabled until hydration resolves, then resumes the persisted draft as editable state', async () => {
+    const deferredLoad = createDeferredPromise<TournamentSetupDraft | undefined>()
+    const persistedDraft: TournamentSetupDraft = {
+      draftFormatVersion: 1,
+      draftId: 'persisted-draft-1',
+      createdAt: '2026-08-21T09:00:00+09:00',
+      updatedAt: '2026-08-21T09:05:00+09:00',
+      currentStep: 'TEAMS',
+      tournament: {
+        name: '保存済み大会',
+        eventDate: '2026-10-12',
+      },
+      teams: [
+        { teamKey: 'team-1', name: '赤組' },
+        { teamKey: 'team-2', name: '青組' },
+      ],
+      templateSource: {
+        type: 'NONE',
+      },
+      competitions: [],
+    }
+
+    const repository: SetupDraftRepository = {
+      loadSetupDraft: vi.fn(async () => deferredLoad.promise),
+      saveSetupDraft: vi.fn(async () => {}),
+      clearSetupDraft: vi.fn(async () => {}),
+      loadEditDraft: vi.fn(async () => ({ status: 'NONE' as const })),
+      saveEditDraft: vi.fn(async () => {}),
+      clearEditDraft: vi.fn(async () => {}),
+    }
+
+    render(<TournamentSetupWizard repository={repository} onCancel={vi.fn()} onReadyToApply={vi.fn()} />)
+
+    expect(screen.getByLabelText('大会セットアップ進捗')).toBeInTheDocument()
+    expect(screen.getByText('読み込み中…')).toBeInTheDocument()
+    expect(screen.getByLabelText('大会名')).toBeDisabled()
+    expect(screen.getByLabelText('開催日')).toBeDisabled()
+    expect(screen.getByRole('button', { name: '次へ' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '戻る' })).toBeDisabled()
+
+    deferredLoad.resolve(persistedDraft)
+
+    expect(await screen.findByLabelText('チーム数')).toHaveValue(2)
+    expect(screen.getByLabelText('チーム名 1')).toHaveValue('赤組')
+    expect(screen.getByLabelText('チーム名 2')).toHaveValue('青組')
+    expect(screen.queryByText('読み込み中…')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('チーム数')).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: '次へ' })).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: '戻る' })).not.toBeDisabled()
+
+    fireEvent.change(screen.getByLabelText('チーム名 2'), { target: { value: '青組 改' } })
+
+    expect(screen.getByLabelText('チーム名 2')).toHaveValue('青組 改')
+  })
+
   it('creates editable default team names and preserves manual names when resizing where possible', async () => {
     const { repository } = createRepository()
 
     render(<TournamentSetupWizard repository={repository} onCancel={vi.fn()} onReadyToApply={vi.fn()} />)
 
-    openTeamsStep()
+    await openTeamsStep()
     fireEvent.change(screen.getByLabelText('チーム数'), { target: { value: '4' } })
 
     expect(await screen.findByLabelText('チーム名 1')).toHaveValue('1組')
