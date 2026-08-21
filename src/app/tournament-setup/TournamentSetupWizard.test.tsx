@@ -6,6 +6,21 @@ import type {
 } from '../../config/setup/setup-types'
 import { TournamentSetupWizard } from './TournamentSetupWizard'
 
+const compileSnapshotSpy = vi.hoisted(() => vi.fn())
+
+vi.mock('../../config/setup/setup-compiler', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../config/setup/setup-compiler')>()
+
+  return {
+    ...actual,
+    compileTournamentSetup: (...args: Parameters<typeof actual.compileTournamentSetup>) => {
+      const snapshot = actual.compileTournamentSetup(...args)
+      compileSnapshotSpy(snapshot)
+      return snapshot
+    },
+  }
+})
+
 function cloneDraft(draft: TournamentSetupDraft | undefined): TournamentSetupDraft | undefined {
   return draft ? structuredClone(draft) : undefined
 }
@@ -329,5 +344,49 @@ describe('TournamentSetupWizard', () => {
 
     fireEvent.click(screen.getAllByRole('button', { name: '修正する' })[0]!)
     expect(await screen.findByLabelText('大会名')).toBeInTheDocument()
+  })
+
+  it('focuses the affected competition card after fixing a competition-specific issue', async () => {
+    const invalidDraft = createReviewDraft('FINAL_CHECK')
+    invalidDraft.competitions[1]!.name = ''
+    const { repository } = createRepository(invalidDraft)
+
+    render(<TournamentSetupWizard repository={repository} onCancel={vi.fn()} onReadyToApply={vi.fn()} />)
+
+    const issue = await screen.findByText('この競技 の競技名を入力してください。')
+    fireEvent.click(within(issue.closest('[role="alert"]')!).getByRole('button', { name: '修正する' }))
+
+    const secondCompetition = await screen.findByRole('region', { name: '競技 2 の競技設定' })
+    const firstCompetition = screen.getByRole('region', { name: '順位競技 の競技設定' })
+
+    await waitFor(() => expect(secondCompetition).toHaveFocus())
+    expect(secondCompetition).toHaveAttribute('data-focus-target', 'true')
+    expect(firstCompetition).not.toHaveAttribute('data-focus-target')
+  })
+
+  it('hands off the rendered compiled snapshot without recompiling an unchanged final check', async () => {
+    compileSnapshotSpy.mockClear()
+    const draft = createReviewDraft('FINAL_CHECK')
+    const { repository } = createRepository(draft)
+    const onReadyToApply = vi.fn()
+    const view = render(
+      <TournamentSetupWizard repository={repository} onCancel={vi.fn()} onReadyToApply={onReadyToApply} />,
+    )
+
+    await screen.findByText('大会情報')
+    const renderedSnapshot = compileSnapshotSpy.mock.calls.at(-1)?.[0]
+    const compileCount = compileSnapshotSpy.mock.calls.length
+
+    expect(renderedSnapshot).toBeDefined()
+
+    view.rerender(
+      <TournamentSetupWizard repository={repository} onCancel={vi.fn()} onReadyToApply={onReadyToApply} />,
+    )
+    expect(compileSnapshotSpy).toHaveBeenCalledTimes(compileCount)
+
+    fireEvent.click(screen.getByRole('button', { name: 'この内容で大会を作成する' }))
+
+    expect(compileSnapshotSpy).toHaveBeenCalledTimes(compileCount)
+    expect(onReadyToApply.mock.calls[0]?.[0]).toBe(renderedSnapshot)
   })
 })

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { TournamentConfigSnapshot } from '../../config/tournament-config'
 import type { SetupIssue } from '../../config/setup/setup-validation'
@@ -69,10 +69,22 @@ describe('FinalCheckStep', () => {
     expect(screen.getByRole('button', { name: 'この内容で大会を作成する' })).toBeDisabled()
   })
 
-  it('labels a time preview for operators without exposing its schema key', () => {
-    render(<CourtInputPreview competitionName="リレー" inputType="TIME" />)
+  it.each([
+    ['順位競技', 'RANK', 'rank', '順位を入力'],
+    ['タイム競技', 'TIME', 'time', 'タイムを入力'],
+    ['回数競技', 'NUMBER', 'value', '記録を入力'],
+    ['勝敗競技', 'WIN_LOSS', 'result', '勝敗を入力'],
+  ] as const)('keeps %s operator previews free of raw type and field-key tokens', (
+    competitionName,
+    inputType,
+    fieldKey,
+    expectedHeading,
+  ) => {
+    render(<CourtInputPreview competitionName={competitionName} inputType={inputType} />)
 
-    expect(screen.getByText('タイムを入力')).toBeInTheDocument()
-    expect(screen.queryByText('time')).not.toBeInTheDocument()
+    const preview = screen.getByRole('region', { name: `${competitionName} の入力プレビュー` })
+    expect(within(preview).getByText(expectedHeading)).toBeInTheDocument()
+    expect(within(preview).queryByText(inputType, { exact: true })).not.toBeInTheDocument()
+    expect(within(preview).queryByText(fieldKey, { exact: true })).not.toBeInTheDocument()
   })
 })

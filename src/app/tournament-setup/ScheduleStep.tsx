@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Alert from '@mui/material/Alert'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
@@ -21,6 +21,7 @@ export interface ScheduleStepProps {
   competitions: SetupCompetitionDraft[]
   teams: SetupTeamDraft[]
   disabled?: boolean
+  focusedCompetitionKey?: string
   onCompetitionsChange: (competitions: SetupCompetitionDraft[]) => void
 }
 
@@ -64,9 +65,11 @@ export function ScheduleStep({
   competitions,
   teams,
   disabled = false,
+  focusedCompetitionKey,
   onCompetitionsChange,
 }: ScheduleStepProps) {
   const [expandedKeys, setExpandedKeys] = useState<string[]>([])
+  const cardRefs = useRef(new Map<string, HTMLElement>())
 
   useEffect(() => {
     const nextCompetitions = competitions.map((competition) =>
@@ -76,6 +79,19 @@ export function ScheduleStep({
     if (nextCompetitions.every((competition, index) => competition === competitions[index])) return
     onCompetitionsChange(nextCompetitions)
   }, [competitions, onCompetitionsChange, teams])
+
+  useEffect(() => {
+    if (!focusedCompetitionKey) return
+
+    setExpandedKeys((currentKeys) => (
+      currentKeys.includes(focusedCompetitionKey) ? currentKeys : [...currentKeys, focusedCompetitionKey]
+    ))
+
+    const card = cardRefs.current.get(focusedCompetitionKey)
+    if (!card) return
+    if (typeof card.scrollIntoView === 'function') card.scrollIntoView({ block: 'nearest' })
+    card.focus()
+  }, [focusedCompetitionKey])
 
   const updateCompetition = (
     index: number,
@@ -125,14 +141,28 @@ export function ScheduleStep({
         const schedule = competition.schedule ?? autoAssignCompetitionSchedule(competition, teams)
         const expanded = expandedKeys.includes(competition.competitionKey)
         const preservesDetailedGrouping = competition.inputGrouping === 'CUSTOM_GROUP'
+        const focused = competition.competitionKey === focusedCompetitionKey
+        const competitionName = competition.name || `競技 ${index + 1}`
 
         return (
-          <Card key={competition.competitionKey} variant="outlined">
+          <Card
+            key={competition.competitionKey}
+            component="section"
+            variant="outlined"
+            ref={(element) => {
+              if (element) cardRefs.current.set(competition.competitionKey, element)
+              else cardRefs.current.delete(competition.competitionKey)
+            }}
+            tabIndex={-1}
+            aria-label={`${competitionName} の進行設定`}
+            data-focus-target={focused ? 'true' : undefined}
+            sx={focused ? { borderColor: 'primary.main', boxShadow: 2 } : undefined}
+          >
             <CardContent>
               <Stack spacing={2.5}>
                 <div>
                   <Typography component="h3" variant="h6">
-                    {competition.name || `競技 ${index + 1}`}
+                    {competitionName}
                   </Typography>
                   <Typography color="text.secondary">
                     必要な基本設定だけ先に決め、細かな時刻や割り当ては後から開いて調整できます。

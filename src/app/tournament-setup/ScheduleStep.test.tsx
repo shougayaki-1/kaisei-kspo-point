@@ -33,8 +33,10 @@ function buildCompetition(
 
 function ScheduleStepHarness({
   initialCompetitions = [buildCompetition()],
+  focusedCompetitionKey,
 }: {
   initialCompetitions?: SetupCompetitionDraft[]
+  focusedCompetitionKey?: string
 }) {
   const [competitions, setCompetitions] = useState<SetupCompetitionDraft[]>([
     ...initialCompetitions,
@@ -45,6 +47,7 @@ function ScheduleStepHarness({
       <ScheduleStep
         competitions={competitions}
         teams={buildTeams(['赤組', '青組', '黄組', '緑組'])}
+        focusedCompetitionKey={focusedCompetitionKey}
         onCompetitionsChange={setCompetitions}
       />
       <output aria-label="schedule-state">{JSON.stringify(competitions)}</output>
@@ -136,5 +139,22 @@ describe('ScheduleStep', () => {
     fireEvent.click(screen.getByLabelText('コートごとに入力'))
 
     expect(readCompetitionState()[0]?.inputGrouping).toBe('CUSTOM_GROUP')
+  })
+
+  it('focuses and expands the named competition when a schedule correction targets it', () => {
+    render(
+      <ScheduleStepHarness
+        initialCompetitions={[
+          buildCompetition({ competitionKey: 'competition-1', name: '玉入れ' }),
+          buildCompetition({ competitionKey: 'competition-2', name: 'リレー' }),
+        ]}
+        focusedCompetitionKey="competition-2"
+      />,
+    )
+
+    const targetedCard = screen.getByRole('region', { name: 'リレー の進行設定' })
+    expect(targetedCard).toHaveFocus()
+    expect(targetedCard).toHaveAttribute('data-focus-target', 'true')
+    expect(screen.getByLabelText('1回目の開始時刻')).toBeInTheDocument()
   })
 })

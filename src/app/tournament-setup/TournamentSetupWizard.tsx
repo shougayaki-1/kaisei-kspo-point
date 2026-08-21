@@ -137,6 +137,7 @@ export function TournamentSetupWizard({
   const [draft, setDraft] = useState<TournamentSetupDraft>(() => createDefaultDraft())
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [hydrated, setHydrated] = useState(false)
+  const [focusedCompetitionKey, setFocusedCompetitionKey] = useState<string | undefined>()
 
   const mountedRef = useRef(true)
   const hasLocalEditsRef = useRef(false)
@@ -277,7 +278,8 @@ export function TournamentSetupWizard({
     }
   }, [draft])
 
-  const goToStep = (step: SetupStep) => {
+  const goToStep = (step: SetupStep, competitionKey?: string) => {
+    setFocusedCompetitionKey(competitionKey)
     updateDraft((nextDraft) => {
       nextDraft.currentStep = step
     })
@@ -357,6 +359,7 @@ export function TournamentSetupWizard({
           <CompetitionStep
             competitions={draft.competitions}
             disabled={controlsDisabled}
+            focusedCompetitionKey={focusedCompetitionKey}
             onCompetitionsChange={(competitions) => {
               updateDraft((nextDraft) => {
                 nextDraft.competitions = competitions
@@ -370,6 +373,7 @@ export function TournamentSetupWizard({
             competitions={draft.competitions}
             teams={draft.teams}
             disabled={controlsDisabled}
+            focusedCompetitionKey={focusedCompetitionKey}
             onCompetitionsChange={(competitions) => {
               updateDraft((nextDraft) => {
                 nextDraft.competitions = competitions
@@ -378,14 +382,20 @@ export function TournamentSetupWizard({
           />
         )
       case 'SCORING_REVIEW':
-        return <ScoringReviewStep competitions={draft.competitions} issues={finalCheck.issues} />
+        return (
+          <ScoringReviewStep
+            competitions={draft.competitions}
+            issues={finalCheck.issues}
+            focusedCompetitionKey={focusedCompetitionKey}
+          />
+        )
       case 'FINAL_CHECK':
         return (
           <FinalCheckStep
             snapshot={finalCheck.snapshot}
             issues={finalCheck.issues}
             disabled={controlsDisabled}
-            onFixIssue={(issue) => goToStep(issue.step)}
+            onFixIssue={(issue) => goToStep(issue.step, issue.competitionKey)}
             onReadyToApply={(snapshot) => onReadyToApply(snapshot, draft)}
           />
         )
