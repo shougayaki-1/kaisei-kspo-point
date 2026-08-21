@@ -1,0 +1,326 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import Alert from '@mui/material/Alert'
+import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
+import Card from '@mui/material/Card'
+import CardContent from '@mui/material/CardContent'
+import Stack from '@mui/material/Stack'
+import Typography from '@mui/material/Typography'
+import type { TournamentConfigSnapshot } from '../../config/tournament-config'
+import type {
+  SetupDraftRepository,
+  SetupStep,
+  SetupTeamDraft,
+  TournamentSetupDraft,
+} from '../../config/setup/setup-types'
+import { BasicStep } from './BasicStep'
+import { SetupProgress, SETUP_STEPS } from './SetupProgress'
+import { TeamsStep } from './TeamsStep'
+
+type SaveState = 'idle' | 'saving' | 'saved' | 'error'
+
+export interface TournamentSetupWizardProps {
+  repository: SetupDraftRepository
+  onCancel: () => void
+  onReadyToApply: (snapshot: TournamentConfigSnapshot, draft: TournamentSetupDraft) => void
+}
+
+interface PendingSave {
+  id: number
+  draft: TournamentSetupDraft
+}
+
+function createId(prefix: string): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `${prefix}-${crypto.randomUUID()}`
+  }
+  return `${prefix}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+function createDraftTimestamp(): string {
+  return new Date().toISOString()
+}
+
+function createDefaultDraft(): TournamentSetupDraft {
+  const now = createDraftTimestamp()
+
+  return {
+    draftFormatVersion: 1,
+    draftId: createId('setup-draft'),
+    createdAt: now,
+    updatedAt: now,
+    currentStep: 'BASIC',
+    tournament: {
+      name: '',
+    },
+    teams: [],
+    templateSource: {
+      type: 'NONE',
+    },
+    competitions: [],
+  }
+}
+
+function cloneDraft(draft: TournamentSetupDraft): TournamentSetupDraft {
+  return structuredClone(draft)
+}
+
+function defaultTeamName(index: number): string {
+  return `${index + 1}組`
+}
+
+function resizeTeams(currentTeams: SetupTeamDraft[], requestedCount: number): SetupTeamDraft[] {
+  const nextCount = Math.max(0, requestedCount)
+  const nextTeams = currentTeams.slice(0, nextCount).map((team) => ({ ...team }))
+
+  for (let index = nextTeams.length; index < nextCount; index += 1) {
+    nextTeams.push({
+      teamKey: createId('team'),
+      name: defaultTeamName(index),
+    })
+  }
+
+  return nextTeams
+}
+
+function saveStateText(state: SaveState): string | null {
+  switch (state) {
+    case 'saving':
+      return '保存中...'
+    case 'saved':
+      return '保存済み'
+    default:
+      return null
+  }
+}
+
+export function TournamentSetupWizard({
+  repository,
+  onCancel,
+}: TournamentSetupWizardProps) {
+  const [draft, setDraft] = useState<TournamentSetupDraft>(() => createDefaultDraft())
+  const [saveState, setSaveState] = useState<SaveState>('idle')
+  const [hydrated, setHydrated] = useState(false)
+
+  const mountedRef = useRef(true)
+  const hasLocalEditsRef = useRef(false)
+  const needsAutosaveRef = useRef(false)
+  const saveQueueRef = useRef<PendingSave | null>(null)
+  const nextSaveIdRef = useRef(0)
+  const savingRef = useRef(false)
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let ignore = false
+
+    void repository.loadSetupDraft()
+      .then((loadedDraft) => {
+        if (ignore || !loadedDraft || hasLocalEditsRef.current) return
+        setDraft(cloneDraft(loadedDraft))
+      })
+      .finally(() => {
+        if (!ignore) setHydrated(true)
+      })
+
+    return () => {
+      ignore = true
+    }
+  }, [repository])
+
+  const flushSaves = useCallback(async () => {
+    if (savingRef.current) return
+
+    savingRef.current = true
+
+    try {
+      while (saveQueueRef.current) {
+        const currentSave = saveQueueRef.current
+        saveQueueRef.current = null
+
+        try {
+          await repository.saveSetupDraft(currentSave.draft)
+          if (!mountedRef.current) return
+
+          if (saveQueueRef.current || currentSave.id !== nextSaveIdRef.current) {
+            setSaveState('saving')
+            continue
+          }
+
+          setSaveState('saved')
+        } catch {
+          if (!mountedRef.current) return
+
+          if (saveQueueRef.current || currentSave.id !== nextSaveIdRef.current) {
+            setSaveState('saving')
+            continue
+          }
+
+          setSaveState('error')
+        }
+      }
+    } finally {
+      savingRef.current = false
+    }
+
+    if (saveQueueRef.current) {
+      void flushSaves()
+    }
+  }, [repository])
+
+  const queueSave = useCallback((nextDraft: TournamentSetupDraft) => {
+    const nextSaveId = nextSaveIdRef.current + 1
+    nextSaveIdRef.current = nextSaveId
+    saveQueueRef.current = {
+      id: nextSaveId,
+      draft: cloneDraft(nextDraft),
+    }
+    setSaveState('saving')
+    void flushSaves()
+  }, [flushSaves])
+
+  useEffect(() => {
+    if (!hydrated || !needsAutosaveRef.current) return
+    needsAutosaveRef.current = false
+    queueSave(draft)
+  }, [draft, hydrated, queueSave])
+
+  const updateDraft = useCallback((mutate: (nextDraft: TournamentSetupDraft) => void) => {
+    hasLocalEditsRef.current = true
+
+    setDraft((currentDraft) => {
+      const nextDraft = cloneDraft(currentDraft)
+      mutate(nextDraft)
+      nextDraft.updatedAt = createDraftTimestamp()
+      needsAutosaveRef.current = true
+      return nextDraft
+    })
+  }, [])
+
+  const activeStep = useMemo(
+    () => Math.max(0, SETUP_STEPS.findIndex((step) => step.key === draft.currentStep)),
+    [draft.currentStep],
+  )
+
+  const canGoBack = activeStep > 0
+  const canGoNext = activeStep < SETUP_STEPS.length - 1
+
+  const saveText = saveStateText(saveState)
+
+  const goToStep = (step: SetupStep) => {
+    updateDraft((nextDraft) => {
+      nextDraft.currentStep = step
+    })
+  }
+
+  const handleNext = () => {
+    if (!canGoNext) return
+    const nextStep = SETUP_STEPS[activeStep + 1]
+    if (!nextStep) return
+    goToStep(nextStep.key)
+  }
+
+  const handleBack = () => {
+    if (!canGoBack) return
+    const previousStep = SETUP_STEPS[activeStep - 1]
+    if (!previousStep) return
+    goToStep(previousStep.key)
+  }
+
+  const renderStep = () => {
+    switch (draft.currentStep) {
+      case 'BASIC':
+        return (
+          <BasicStep
+            name={draft.tournament.name}
+            eventDate={draft.tournament.eventDate}
+            onNameChange={(value) => {
+              updateDraft((nextDraft) => {
+                nextDraft.tournament.name = value
+              })
+            }}
+            onEventDateChange={(value) => {
+              updateDraft((nextDraft) => {
+                nextDraft.tournament.eventDate = value || undefined
+              })
+            }}
+          />
+        )
+      case 'TEAMS':
+        return (
+          <TeamsStep
+            teams={draft.teams}
+            onTeamCountChange={(count) => {
+              updateDraft((nextDraft) => {
+                nextDraft.teams = resizeTeams(nextDraft.teams, count)
+              })
+            }}
+            onTeamNameChange={(index, value) => {
+              updateDraft((nextDraft) => {
+                if (!nextDraft.teams[index]) return
+                nextDraft.teams[index] = {
+                  ...nextDraft.teams[index],
+                  name: value,
+                }
+              })
+            }}
+          />
+        )
+      default:
+        return (
+          <Alert severity="info" variant="outlined">
+            この手順は後続タスクで実装します。
+          </Alert>
+        )
+    }
+  }
+
+  return (
+    <Stack spacing={3}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2, alignItems: 'flex-start' }}>
+        <div>
+          <Typography component="h1" variant="h5">大会セットアップ</Typography>
+          <Typography color="text.secondary">
+            下書きを自動保存しながら大会構成を順番に入力します。
+          </Typography>
+        </div>
+        <Stack spacing={1} sx={{ alignItems: 'flex-end' }}>
+          {saveText ? <Typography role="status">{saveText}</Typography> : null}
+          {saveState === 'error' ? (
+            <Alert severity="error" role="alert">保存に失敗</Alert>
+          ) : null}
+        </Stack>
+      </Box>
+
+      <Card variant="outlined">
+        <CardContent>
+          <SetupProgress activeStep={activeStep} />
+        </CardContent>
+      </Card>
+
+      <Card variant="outlined">
+        <CardContent>
+          {renderStep()}
+        </CardContent>
+      </Card>
+
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2 }}>
+        <Button variant="text" onClick={onCancel}>
+          キャンセル
+        </Button>
+        <Stack direction="row" spacing={1}>
+          <Button variant="outlined" onClick={handleBack} disabled={!canGoBack}>
+            戻る
+          </Button>
+          <Button variant="contained" onClick={handleNext} disabled={!canGoNext}>
+            次へ
+          </Button>
+        </Stack>
+      </Box>
+    </Stack>
+  )
+}
