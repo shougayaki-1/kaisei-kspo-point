@@ -31,9 +31,13 @@ function buildCompetition(
   }
 }
 
-function ScheduleStepHarness() {
+function ScheduleStepHarness({
+  initialCompetitions = [buildCompetition()],
+}: {
+  initialCompetitions?: SetupCompetitionDraft[]
+}) {
   const [competitions, setCompetitions] = useState<SetupCompetitionDraft[]>([
-    buildCompetition(),
+    ...initialCompetitions,
   ])
 
   return (
@@ -101,5 +105,36 @@ describe('ScheduleStep', () => {
 
     expect(scrollRegion).toHaveAttribute('tabindex', '0')
     expect(screen.getByRole('table', { name: '玉入れ の時程表' })).toBeInTheDocument()
+  })
+
+  it('preserves custom grouped input truthfully without selecting a simpler grouping', () => {
+    render(
+      <ScheduleStepHarness
+        initialCompetitions={[
+          buildCompetition({
+            inputGrouping: 'CUSTOM_GROUP',
+            customGroups: [
+              {
+                groupKey: 'group-a',
+                label: '第1展開 A+B',
+                round: 1,
+                courtIndexes: [1, 2],
+              },
+            ],
+          }),
+        ]}
+      />,
+    )
+
+    expect(screen.getByText('詳細な入力のまとめ方はそのまま保持されます。')).toBeInTheDocument()
+    expect(screen.getByLabelText('同じ回をまとめて入力')).not.toBeChecked()
+    expect(screen.getByLabelText('コートごとに入力')).not.toBeChecked()
+    expect(screen.getByLabelText('同じ回をまとめて入力')).toBeDisabled()
+    expect(screen.getByLabelText('コートごとに入力')).toBeDisabled()
+    expect(readCompetitionState()[0]?.inputGrouping).toBe('CUSTOM_GROUP')
+
+    fireEvent.click(screen.getByLabelText('コートごとに入力'))
+
+    expect(readCompetitionState()[0]?.inputGrouping).toBe('CUSTOM_GROUP')
   })
 })

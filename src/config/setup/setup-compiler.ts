@@ -12,6 +12,10 @@ import type {
 import type { InputScope } from '../../domain/tournament'
 import type { InputField, InputSchema } from '../input-schema'
 import type { TournamentConfigSnapshot } from '../tournament-config'
+import {
+  autoAssignCompetitionSchedule,
+  type SetupCompetitionSchedule,
+} from './schedule-assignment'
 import type { SetupCompetitionDraft, SetupTeamDraft, TournamentSetupDraft } from './setup-types'
 
 interface TeamCompileResult {
@@ -132,44 +136,37 @@ function compileCompetitionEntries(
 function compileSchedule(
   competitionId: CompetitionId,
   draft: SetupCompetitionDraft,
+  teams: SetupTeamDraft[],
   entryIds: CompetitionEntryId[],
   options: SetupCompilerOptions,
 ): ScheduleCompileResult {
   const scheduleSlots: TournamentConfigSnapshot['scheduleSlots'] = []
   const courtRuns: TournamentConfigSnapshot['courtRuns'] = []
   const scoringSessions: TournamentConfigSnapshot['scoringSessions'] = []
-  const totalRuns = draft.rounds * draft.courts
+  const resolvedSchedule = autoAssignCompetitionSchedule(draft, teams)
+  const entryIdsByKey = buildEntryIdsByKey(resolvedSchedule, entryIds)
 
-  let entryIndex = 0
-  let runSequenceIndex = 0
-
-  for (let roundIndex = 0; roundIndex < draft.rounds; roundIndex += 1) {
-    const round = roundIndex + 1
+  for (const round of resolvedSchedule.rounds) {
     const slotId = options.createId<ScheduleSlotId>()
     const runIds: CourtRunId[] = []
 
     scheduleSlots.push({
       slotId,
       competitionId,
-      label: slotLabel(round),
+      label: slotLabel(round.roundNumber),
+      ...(round.startTime ? { plannedStart: round.startTime } : {}),
     })
 
-    for (let courtIndex = 0; courtIndex < draft.courts; courtIndex += 1) {
+    for (const cell of round.cells) {
       const courtRunId = options.createId<CourtRunId>()
-      const remainingEntries = entryIds.length - entryIndex
-      const remainingRuns = totalRuns - runSequenceIndex
-      const participantCount = remainingEntries > 0
-        ? Math.ceil(remainingEntries / remainingRuns)
-        : 0
-      const participantEntryIds = entryIds.slice(entryIndex, entryIndex + participantCount)
-
-      entryIndex += participantCount
-      runSequenceIndex += 1
+      const participantEntryIds = cell.entryKeys
+        .map((entryKey) => entryIdsByKey.get(entryKey))
+        .filter((entryId): entryId is CompetitionEntryId => Boolean(entryId))
 
       courtRuns.push({
         courtRunId,
         slotId,
-        courtLabel: courtLabel(courtIndex),
+        courtLabel: courtLabel(cell.courtNumber - 1),
         participantEntryIds,
       })
       runIds.push(courtRunId)
@@ -180,7 +177,7 @@ function compileSchedule(
         scoringSessionId: options.createId<ScoringSessionId>(),
         competitionId,
         slotId,
-        label: `${slotLabel(round)} 全体`,
+        label: `${slotLabel(round.roundNumber)} 全体`,
         courtRunIds: runIds,
         inputScope: 'WHOLE_SLOT',
       })
@@ -193,7 +190,7 @@ function compileSchedule(
           scoringSessionId: options.createId<ScoringSessionId>(),
           competitionId,
           slotId,
-          label: `${slotLabel(round)} ${courtLabel(courtIndex)}`,
+          label: `${slotLabel(round.roundNumber)} ${courtLabel(courtIndex)}`,
           courtRunIds: [courtRunId],
           inputScope: 'PER_COURT',
         })
@@ -201,10 +198,10 @@ function compileSchedule(
       continue
     }
 
-    for (const group of draft.customGroups ?? []) {
-      if (group.round !== round) continue
+    for (const group of resolvedSchedule.inputGroups) {
+      if (group.roundNumber !== round.roundNumber) continue
 
-      const groupedRunIds = group.courtIndexes
+      const groupedRunIds = group.courtNumbers
         .map((courtNumber) => runIds[courtNumber - 1])
         .filter((courtRunId): courtRunId is CourtRunId => Boolean(courtRunId))
 
@@ -226,6 +223,17 @@ function compileSchedule(
     courtRuns,
     scoringSessions,
   }
+}
+
+function buildEntryIdsByKey(
+  schedule: SetupCompetitionSchedule,
+  entryIds: CompetitionEntryId[],
+): Map<string, CompetitionEntryId> {
+  return new Map(
+    schedule.entries.map((entry, index) => [entry.entryKey, entryIds[index]]).filter(
+      (item): item is [string, CompetitionEntryId] => Boolean(item[1]),
+    ),
+  )
 }
 
 function compileInputSchema(
@@ -349,6 +357,7 @@ export function compileTournamentSetup(
     const schedule = compileSchedule(
       competitionId,
       competitionDraft,
+      draft.teams,
       entries.orderedEntryIds,
       resolvedOptions,
     )

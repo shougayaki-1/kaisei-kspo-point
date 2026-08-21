@@ -55,8 +55,9 @@ function normalizeCompetition(
 
 function groupingValue(
   competition: SetupCompetitionDraft,
-): 'WHOLE_ROUND' | 'PER_COURT' {
-  return competition.inputGrouping === 'PER_COURT' ? 'PER_COURT' : 'WHOLE_ROUND'
+): 'WHOLE_ROUND' | 'PER_COURT' | '' {
+  if (competition.inputGrouping === 'CUSTOM_GROUP') return ''
+  return competition.inputGrouping
 }
 
 export function ScheduleStep({
@@ -123,6 +124,7 @@ export function ScheduleStep({
       {competitions.map((competition, index) => {
         const schedule = competition.schedule ?? autoAssignCompetitionSchedule(competition, teams)
         const expanded = expandedKeys.includes(competition.competitionKey)
+        const preservesDetailedGrouping = competition.inputGrouping === 'CUSTOM_GROUP'
 
         return (
           <Card key={competition.competitionKey} variant="outlined">
@@ -162,18 +164,28 @@ export function ScheduleStep({
                   />
                 </Stack>
 
-                <FormControl component="fieldset" disabled={disabled}>
+                <FormControl component="fieldset" disabled={disabled || preservesDetailedGrouping}>
                   <FormLabel>入力のまとめ方</FormLabel>
                   <RadioGroup
                     value={groupingValue(competition)}
-                    onChange={(event) => updateCompetition(index, (nextCompetition) => {
-                      nextCompetition.inputGrouping = event.target.value as SetupCompetitionDraft['inputGrouping']
-                    }, true)}
+                    onChange={(event) => {
+                      if (preservesDetailedGrouping) return
+
+                      updateCompetition(index, (nextCompetition) => {
+                        nextCompetition.inputGrouping = event.target.value as SetupCompetitionDraft['inputGrouping']
+                      }, true)
+                    }}
                   >
                     <FormControlLabel value="WHOLE_ROUND" control={<Radio />} label="同じ回をまとめて入力" />
                     <FormControlLabel value="PER_COURT" control={<Radio />} label="コートごとに入力" />
                   </RadioGroup>
                 </FormControl>
+
+                {preservesDetailedGrouping ? (
+                  <Alert severity="info" variant="outlined">
+                    詳細な入力のまとめ方はそのまま保持されます。
+                  </Alert>
+                ) : null}
 
                 <ScheduleGridEditor
                   competitionName={competition.name || `競技 ${index + 1}`}

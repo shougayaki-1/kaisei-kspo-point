@@ -4,8 +4,16 @@ import type {
   SetupCompetitionDraft,
   SetupCustomCourtGroupDraft,
 } from './setup-types'
+import type { SetupCompetitionSchedule } from './schedule-assignment'
 import { validateTournamentConfig } from '../tournament-config'
 import { compileTournamentSetup } from './setup-compiler'
+
+const TEST_TEAMS = [
+  { teamKey: 'team-red', name: '赤組' },
+  { teamKey: 'team-blue', name: '青組' },
+  { teamKey: 'team-yellow', name: '黄組' },
+  { teamKey: 'team-green', name: '緑組' },
+]
 
 function rankPoints(count: number): Record<number, number> {
   return Object.fromEntries(
@@ -16,40 +24,60 @@ function rankPoints(count: number): Record<number, number> {
 function buildCompetitionDraft(
   competition: Partial<SetupCompetitionDraft> = {},
 ): SetupCompetitionDraft {
-  const teams = [
-    { teamKey: 'team-red', name: '赤組' },
-    { teamKey: 'team-blue', name: '青組' },
-    { teamKey: 'team-yellow', name: '黄組' },
-    { teamKey: 'team-green', name: '緑組' },
-  ]
-
   return {
     competitionKey: 'competition-quantity',
     name: '玉運び',
     competitionKind: 'QUANTITY',
+      inputGrouping: 'WHOLE_ROUND',
+      rounds: 1,
+      courts: 4,
+      groupsPerTeam: 1,
+      scoring: {
+        inputType: 'NUMBER',
+        rankingDirection: 'HIGHER',
+        rankPoints: rankPoints(TEST_TEAMS.length),
+      },
+      ...competition,
+  }
+}
+
+function buildSchedule(
+  overrides: Partial<SetupCompetitionSchedule> = {},
+): SetupCompetitionSchedule {
+  return {
+    roundCount: 1,
+    courtCount: 4,
     inputGrouping: 'WHOLE_ROUND',
-    rounds: 1,
-    courts: 4,
-    groupsPerTeam: 1,
-    scoring: {
-      inputType: 'NUMBER',
-      rankingDirection: 'HIGHER',
-      rankPoints: rankPoints(teams.length),
-    },
-    ...competition,
+    entries: [
+      { entryKey: 'team-red:group-1', teamKey: 'team-red', teamName: '赤組', label: '赤組', groupNumber: 1 },
+      { entryKey: 'team-blue:group-1', teamKey: 'team-blue', teamName: '青組', label: '青組', groupNumber: 1 },
+      { entryKey: 'team-yellow:group-1', teamKey: 'team-yellow', teamName: '黄組', label: '黄組', groupNumber: 1 },
+      { entryKey: 'team-green:group-1', teamKey: 'team-green', teamName: '緑組', label: '緑組', groupNumber: 1 },
+    ],
+    rounds: [
+      {
+        roundKey: 'round-1',
+        roundNumber: 1,
+        label: '第1回',
+        startTime: '',
+        cells: [
+          { cellKey: 'round-1-court-1', roundNumber: 1, courtNumber: 1, courtLabel: 'Aコート', entryKeys: ['team-red:group-1'] },
+          { cellKey: 'round-1-court-2', roundNumber: 1, courtNumber: 2, courtLabel: 'Bコート', entryKeys: ['team-blue:group-1'] },
+          { cellKey: 'round-1-court-3', roundNumber: 1, courtNumber: 3, courtLabel: 'Cコート', entryKeys: ['team-yellow:group-1'] },
+          { cellKey: 'round-1-court-4', roundNumber: 1, courtNumber: 4, courtLabel: 'Dコート', entryKeys: ['team-green:group-1'] },
+        ],
+      },
+    ],
+    inputGroups: [
+      { groupKey: 'round-1-whole', label: '第1回 まとめて入力', roundNumber: 1, courtNumbers: [1, 2, 3, 4] },
+    ],
+    ...overrides,
   }
 }
 
 function buildDraft(
   competition: Partial<SetupCompetitionDraft> = {},
 ): TournamentSetupDraft {
-  const teams = [
-    { teamKey: 'team-red', name: '赤組' },
-    { teamKey: 'team-blue', name: '青組' },
-    { teamKey: 'team-yellow', name: '黄組' },
-    { teamKey: 'team-green', name: '緑組' },
-  ]
-
   return {
     draftFormatVersion: 1,
     draftId: 'draft-1',
@@ -60,7 +88,7 @@ function buildDraft(
       name: '開成運動交流祭',
       eventDate: '2026-09-20',
     },
-    teams,
+    teams: TEST_TEAMS,
     templateSource: {
       type: 'BUILT_IN',
       templateId: 'generic-quantity-v1',
@@ -205,6 +233,50 @@ describe('compileTournamentSetup', () => {
     expect(snapshot.scoringSessions).toHaveLength(4)
     expect(snapshot.scoringSessions.every((session) => session.inputScope === 'PER_COURT')).toBe(true)
     expect(snapshot.scoringSessions.every((session) => session.courtRunIds.length === 1)).toBe(true)
+    expectNoValidationErrors(snapshot)
+  })
+
+  it('uses edited schedule start times and cell assignments when a compatible manual schedule exists', () => {
+    const snapshot = compileTournamentSetup(buildDraft({
+      schedule: buildSchedule({
+        rounds: [
+          {
+            roundKey: 'round-1',
+            roundNumber: 1,
+            label: '第1回',
+            startTime: '09:30',
+            cells: [
+              { cellKey: 'round-1-court-1', roundNumber: 1, courtNumber: 1, courtLabel: 'Aコート', entryKeys: ['team-blue:group-1'] },
+              { cellKey: 'round-1-court-2', roundNumber: 1, courtNumber: 2, courtLabel: 'Bコート', entryKeys: ['team-red:group-1'] },
+              { cellKey: 'round-1-court-3', roundNumber: 1, courtNumber: 3, courtLabel: 'Cコート', entryKeys: [] },
+              { cellKey: 'round-1-court-4', roundNumber: 1, courtNumber: 4, courtLabel: 'Dコート', entryKeys: ['team-green:group-1', 'team-yellow:group-1'] },
+            ],
+          },
+        ],
+      }),
+    }), {
+      createId: createIdFactory(),
+    })
+
+    const entryIdsByLabel = new Map(
+      snapshot.competitionEntries.map((entry) => [entry.label, entry.entryId]),
+    )
+    const runsByCourtLabel = new Map(
+      snapshot.courtRuns.map((run) => [run.courtLabel, run]),
+    )
+
+    expect(snapshot.scheduleSlots[0]?.plannedStart).toBe('09:30')
+    expect(runsByCourtLabel.get('A')?.participantEntryIds).toEqual([
+      entryIdsByLabel.get('青組'),
+    ])
+    expect(runsByCourtLabel.get('B')?.participantEntryIds).toEqual([
+      entryIdsByLabel.get('赤組'),
+    ])
+    expect(runsByCourtLabel.get('C')?.participantEntryIds).toEqual([])
+    expect(runsByCourtLabel.get('D')?.participantEntryIds).toEqual([
+      entryIdsByLabel.get('緑組'),
+      entryIdsByLabel.get('黄組'),
+    ])
     expectNoValidationErrors(snapshot)
   })
 
