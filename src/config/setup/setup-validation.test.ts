@@ -189,4 +189,29 @@ describe('mapConfigIssuesToSetupIssues', () => {
     expect(mapped[0]?.message).not.toContain('EMPTY_RANK_POINTS')
     expect(mapped[0]?.message).not.toContain('UNKNOWN_')
   })
+
+  it('hides raw internal domain terms for otherwise unhandled config issues without known target context', () => {
+    const draft = buildDraft({
+      name: '台風の目',
+    })
+    const issue: ConfigValidationIssue = {
+      severity: 'ERROR',
+      code: 'UNHANDLED_DOMAIN_ISSUE',
+      message: 'BEST_N の CompetitionEntry 集計設定が不正です。',
+      targetId: 'missing-target-id',
+    }
+
+    const mapped = mapConfigIssuesToSetupIssues(draft, [issue])
+
+    expect(mapped).toEqual([
+      expect.objectContaining({
+        step: 'FINAL_CHECK',
+        severity: 'ERROR',
+        code: 'UNHANDLED_DOMAIN_ISSUE',
+      }),
+    ])
+    expect(mapped[0]?.message).not.toContain('BEST_N')
+    expect(mapped[0]?.message).not.toContain('CompetitionEntry')
+    expect(mapped[0]?.message).toBe('設定内容を確認してください。')
+  })
 })

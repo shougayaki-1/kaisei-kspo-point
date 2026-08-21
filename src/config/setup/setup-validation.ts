@@ -178,7 +178,7 @@ function translateConfigIssueMessage(
       return 'コート割り当てに不整合があります。組み合わせを確認してください。'
     default:
       if (competitionName) return `${competitionName} の設定を確認してください。`
-      return issue.message
+      return '設定内容を確認してください。'
   }
 }
 
