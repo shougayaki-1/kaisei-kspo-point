@@ -190,6 +190,8 @@ describe('TournamentSetupWizard', () => {
 
     render(<TournamentSetupWizard repository={repository} onCancel={vi.fn()} onReadyToApply={vi.fn()} />)
 
+    await waitForHydration()
+
     fireEvent.change(screen.getByLabelText('大会名'), { target: { value: '保存失敗ケース' } })
 
     expect(await screen.findByText('保存に失敗')).toBeInTheDocument()
@@ -225,6 +227,8 @@ describe('TournamentSetupWizard', () => {
     }
 
     render(<TournamentSetupWizard repository={repository} onCancel={vi.fn()} onReadyToApply={vi.fn()} />)
+
+    await waitForHydration()
 
     fireEvent.change(screen.getByLabelText('大会名'), { target: { value: '最初の名前' } })
     await waitFor(() => expect(repository.saveSetupDraft).toHaveBeenCalledTimes(1))

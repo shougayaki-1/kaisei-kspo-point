@@ -4,6 +4,7 @@
 - Completed on branch `feat/tournament-setup-wizard`
 - Commit: `c474d46` (`feat: add autosaved tournament setup wizard`)
 - Follow-up hydration-race fix implemented after review
+- Follow-up test-evidence fix implemented after re-review
 
 ## RED Evidence
 - Command: `npm run test:run -- src/app/tournament-setup/TournamentSetupWizard.test.tsx`
@@ -16,6 +17,8 @@
 - Result: PASS (`1` file, `6` tests)
 - Command: `npm run typecheck`
 - Result: PASS
+- Command: `npm run test:run -- src/app/tournament-setup/TournamentSetupWizard.test.tsx`
+- Result: PASS after adding `waitForHydration()` before immediate save-failure and save-serialization interactions.
 - Command: `npm run test:run`
 - Result: PASS (`74` files, `347` tests)
 
