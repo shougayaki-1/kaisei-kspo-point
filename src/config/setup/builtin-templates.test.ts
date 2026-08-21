@@ -14,10 +14,14 @@ describe('GENERIC_SETUP_TEMPLATES', () => {
 
   it('parses every built-in template through the imported template schema', () => {
     for (const template of GENERIC_SETUP_TEMPLATES) {
-      expect(parseTournamentSetupTemplate({
-        templateFormatVersion: 1,
-        templates: [template],
-      }).templates[0]).toEqual(template)
+      expect(parseTournamentSetupTemplate(template)).toEqual(template)
+    }
+  })
+
+  it('uses groupsPerTeam in every built-in competition template', () => {
+    for (const template of GENERIC_SETUP_TEMPLATES) {
+      expect(template.competitions[0]?.groupsPerTeam).toBe(1)
+      expect(template.competitions[0]).not.toHaveProperty('participantsPerRound')
     }
   })
 })

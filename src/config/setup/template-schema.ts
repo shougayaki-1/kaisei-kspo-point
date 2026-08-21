@@ -49,14 +49,13 @@ const scoringSchema = z.strictObject({
 })
 
 const competitionSetupTemplateSchema = z.strictObject({
-  templateId: z.string().trim().min(1),
-  templateVersion: positiveIntegerSchema,
+  competitionKey: z.string().trim().min(1),
   name: z.string().trim().min(1),
   competitionKind: z.enum(['RANKING', 'TIME', 'QUANTITY', 'WIN_LOSS']),
   inputGrouping: z.enum(['PER_COURT', 'WHOLE_ROUND', 'CUSTOM_GROUP']),
   rounds: positiveIntegerSchema,
   courts: positiveIntegerSchema,
-  participantsPerRound: positiveIntegerSchema,
+  groupsPerTeam: positiveIntegerSchema,
   scoring: scoringSchema,
 }).superRefine((value, ctx) => {
   const supported = (
@@ -88,19 +87,23 @@ const competitionSetupTemplateSchema = z.strictObject({
 
 const tournamentSetupTemplateFileSchema = z.strictObject({
   templateFormatVersion: z.literal(1),
-  templates: z.array(competitionSetupTemplateSchema),
+  templateId: z.string().trim().min(1),
+  templateVersion: positiveIntegerSchema,
+  name: z.string().trim().min(1),
+  eventYear: positiveIntegerSchema.optional(),
+  competitions: z.array(competitionSetupTemplateSchema).min(1),
 }).superRefine((value, ctx) => {
   const seen = new Set<string>()
 
-  for (const [index, template] of value.templates.entries()) {
-    if (seen.has(template.templateId)) {
+  for (const [index, competition] of value.competitions.entries()) {
+    if (seen.has(competition.competitionKey)) {
       ctx.addIssue({
         code: 'custom',
-        message: `Duplicate competition template key: ${template.templateId}`,
-        path: ['templates', index, 'templateId'],
+        message: `Duplicate competition template key: ${competition.competitionKey}`,
+        path: ['competitions', index, 'competitionKey'],
       })
     }
-    seen.add(template.templateId)
+    seen.add(competition.competitionKey)
   }
 })
 
