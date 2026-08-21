@@ -15,6 +15,7 @@ import type {
 } from '../../config/setup/setup-types'
 import { BasicStep } from './BasicStep'
 import { CompetitionStep } from './CompetitionStep'
+import { ScheduleStep } from './ScheduleStep'
 import { SetupProgress, SETUP_STEPS } from './SetupProgress'
 import { TemplateStep } from './TemplateStep'
 import { TeamsStep } from './TeamsStep'
@@ -293,6 +294,19 @@ export function TournamentSetupWizard({
         return (
           <CompetitionStep
             competitions={draft.competitions}
+            disabled={controlsDisabled}
+            onCompetitionsChange={(competitions) => {
+              updateDraft((nextDraft) => {
+                nextDraft.competitions = competitions
+              })
+            }}
+          />
+        )
+      case 'SCHEDULE':
+        return (
+          <ScheduleStep
+            competitions={draft.competitions}
+            teams={draft.teams}
             disabled={controlsDisabled}
             onCompetitionsChange={(competitions) => {
               updateDraft((nextDraft) => {
