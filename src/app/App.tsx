@@ -282,7 +282,7 @@ export function App({
         <>
           <TournamentConfigEditor repository={editorConfigRepository} tournamentId={activeTournamentId} operatorName={operatorName} />
           <ConfigFilePanel services={configFileServices} operatorName={operatorName} deviceId={deviceId} onActivated={handleConfigFileActivated} />
-          <ConfigDistributionPanel services={configUpdateServices} />
+          <ConfigDistributionPanel services={configUpdateServices} knownConfigVersionId={knownConfigVersionId} />
         </>
       ) : hostTab === 'QR' ? (
         <TransferDemo mode="HOST" deviceId={deviceId} />

@@ -15,6 +15,12 @@ export interface ConfigDistributionServices {
 
 export interface ConfigDistributionPanelProps {
   services: ConfigDistributionServices
+  /**
+   * The ConfigVersion the surrounding shell currently knows to be active. The panel re-reads its
+   * own status whenever this changes, so a configuration created or activated after mount is
+   * distributed instead of a stale one.
+   */
+  knownConfigVersionId?: string | null
 }
 
 /**
@@ -22,7 +28,10 @@ export interface ConfigDistributionPanelProps {
  * code that every Court device scans. One shared export serves all Court and replacement
  * devices; the payload never carries a per-court assignment.
  */
-export function ConfigDistributionPanel({ services }: ConfigDistributionPanelProps) {
+export function ConfigDistributionPanel({
+  services,
+  knownConfigVersionId = null,
+}: ConfigDistributionPanelProps) {
   const [status, setStatus] = useState<ConfigUpdateStatus | null>(null)
   const [frames, setFrames] = useState<string[]>([])
   const [frameIndex, setFrameIndex] = useState(0)
@@ -31,6 +40,11 @@ export function ConfigDistributionPanel({ services }: ConfigDistributionPanelPro
 
   useEffect(() => {
     let cancelled = false
+    // A ConfigVersion change invalidates any QR already on screen: never let the operator keep
+    // showing frames for the previous version while the new status is being read.
+    setFrames([])
+    setFrameIndex(0)
+    setError('')
     services.loadStatus()
       .then((value) => { if (!cancelled) setStatus(value) })
       .catch((cause: unknown) => {
@@ -39,7 +53,7 @@ export function ConfigDistributionPanel({ services }: ConfigDistributionPanelPro
         }
       })
     return () => { cancelled = true }
-  }, [services])
+  }, [services, knownConfigVersionId])
 
   // A single frame stays static; several frames loop so the operator scans continuously.
   useEffect(() => {
