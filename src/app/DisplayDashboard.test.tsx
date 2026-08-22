@@ -7,6 +7,7 @@ import { DisplayDashboard } from './DisplayDashboard'
 function authoritativeState(): HostScoringState {
   return {
     tournamentId: 'tournament-1' as never,
+    tournamentName: '表示テスト大会',
     configVersionId: 'config-v2',
     configVersion: 2,
     projections: [{

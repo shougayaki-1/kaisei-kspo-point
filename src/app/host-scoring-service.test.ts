@@ -171,6 +171,21 @@ describe('Host authoritative scoring service', () => {
     const database = db(); const repository = new ConfigRepository(database); const initial = config({ 1: 10, 2: 5 }); await repository.apply(initial, { operator: 'Host', createdAt: '2026-08-19T10:00:00+09:00', changeClass: 'SCORING' }); const changed = structuredClone(initial); changed.scoringProfiles[0]!.awardRule.rankPoints = { 1: 30, 2: 10 }; const preview = await repository.previewRegression(changed); await repository.apply(changed, { operator: 'Host', createdAt: '2026-08-19T10:01:00+09:00', changeClass: 'SCORING', scoringTestApprovals: preview.filter((item) => item.status === 'FAIL').map((item) => ({ testCaseId: item.testCaseId, actualFingerprint: scoringTestResultFingerprint(item), operator: 'Host', approvedAt: '2026-08-19T10:00:30+09:00' })) }); await saveLinear(database)
     const state = await createHostScoringService(database).loadAuthoritativeState(); expect(state.configVersion).toBe(2); expect(state.events[0]?.scoringProfileId).toBe(ids.profile); expect(state.events[0]?.participants.map((item) => item.aggregateScore).sort()).toEqual([40, 40]); expect(state.standings.map((row) => row.teamName).sort()).toEqual(['Configured Blue', 'Configured Red'])
   })
+  it('exposes the tournament name from the active immutable ConfigVersion snapshot', async () => {
+    const database = db()
+    const repository = new ConfigRepository(database)
+    const snapshot = config()
+    snapshot.tournament.name = '表示テスト大会'
+    await repository.apply(snapshot, { operator: 'Host', createdAt: '2026-08-19T10:00:00+09:00', changeClass: 'SCORING' })
+    await saveLinear(database)
+
+    // A mutable tournaments row edited outside the immutable snapshot must not leak into display state.
+    const stored = await database.tournaments.get(ids.tournament)
+    await database.tournaments.put({ ...stored!, name: '書き換えられた名前' })
+
+    const state = await createHostScoringService(database).loadAuthoritativeState()
+    expect(state.tournamentName).toBe('表示テスト大会')
+  })
   it('fails closed for incompatible raw Result/config or missing ScoringProfile', async () => {
     const database = db(); await seedConfig(database); const repository = new ResultRepository(database); const badResult = result('bad-result', ids.session1, 'bad-rev'); const badRevision = revision('bad-result', 'bad-rev', 1, [], '1', '2'); badRevision.rawData = { inputSchemaId: 'schema-number', inputSchemaVersion: 1, entries: { ['unknown-entry']: { score: '9' } } }; await repository.saveResultWithRevision(badResult, badRevision); await expect(createHostScoringService(database).loadAuthoritativeState()).rejects.toThrow(/entry|config|incompatible|unknown/i)
     await database.results.clear(); await database.resultRevisions.clear(); await saveLinear(database); await database.scoringProfiles.clear(); await expect(createHostScoringService(database).loadAuthoritativeState()).rejects.toThrow(/ScoringProfile|profile/i)
