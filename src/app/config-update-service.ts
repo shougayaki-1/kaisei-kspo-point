@@ -226,7 +226,15 @@ export function createConfigUpdateService(db: AppDatabase) {
 
       if (!progress.complete) return { progress }
       const imported = await configRepository.getVersionById(latest.batchId)
-      return imported ? { progress, importedConfigVersionId: latest.batchId } : { progress }
+      if (!imported) return { progress }
+
+      // A completed transfer whose ConfigVersion is already active is finished business: its
+      // frames stay in the repository forever, and restoring it would hide the camera and make
+      // "大会設定を更新" unable to scan the next ConfigVersion.
+      const active = await configRepository.getActiveVersion(latest.tournamentId)
+      if (active?.configVersionId === latest.batchId) return null
+
+      return { progress, importedConfigVersionId: latest.batchId }
     },
 
     async getProgress(transferId: string) {

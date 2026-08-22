@@ -140,6 +140,32 @@ describe('CourtConfigTransfer', () => {
     expect(api.activate).not.toHaveBeenCalled()
   })
 
+  it('offers the camera again when the only completed transfer is already active', async () => {
+    // The service suppresses a restore whose ConfigVersion is already active on this device,
+    // so "大会設定を更新" must show the scanner rather than the stale review screen.
+    const api = services({ restoreLatestTransfer: vi.fn(async () => null) })
+    render(
+      <CourtConfigTransfer
+        services={api}
+        operatorName="コート担当"
+        deviceId="court-device-1"
+        onActivated={vi.fn()}
+        heading="大会設定を更新"
+        now={() => '2026-08-21T09:00:00.000Z'}
+      />,
+    )
+
+    await waitFor(() => expect(api.restoreLatestTransfer).toHaveBeenCalledOnce())
+    expect(screen.getByRole('button', { name: '大会設定QRを読み取る' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '大会設定の確認' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'この大会を使用' })).not.toBeInTheDocument()
+    expect(api.getVersionSummary).not.toHaveBeenCalled()
+
+    await startCamera()
+    await scan('KSPO1:frame-1')
+    expect(await screen.findByText('1 / 3 読み取り済み')).toBeInTheDocument()
+  })
+
   it('reports Japanese progress as frames arrive and ignores duplicates', async () => {
     const api = services()
     renderTransfer(api)
