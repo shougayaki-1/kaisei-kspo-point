@@ -37,10 +37,14 @@ import {
 } from '../pwa/runtime'
 import { ConfigFilePanel } from './ConfigFilePanel'
 import { createConfigFilePanelServices } from './config-file-panel-service'
-import { ConfigUpdatePanel } from './ConfigUpdatePanel'
-import { createConfigUpdateService, type ConfigUpdateActivationResult } from './config-update-service'
-import type { ConfigUpdatePanelServices } from './ConfigUpdatePanel'
-import { CourtScoringSession } from './CourtScoringSession'
+import {
+  createConfigUpdateService,
+  type ConfigUpdateActivationResult,
+  type ConfigUpdateServices,
+} from './config-update-service'
+import { ConfigDistributionPanel } from './config-transfer/ConfigDistributionPanel'
+import { CourtModeScreen } from './CourtModeScreen'
+import { createCourtBootstrapService, type CourtBootstrapServices } from './court-bootstrap-service'
 import { createCourtResultService } from './court-result-service'
 import { CourtTransferHistory } from './CourtTransferHistory'
 import { createCourtTransferHistoryServices } from './court-transfer-history-service'
@@ -74,7 +78,8 @@ export interface AppProps {
   pwaRuntime?: PwaRuntime
   resetPersistentData?: () => Promise<void> | void
   hostBackupServices?: HostBackupPanelServices
-  configUpdateServices?: ConfigUpdatePanelServices
+  configUpdateServices?: ConfigUpdateServices
+  courtBootstrapServices?: CourtBootstrapServices
   requestDisplayFullscreen?: () => Promise<void> | void
 }
 
@@ -116,6 +121,7 @@ export function App({
   resetPersistentData,
   hostBackupServices,
   configUpdateServices: injectedConfigUpdateServices,
+  courtBootstrapServices: injectedCourtBootstrapServices,
   requestDisplayFullscreen,
 }: AppProps = {}) {
   const [mode, setMode] = useState<AppMode>(null)
@@ -140,6 +146,8 @@ export function App({
   const configFileServices = useMemo(() => createConfigFilePanelServices(appDatabase), [appDatabase])
   const browserConfigUpdateServices = useMemo(() => createConfigUpdateService(appDatabase), [appDatabase])
   const configUpdateServices = injectedConfigUpdateServices ?? browserConfigUpdateServices
+  const browserCourtBootstrapServices = useMemo(() => createCourtBootstrapService(appDatabase), [appDatabase])
+  const courtBootstrapServices = injectedCourtBootstrapServices ?? browserCourtBootstrapServices
   const courtResultServices = useMemo(() => createCourtResultService(appDatabase, { deviceId }), [appDatabase, deviceId])
   const courtTransferHistoryServices = useMemo(() => createCourtTransferHistoryServices(appDatabase), [appDatabase])
   const hostScoringServices = useMemo(() => createHostScoringService(appDatabase), [appDatabase])
@@ -274,7 +282,7 @@ export function App({
         <>
           <TournamentConfigEditor repository={editorConfigRepository} tournamentId={activeTournamentId} operatorName={operatorName} />
           <ConfigFilePanel services={configFileServices} operatorName={operatorName} deviceId={deviceId} onActivated={handleConfigFileActivated} />
-          <ConfigUpdatePanel mode="HOST" services={configUpdateServices} operatorName={operatorName} deviceId={deviceId} onActivated={handleConfigUpdateActivated} />
+          <ConfigDistributionPanel services={configUpdateServices} />
         </>
       ) : hostTab === 'QR' ? (
         <TransferDemo mode="HOST" deviceId={deviceId} />
@@ -288,10 +296,18 @@ export function App({
         <div><h1>コートモード</h1><p>競技結果を端末内に記録します。</p></div>
         <button type="button" onClick={returnToModeSelection}>モード選択へ戻る</button>
       </div>
-      <CourtScoringSession services={courtResultServices} />
-      <ConfigUpdatePanel mode="COURT" services={configUpdateServices} operatorName={operatorName} deviceId={deviceId} onActivated={handleConfigUpdateActivated} />
-      <TransferDemo mode="COURT" deviceId={deviceId} />
-      <CourtTransferHistory services={courtTransferHistoryServices} />
+      <CourtModeScreen
+        bootstrapServices={courtBootstrapServices}
+        configTransferServices={configUpdateServices}
+        scoringServices={courtResultServices}
+        operatorName={operatorName}
+        deviceId={deviceId}
+        onConfigActivated={handleConfigUpdateActivated}
+        readyExtras={(courtDeviceId) => <>
+          <TransferDemo mode="COURT" deviceId={courtDeviceId} />
+          <CourtTransferHistory services={courtTransferHistoryServices} />
+        </>}
+      />
     </>
   } else {
     content = <Stack spacing={4}>

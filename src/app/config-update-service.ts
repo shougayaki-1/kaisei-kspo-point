@@ -55,6 +55,19 @@ export interface RestoredConfigUpdate {
   importedConfigVersionId?: string
 }
 
+/** Everything the Headquarters distribution and Court bootstrap UIs need from this service. */
+export interface ConfigUpdateServices {
+  loadStatus(): Promise<ConfigUpdateStatus>
+  exportVersion(configVersionId: string): Promise<ExportedConfigUpdate>
+  ingestFrame(encoded: string, receivedAt: string): Promise<ConfigUpdateIngestResult>
+  restoreLatestTransfer(): Promise<RestoredConfigUpdate | null>
+  getVersionSummary(configVersionId: string): Promise<ConfigUpdateSummary>
+  activate(
+    configVersionId: string,
+    activation: ConfigActivationMetadata,
+  ): Promise<ConfigUpdateActivationResult>
+}
+
 export interface ConfigUpdateActivationResult {
   configVersionId: string
   version: number

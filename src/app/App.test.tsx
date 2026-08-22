@@ -1,10 +1,47 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { ConfigRepository } from '../db/config-repository'
 import type { PwaRuntime, PwaRuntimeSnapshot } from '../pwa/runtime'
 import { App, loadHostBootstrapState } from './App'
 import type { ConfigVersionRecord } from '../db/schema'
-import type { ConfigUpdatePanelServices } from './ConfigUpdatePanel'
+import type { ConfigUpdateServices } from './config-update-service'
+import type { CourtBootstrapServices, CourtBootstrapState } from './court-bootstrap-service'
+import type { ScoringSessionId } from '../domain/ids'
+
+vi.mock('@zxing/browser', () => ({
+  BrowserQRCodeReader: class {
+    decodeFromVideoDevice = vi.fn(async () => ({ stop: vi.fn() }))
+  },
+}))
+
+const courtSessionId = 'session-a' as ScoringSessionId
+
+const courtConfiguration = {
+  tournamentId: 'tournament-1' as never,
+  tournamentName: '開成運動交流祭',
+  configVersionId: 'config-v1',
+  configVersion: 1,
+  quickResponsibilities: [
+    { id: 'court:A', label: 'コート A', courtLabel: 'A', scoringSessionIds: [courtSessionId] },
+  ],
+  sessionOptions: [
+    { scoringSessionId: courtSessionId, label: 'コートA 入力', competitionName: '玉入れ', inputScope: 'PER_COURT' as const, courtLabels: ['A'], grouped: false },
+  ],
+}
+
+const readyState: CourtBootstrapState = {
+  status: 'READY',
+  allowedScoringSessionIds: [courtSessionId],
+  ...courtConfiguration,
+}
+
+function bootstrapServices(state: CourtBootstrapState): CourtBootstrapServices {
+  return {
+    loadState: vi.fn(async () => state),
+    saveResponsibility: vi.fn(async () => state),
+    clearResponsibility: vi.fn(async () => state),
+  }
+}
 
 function configRepository(): Pick<ConfigRepository, 'loadCurrent' | 'apply'> {
   let version = 0
@@ -46,7 +83,7 @@ function configRepositoryWithActiveVersion(): Pick<ConfigRepository, 'loadCurren
   }
 }
 
-function configUpdateServices(): ConfigUpdatePanelServices {
+function configUpdateServices(): ConfigUpdateServices {
   let activeConfigVersionId: string | null = null
   return {
     loadStatus: vi.fn(async () => ({
@@ -163,12 +200,31 @@ describe('App', () => {
     expect(screen.getByLabelText('本部QR受信')).toBeInTheDocument()
   })
 
-  it('keeps Court mode on the existing QR transfer flow', async () => {
-    render(<App configRepository={configRepository()} />)
+  it('gates a fresh Court device on receiving the tournament configuration', async () => {
+    render(<App configRepository={configRepository()} courtBootstrapServices={bootstrapServices({ status: 'UNCONFIGURED' })} />)
     fireEvent.click(screen.getByRole('button', { name: 'コートモード' }))
 
-    expect(screen.getByRole('heading', { name: '結果QR転送' })).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: '大会設定を受信' })).toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: 'ScoringSession' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '結果QR転送' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '大会設定' })).not.toBeInTheDocument()
+  })
+
+  it('keeps Court mode on the existing QR transfer flow once the device is ready', async () => {
+    render(<App configRepository={configRepository()} courtBootstrapServices={bootstrapServices(readyState)} />)
+    fireEvent.click(screen.getByRole('button', { name: 'コートモード' }))
+
+    expect(await screen.findByRole('heading', { name: '結果QR転送' })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'ScoringSession' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '大会設定' })).not.toBeInTheDocument()
+  })
+
+  it('offers Court distribution of the active ConfigVersion from Host 大会設定', async () => {
+    render(<App configRepository={configRepository()} configUpdateServices={configUpdateServices()} />)
+    fireEvent.click(screen.getByRole('button', { name: '本部モード' }))
+
+    expect(await screen.findByRole('button', { name: 'コート端末へ配布' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('Config Update QR出力')).not.toBeInTheDocument()
   })
 
   it('keeps Display mode read-only and hides Host/Court destructive and write surfaces', async () => {
@@ -237,13 +293,20 @@ describe('App', () => {
   })
 
   it('synchronizes App config diagnostics after Court Config Update activation', async () => {
-    render(<App configUpdateServices={configUpdateServices()} />)
+    render(
+      <App
+        configUpdateServices={configUpdateServices()}
+        courtBootstrapServices={bootstrapServices({ status: 'UNCONFIGURED' })}
+      />,
+    )
     fireEvent.click(screen.getByRole('button', { name: 'コートモード' }))
-    fireEvent.change(screen.getByLabelText('Config Update QR文字列'), { target: { value: 'frame' } })
-    fireEvent.click(screen.getByRole('button', { name: '読み取る' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'このConfigVersionを有効化' }))
+    fireEvent.change(await screen.findByLabelText('大会設定QR文字列'), { target: { value: 'frame' } })
+    fireEvent.click(screen.getByRole('button', { name: '文字列から読み取る' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'この大会を使用' }))
 
-    expect(await screen.findByText('Config v2')).toBeInTheDocument()
+    // Activation flows through import, review, activation, and a gate reload, so re-query the
+    // status bar until it settles rather than holding a node from an intermediate render.
+    await waitFor(() => expect(screen.getByText('Config v2')).toBeInTheDocument())
     expect(await screen.findByRole('alert')).toHaveTextContent(/release SHA|埋め込まれた/i)
     fireEvent.click(screen.getByRole('button', { name: '端末状態' }))
     expect(screen.getByText('config-v2')).toBeInTheDocument()
