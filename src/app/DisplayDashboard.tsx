@@ -47,20 +47,39 @@ export function DisplayDashboard({
   }, [refreshIntervalMs, service])
 
   if (!state) {
-    return <section aria-label="Display standings">
+    return <section className="display-dashboard display-dashboard--empty" aria-label="Display standings">
       {error ? <p role="alert">{error}</p> : <p>集計中...</p>}
     </section>
   }
 
   return (
-    <section aria-label="Display standings">
-      <h2>総合順位</h2>
-      {error ? <p role="alert">更新失敗（前回の表示を継続）: {error}</p> : null}
-      <p>Current ConfigVersion: v{state.configVersion} / {state.configVersionId}</p>
-      <ol>
+    <section className="display-dashboard" aria-label="Display standings">
+      <header className="display-dashboard__header">
+        <div>
+          <p className="display-dashboard__eyebrow">開成運動交流祭 得点管理</p>
+          <h1>{state.tournamentName}</h1>
+        </div>
+        <div className="display-dashboard__version">Config v{state.configVersion}</div>
+      </header>
+
+      <div className="display-dashboard__title-row">
+        <h2>総合順位</h2>
+        {error ? (
+          <p className="display-dashboard__warning" role="alert">更新失敗・前回値を表示中: {error}</p>
+        ) : null}
+      </div>
+
+      <ol className="display-standings" aria-label="総合順位一覧">
         {state.standings.map((standing) => (
-          <li key={standing.teamId}>
-            {standing.rank}位 {standing.teamName}: {String(standing.totalScore)}
+          <li
+            className="display-standing"
+            key={standing.teamId}
+            aria-label={`${standing.rank}位 ${standing.teamName} ${String(standing.totalScore)}点`}
+          >
+            <span className="display-standing__rank">{standing.rank}</span>
+            <span className="display-standing__team">{standing.teamName}</span>
+            <span className="display-standing__score">{String(standing.totalScore)}</span>
+            <span className="display-standing__unit">点</span>
           </li>
         ))}
       </ol>

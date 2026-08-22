@@ -562,3 +562,169 @@ fieldset {
     padding: 1rem;
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * Display mode: a strict 16:9 public stage for a projector, TV, or monitor.
+ * The stage is letterboxed/pillarboxed when the viewport is not 16:9 so the
+ * standings are never cropped or stretched. 1920x1080 is the visual reference;
+ * all sizing is relative so it scales to whatever the venue screen provides.
+ * ------------------------------------------------------------------------- */
+.display-viewport {
+  width: 100dvw;
+  height: 100dvh;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  position: relative;
+  background: #0b1220;
+}
+
+.display-stage {
+  width: min(100dvw, calc(100dvh * 16 / 9));
+  height: min(100dvh, calc(100dvw * 9 / 16));
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: #f8fafc;
+  color: #0b1220;
+}
+
+.display-dashboard {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: clamp(24px, 3.2vw, 64px);
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  gap: clamp(14px, 1.6vw, 30px);
+}
+
+.display-dashboard--empty {
+  place-content: center;
+  text-align: center;
+  font-size: clamp(1.2rem, 2.4vw, 2.4rem);
+}
+
+.display-dashboard__header,
+.display-dashboard__title-row,
+.display-standing {
+  display: grid;
+  align-items: center;
+}
+
+.display-dashboard__header {
+  grid-template-columns: 1fr auto;
+  gap: clamp(12px, 1.6vw, 32px);
+  border-bottom: 2px solid #d7dfeb;
+  padding-bottom: clamp(8px, 1vw, 20px);
+}
+
+.display-dashboard__eyebrow {
+  margin: 0;
+  font-size: clamp(0.75rem, 1.1vw, 1.4rem);
+  letter-spacing: 0.12em;
+  color: #5b6a82;
+}
+
+.display-dashboard__header h1 {
+  margin: 0;
+  font-size: clamp(1.5rem, 3vw, 3.6rem);
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.display-dashboard__version {
+  font-size: clamp(0.85rem, 1.4vw, 1.8rem);
+  font-weight: 700;
+  color: #5b6a82;
+}
+
+.display-dashboard__title-row {
+  grid-template-columns: auto 1fr;
+  gap: clamp(12px, 1.6vw, 32px);
+}
+
+.display-dashboard__title-row h2 {
+  margin: 0;
+  font-size: clamp(1.4rem, 2.8vw, 3.2rem);
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.display-dashboard__warning {
+  margin: 0;
+  justify-self: end;
+  font-size: clamp(0.7rem, 1vw, 1.1rem);
+  font-weight: 700;
+  color: #8a5a00;
+  background: #fff4d6;
+  border-radius: 999px;
+  padding: 0.25em 0.9em;
+  max-width: 46%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.display-standings {
+  min-height: 0;
+  display: grid;
+  grid-auto-rows: 1fr;
+  gap: clamp(8px, 0.8vw, 16px);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.display-standing {
+  grid-template-columns: minmax(72px, 0.12fr) 1fr auto auto;
+  gap: clamp(8px, 1.2vw, 28px);
+  min-height: 0;
+  overflow: hidden;
+  background: #ffffff;
+  border: 1px solid #e1e7f0;
+  border-radius: clamp(8px, 0.8vw, 18px);
+  padding: 0 clamp(12px, 1.6vw, 32px);
+}
+
+.display-standing__rank {
+  font-size: clamp(2rem, 4.2vw, 5rem);
+  font-weight: 900;
+  line-height: 1;
+  text-align: center;
+  color: #1d4ed8;
+}
+
+.display-standing__team {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: clamp(1.4rem, 2.6vw, 3.2rem);
+  font-weight: 800;
+}
+
+.display-standing__score {
+  font-size: clamp(2rem, 4vw, 4.8rem);
+  font-variant-numeric: tabular-nums;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.display-standing__unit {
+  font-size: clamp(0.9rem, 1.4vw, 1.8rem);
+  font-weight: 700;
+  color: #5b6a82;
+}
+
+.display-exit-button {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  opacity: 0.2;
+  transition: opacity 120ms ease-in-out;
+}
+
+.display-exit-button:hover,
+.display-exit-button:focus-visible {
+  opacity: 1;
+}
