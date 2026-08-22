@@ -1,5 +1,4 @@
-import { BrowserQRCodeReader, type IScannerControls } from '@zxing/browser'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createId, type BatchId, type DeviceId, type RevisionId } from '../domain/ids'
 import type { ResultRevision } from '../domain/result'
 import { createDatabase } from '../db/database'
@@ -8,6 +7,7 @@ import { applyAck, decodeAck, encodeAck, markBatchSentManually } from '../transf
 import { createTransferBatch, decodeQrFragment, encodeBatchFragments } from '../transfer/codec'
 import type { TransferProgress } from '../transfer/receiver'
 import { processCompletedHostBatch } from './host-transfer-import-service'
+import { QrCameraScanner } from './qr/QrCameraScanner'
 
 export type TransferDemoMode = 'HOST' | 'COURT'
 
@@ -210,10 +210,6 @@ export function TransferDemo({
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const [cameraActive, setCameraActive] = useState(false)
-  const cameraPreviewRef = useRef<HTMLVideoElement>(null)
-  const scannerControlsRef = useRef<IScannerControls | null>(null)
-  const lastScannedTextRef = useRef<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -336,51 +332,6 @@ export function TransferDemo({
       setMessage('結果を取り込み、ACKを生成しました')
     })
 
-  useEffect(() => {
-    if (mode !== 'HOST' || !cameraActive || !cameraPreviewRef.current) return
-
-    let cancelled = false
-    const reader = new BrowserQRCodeReader()
-
-    void reader.decodeFromVideoDevice(undefined, cameraPreviewRef.current, (result) => {
-      if (cancelled || !result) return
-      const scannedText = result.getText()
-      if (scannedText === lastScannedTextRef.current) return
-      lastScannedTextRef.current = scannedText
-      setHostInput(scannedText)
-      void ingestHost(scannedText)
-    }).then((controls) => {
-      if (cancelled) {
-        controls.stop()
-        return
-      }
-      scannerControlsRef.current = controls
-    }).catch((cause: unknown) => {
-      if (cancelled) return
-      const detail = cause instanceof Error ? cause.message : 'カメラを起動できませんでした'
-      setError(`カメラを起動できませんでした。ブラウザのカメラ許可と接続を確認してください。(${detail})`)
-      setCameraActive(false)
-    })
-
-    return () => {
-      cancelled = true
-      scannerControlsRef.current?.stop()
-      scannerControlsRef.current = null
-    }
-  }, [cameraActive, mode])
-
-  const startCamera = () => {
-    setError('')
-    lastScannedTextRef.current = null
-    setCameraActive(true)
-  }
-
-  const stopCamera = () => {
-    scannerControlsRef.current?.stop()
-    scannerControlsRef.current = null
-    setCameraActive(false)
-  }
-
   if (mode === 'COURT') {
     const currentPart = outgoing?.encodedParts[outgoing.currentPartIndex] ?? ''
     return (
@@ -468,25 +419,22 @@ export function TransferDemo({
     <section className="transfer-panel" aria-label="本部QR受信">
       <h2>QR受信</h2>
       <p>カメラまたはUSBリーダーで読み取ったQRコードを受信します。どちらも同じ受信処理へ渡します。</p>
-      <div className="camera-scanner">
-        <div className="section-heading">
-          <div>
-            <h3>カメラで読み取る</h3>
-            <p>初回のみブラウザからカメラ利用の許可を求められます。</p>
-          </div>
-          {cameraActive ? (
-            <button type="button" onClick={stopCamera}>カメラを停止</button>
-          ) : (
-            <button type="button" onClick={startCamera} disabled={busy}>カメラを起動</button>
-          )}
+      <div className="section-heading">
+        <div>
+          <h3>カメラで読み取る</h3>
+          <p>初回のみブラウザからカメラ利用の許可を求められます。</p>
         </div>
-        {cameraActive && (
-          <div className="camera-preview">
-            <video ref={cameraPreviewRef} aria-label="QRコード読み取り用カメラ" muted playsInline />
-            <p>カメラで読み取り中です。QRコードを枠内に映してください。</p>
-          </div>
-        )}
       </div>
+      <QrCameraScanner
+        disabled={busy}
+        onDecoded={(text) => {
+          setHostInput(text)
+          void ingestHost(text)
+        }}
+        startLabel="カメラを起動"
+        stopLabel="カメラを停止"
+        previewLabel="QRコード読み取り用カメラ"
+      />
       <label>
         QR文字列
         <textarea value={hostInput} onChange={(event) => setHostInput(event.target.value)} rows={5} />

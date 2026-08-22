@@ -51,7 +51,19 @@ function revisionValues(revision: ResultRevision, definition: CourtSessionDefini
   return base
 }
 
-export function CourtScoringSession({ services }: { services: CourtScoringSessionServices }) {
+export interface CourtScoringSessionProps {
+  services: CourtScoringSessionServices
+  /**
+   * Locally assigned responsibility. When provided, only these sessions are selectable.
+   * Pass a stable array reference so the load effect does not re-run on every render.
+   */
+  allowedScoringSessionIds?: readonly ScoringSessionId[]
+}
+
+export function CourtScoringSession({
+  services,
+  allowedScoringSessionIds,
+}: CourtScoringSessionProps) {
   const [sessions, setSessions] = useState<CourtScoringSessionOption[]>([])
   const [selectedId, setSelectedId] = useState<ScoringSessionId | ''>('')
   const [definition, setDefinition] = useState<CourtSessionDefinition | null>(null)
@@ -67,13 +79,15 @@ export function CourtScoringSession({ services }: { services: CourtScoringSessio
     let cancelled = false
     services.listSessions().then((items) => {
       if (cancelled) return
-      setSessions(items)
-      setSelectedId(items[0]?.scoringSessionId ?? '')
+      const allowed = allowedScoringSessionIds ? new Set(allowedScoringSessionIds) : null
+      const visible = allowed ? items.filter((item) => allowed.has(item.scoringSessionId)) : items
+      setSessions(visible)
+      setSelectedId(visible[0]?.scoringSessionId ?? '')
     }).catch((cause: unknown) => {
       if (!cancelled) setError(cause instanceof Error ? cause.message : 'ScoringSessionを読み込めません')
     })
     return () => { cancelled = true }
-  }, [services])
+  }, [allowedScoringSessionIds, services])
 
   useEffect(() => {
     if (!selectedId) {
