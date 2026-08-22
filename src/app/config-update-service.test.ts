@@ -258,6 +258,47 @@ describe('Config Update service', () => {
     expect(restored?.importedConfigVersionId).toBe(active!.configVersionId)
   })
 
+  it('does not restore an already active ConfigVersion so the next update can be scanned', async () => {
+    const hostDb = db(`config-host-restore-active-${crypto.randomUUID()}`)
+    const hostRepository = new ConfigRepository(hostDb)
+    const tournamentId = 'shared-tournament' as TournamentId
+    await hostRepository.apply(snapshotFor('shared'), metadata('2026-08-19T10:00:00+09:00'))
+    const hostV1 = await hostRepository.getActiveVersion(tournamentId)
+
+    const updated = snapshotFor('shared', '変更後')
+    await hostRepository.apply(updated, metadata('2026-08-19T10:20:00+09:00'))
+    const hostV2 = await hostRepository.getActiveVersion(tournamentId)
+
+    const hostService = createConfigUpdateService(hostDb)
+    const v1Export = await hostService.exportVersion(hostV1!.configVersionId, 90)
+    const v2Export = await hostService.exportVersion(hostV2!.configVersionId, 90)
+
+    const courtDb = db(`config-court-restore-active-${crypto.randomUUID()}`)
+    const courtService = createConfigUpdateService(courtDb)
+    for (const frame of v1Export.frames) {
+      await courtService.ingestFrame(frame, '2026-08-19T10:30:00+09:00')
+    }
+
+    // Collected but not yet activated: the operator must come back to the review screen.
+    expect((await courtService.restoreLatestTransfer())?.importedConfigVersionId)
+      .toBe(hostV1!.configVersionId)
+
+    await courtService.activate(hostV1!.configVersionId, {
+      operator: 'コート担当',
+      activatedAt: '2026-08-19T10:31:00+09:00',
+    })
+
+    // Now v1 is the active configuration, so "大会設定を更新" must offer the camera again
+    // instead of restoring the v1 review screen.
+    expect(await courtService.restoreLatestTransfer()).toBeNull()
+
+    for (const frame of v2Export.frames) {
+      await courtService.ingestFrame(frame, '2026-08-19T10:40:00+09:00')
+    }
+    const afterV2 = await courtService.restoreLatestTransfer()
+    expect(afterV2?.importedConfigVersionId).toBe(hostV2!.configVersionId)
+  })
+
   it('keeps the prior ConfigVersion immutable until explicit compatible activation', async () => {
     const hostDb = db(`config-host-activate-${crypto.randomUUID()}`)
     const hostRepository = new ConfigRepository(hostDb)

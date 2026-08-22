@@ -130,6 +130,55 @@ describe('ConfigDistributionPanel', () => {
     expect(screen.queryByRole('img', { name: /大会設定QR/ })).not.toBeInTheDocument()
   })
 
+  it('re-reads the status and drops stale frames when the known ConfigVersion changes', async () => {
+    const api = services({
+      loadStatus: vi.fn()
+        .mockResolvedValueOnce(status({ activeConfigVersionId: 'config-v1', activeVersion: 1 }))
+        .mockResolvedValue(status({ activeConfigVersionId: 'config-v2', activeVersion: 2 })),
+      exportVersion: vi.fn(async (configVersionId: string) => ({
+        configVersionId,
+        frames: [`KSPO1:${configVersionId}`],
+      })),
+    })
+    const view = render(
+      <ConfigDistributionPanel services={api} knownConfigVersionId="config-v1" />,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: 'コート端末へ配布' }))
+    await waitFor(() => expect(api.exportVersion).toHaveBeenCalledWith('config-v1'))
+    expect(await screen.findByRole('img', { name: /大会設定QR/ })).toBeInTheDocument()
+
+    view.rerender(<ConfigDistributionPanel services={api} knownConfigVersionId="config-v2" />)
+
+    // The v1 QR must disappear immediately; nothing stale may stay on the distribution screen.
+    await waitFor(() => expect(screen.queryByRole('img', { name: /大会設定QR/ })).not.toBeInTheDocument())
+    await waitFor(() => expect(api.loadStatus).toHaveBeenCalledTimes(2))
+
+    fireEvent.click(screen.getByRole('button', { name: 'コート端末へ配布' }))
+    await waitFor(() => expect(api.exportVersion).toHaveBeenLastCalledWith('config-v2'))
+    expect(await screen.findByText('Config v2')).toBeInTheDocument()
+    expect(screen.getByLabelText('大会設定QR文字列')).toHaveValue('KSPO1:config-v2')
+  })
+
+  it('enables distribution once a first ConfigVersion becomes known', async () => {
+    const api = services({
+      loadStatus: vi.fn()
+        .mockResolvedValueOnce(status({ activeConfigVersionId: null, activeVersion: null }))
+        .mockResolvedValue(status({ activeConfigVersionId: 'config-v1', activeVersion: 1 })),
+    })
+    const view = render(<ConfigDistributionPanel services={api} knownConfigVersionId={null} />)
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'コート端末へ配布' })).toBeDisabled(),
+    )
+
+    view.rerender(<ConfigDistributionPanel services={api} knownConfigVersionId="config-v1" />)
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'コート端末へ配布' })).toBeEnabled(),
+    )
+  })
+
   it('keeps the encoded frame text inside a subordinate recovery disclosure', async () => {
     render(<ConfigDistributionPanel services={services()} />)
     fireEvent.click(await screen.findByRole('button', { name: 'コート端末へ配布' }))
