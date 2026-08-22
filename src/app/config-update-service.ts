@@ -11,10 +11,13 @@ import {
   type ConfigUpdatePayload,
 } from '../transfer/config-update'
 import { decodeQrFrame } from '../transfer/frame'
+import type { TransferProgress } from '../transfer/receiver'
 
 export interface ConfigUpdateStatus {
   tournamentId: TournamentId | null
+  tournamentName: string | null
   activeConfigVersionId: string | null
+  activeVersion: number | null
   versions: Array<{ configVersionId: string; version: number }>
 }
 
@@ -23,16 +26,50 @@ export interface ExportedConfigUpdate {
   frames: string[]
 }
 
-export interface ConfigUpdateIngestResult {
+export interface ConfigUpdateProgress {
+  transferId: string
+  receivedCount: number
+  totalParts: number
+  remainingCount: number
+  missingPartIndexes: number[]
   complete: boolean
+}
+
+export interface ConfigUpdateSummary {
+  configVersionId: string
+  tournamentId: TournamentId
+  tournamentName: string
+  version: number
+  competitionCount: number
+  scoringSessionCount: number
+}
+
+export interface ConfigUpdateIngestResult {
+  progress: ConfigUpdateProgress
   importedConfigVersionId?: string
-  tournamentId?: TournamentId
+  tournamentId: TournamentId
+}
+
+export interface RestoredConfigUpdate {
+  progress: ConfigUpdateProgress
+  importedConfigVersionId?: string
 }
 
 export interface ConfigUpdateActivationResult {
   configVersionId: string
   version: number
   tournamentId: TournamentId
+}
+
+function toConfigUpdateProgress(progress: TransferProgress): ConfigUpdateProgress {
+  return {
+    transferId: String(progress.batchId),
+    receivedCount: progress.receivedCount,
+    totalParts: progress.totalParts,
+    remainingCount: progress.remainingCount,
+    missingPartIndexes: [...progress.missingPartIndexes],
+    complete: progress.complete,
+  }
 }
 
 export function createConfigUpdateService(db: AppDatabase) {
@@ -47,7 +84,9 @@ export function createConfigUpdateService(db: AppDatabase) {
         const versions = await configRepository.listVersions(activeTournament.tournamentId)
         return {
           tournamentId: activeTournament.tournamentId,
+          tournamentName: active?.snapshot.tournament.name ?? activeTournament.name,
           activeConfigVersionId: active?.configVersionId ?? null,
+          activeVersion: active?.version ?? null,
           versions: versions.map((record) => ({
             configVersionId: record.configVersionId,
             version: record.version,
@@ -57,7 +96,13 @@ export function createConfigUpdateService(db: AppDatabase) {
 
       const allVersions = await db.configVersions.toArray()
       if (allVersions.length === 0) {
-        return { tournamentId: null, activeConfigVersionId: null, versions: [] }
+        return {
+          tournamentId: null,
+          tournamentName: null,
+          activeConfigVersionId: null,
+          activeVersion: null,
+          versions: [],
+        }
       }
       const tournamentIds = [...new Set(allVersions.map((record) => record.tournamentId))].sort()
       if (tournamentIds.length > 1) {
@@ -67,11 +112,26 @@ export function createConfigUpdateService(db: AppDatabase) {
       const versions = await configRepository.listVersions(tournamentId)
       return {
         tournamentId,
+        tournamentName: versions.at(-1)?.snapshot.tournament.name ?? null,
         activeConfigVersionId: null,
+        activeVersion: null,
         versions: versions.map((record) => ({
           configVersionId: record.configVersionId,
           version: record.version,
         })),
+      }
+    },
+
+    async getVersionSummary(configVersionId: string): Promise<ConfigUpdateSummary> {
+      const record = await configRepository.getVersionById(configVersionId)
+      if (!record) throw new Error(`ConfigVersion ${configVersionId} does not exist`)
+      return {
+        configVersionId: record.configVersionId,
+        tournamentId: record.snapshot.tournament.tournamentId,
+        tournamentName: record.snapshot.tournament.name,
+        version: record.version,
+        competitionCount: record.snapshot.competitions.length,
+        scoringSessionCount: record.snapshot.scoringSessions.length,
       }
     },
 
@@ -94,9 +154,10 @@ export function createConfigUpdateService(db: AppDatabase) {
 
       await transferRepository.saveReceivedPart(encoded, receivedAt)
       const receiver = await transferRepository.restoreReceiver(frame.tournamentId)
-      const progress = receiver.getProgress(frame.transferId)
-      if (!progress) throw new Error('CONFIG_UPDATE receive state could not be restored')
-      if (!progress.complete) return { complete: false, tournamentId: frame.tournamentId }
+      const restored = receiver.getProgress(frame.transferId)
+      if (!restored) throw new Error('CONFIG_UPDATE receive state could not be restored')
+      const progress = toConfigUpdateProgress(restored)
+      if (!progress.complete) return { progress, tournamentId: frame.tournamentId }
 
       const envelope = await receiver.getCompletedPayload(frame.transferId)
       if (envelope.payloadKind !== 'CONFIG_UPDATE') throw new Error('QR payload is not CONFIG_UPDATE')
@@ -112,10 +173,47 @@ export function createConfigUpdateService(db: AppDatabase) {
 
       await configRepository.importVersion(configVersionRecordFromUpdate(payload))
       return {
-        complete: true,
+        progress,
         importedConfigVersionId: payload.configVersionId,
         tournamentId: payload.tournamentId,
       }
+    },
+
+    /**
+     * Restores the most recently received CONFIG_UPDATE transfer so a Court device that
+     * navigated away or reloaded mid-scan resumes where it left off instead of restarting.
+     * Restoration never activates anything.
+     */
+    async restoreLatestTransfer(): Promise<RestoredConfigUpdate | null> {
+      const rows = await db.receivedQrParts.toArray()
+      const configRows: Array<{ batchId: string; tournamentId: TournamentId; receivedAt: string }> = []
+      for (const row of rows) {
+        try {
+          const frame = await decodeQrFrame(row.encoded)
+          if (frame.payloadKind !== 'CONFIG_UPDATE') continue
+          configRows.push({
+            batchId: frame.transferId,
+            tournamentId: frame.tournamentId,
+            receivedAt: row.receivedAt,
+          })
+        } catch {
+          // A row this frame codec cannot decode is not a CONFIG_UPDATE frame for this app.
+          continue
+        }
+      }
+      if (configRows.length === 0) return null
+
+      const latest = configRows.reduce((newest, candidate) =>
+        candidate.receivedAt > newest.receivedAt ? candidate : newest,
+      )
+      const receiver = await transferRepository.restoreReceiver(latest.tournamentId)
+      const restored = receiver.getProgress(latest.batchId)
+      if (!restored) return null
+      const progress = toConfigUpdateProgress(restored)
+
+      if (!progress.complete) return { progress }
+      const imported = await configRepository.getVersionById(latest.batchId)
+      return imported ? { progress, importedConfigVersionId: latest.batchId } : { progress }
     },
 
     async getProgress(transferId: string) {

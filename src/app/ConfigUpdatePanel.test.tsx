@@ -9,7 +9,9 @@ function services(): ConfigUpdatePanelServices {
   return {
     loadStatus: vi.fn().mockResolvedValue({
       tournamentId,
+      tournamentName: 'テスト大会',
       activeConfigVersionId: 'config-v1',
+      activeVersion: 1,
       versions: [
         { configVersionId: 'config-v1', version: 1 },
         { configVersionId: 'config-v2', version: 2 },
@@ -20,8 +22,25 @@ function services(): ConfigUpdatePanelServices {
       frames: ['KSPO1:frame-1', 'KSPO1:frame-2'],
     }),
     ingestFrame: vi.fn().mockResolvedValue({
-      complete: true,
+      progress: {
+        transferId: 'config-v2',
+        receivedCount: 1,
+        totalParts: 1,
+        remainingCount: 0,
+        missingPartIndexes: [],
+        complete: true,
+      },
       importedConfigVersionId: 'config-v2',
+      tournamentId,
+    }),
+    restoreLatestTransfer: vi.fn().mockResolvedValue(null),
+    getVersionSummary: vi.fn().mockResolvedValue({
+      configVersionId: 'config-v2',
+      tournamentId,
+      tournamentName: 'テスト大会',
+      version: 2,
+      competitionCount: 1,
+      scoringSessionCount: 1,
     }),
     activate: vi.fn().mockResolvedValue(undefined),
   }

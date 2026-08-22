@@ -159,6 +159,105 @@ describe('Config Update service', () => {
     expect((await courtRepository.listVersions(v1.snapshot.tournament.tournamentId))).toHaveLength(1)
   })
 
+  it('reports the active tournament name and version for the distribution screen', async () => {
+    const hostDb = db(`config-host-status-${crypto.randomUUID()}`)
+    const repository = new ConfigRepository(hostDb)
+    await repository.apply(snapshotFor('shared'), metadata('2026-08-19T10:00:00+09:00'))
+    const active = await repository.getActiveVersion('shared-tournament' as TournamentId)
+
+    const status = await createConfigUpdateService(hostDb).loadStatus()
+    expect(status.tournamentName).toBe('shared大会')
+    expect(status.activeVersion).toBe(1)
+    expect(status.activeConfigVersionId).toBe(active!.configVersionId)
+  })
+
+  it('reports frame progress on every ingest and ignores duplicate frames', async () => {
+    const hostDb = db(`config-host-progress-${crypto.randomUUID()}`)
+    const hostRepository = new ConfigRepository(hostDb)
+    await hostRepository.apply(snapshotFor('shared'), metadata('2026-08-19T10:00:00+09:00'))
+    const active = await hostRepository.getActiveVersion('shared-tournament' as TournamentId)
+    const exported = await createConfigUpdateService(hostDb).exportVersion(active!.configVersionId, 90)
+    expect(exported.frames.length).toBeGreaterThan(2)
+
+    const courtDb = db(`config-court-progress-${crypto.randomUUID()}`)
+    const courtService = createConfigUpdateService(courtDb)
+
+    const first = await courtService.ingestFrame(exported.frames[0]!, '2026-08-19T10:10:00+09:00')
+    expect(first.progress.receivedCount).toBe(1)
+    expect(first.progress.totalParts).toBe(exported.frames.length)
+    expect(first.progress.remainingCount).toBe(exported.frames.length - 1)
+    expect(first.progress.missingPartIndexes).toEqual(
+      exported.frames.map((_, index) => index + 1).slice(1),
+    )
+    expect(first.progress.complete).toBe(false)
+    expect(first.importedConfigVersionId).toBeUndefined()
+    expect(first.tournamentId).toBe('shared-tournament')
+
+    const duplicate = await courtService.ingestFrame(exported.frames[0]!, '2026-08-19T10:10:05+09:00')
+    expect(duplicate.progress.receivedCount).toBe(1)
+
+    let last = duplicate
+    for (const frame of exported.frames.slice(1).reverse()) {
+      last = await courtService.ingestFrame(frame, '2026-08-19T10:11:00+09:00')
+    }
+    expect(last.progress.complete).toBe(true)
+    expect(last.progress.remainingCount).toBe(0)
+    expect(last.importedConfigVersionId).toBe(active!.configVersionId)
+  })
+
+  it('summarizes an imported ConfigVersion for the operator review screen', async () => {
+    const hostDb = db(`config-host-summary-${crypto.randomUUID()}`)
+    const hostRepository = new ConfigRepository(hostDb)
+    await hostRepository.apply(snapshotFor('shared'), metadata('2026-08-19T10:00:00+09:00'))
+    const active = await hostRepository.getActiveVersion('shared-tournament' as TournamentId)
+
+    const summary = await createConfigUpdateService(hostDb).getVersionSummary(active!.configVersionId)
+    expect(summary).toEqual({
+      configVersionId: active!.configVersionId,
+      tournamentId: 'shared-tournament',
+      tournamentName: 'shared大会',
+      version: 1,
+      competitionCount: 1,
+      scoringSessionCount: 1,
+    })
+
+    await expect(createConfigUpdateService(hostDb).getVersionSummary('missing-id'))
+      .rejects.toThrow(/does not exist/i)
+  })
+
+  it('restores the latest persisted CONFIG_UPDATE transfer after a reload', async () => {
+    const hostDb = db(`config-host-restore-${crypto.randomUUID()}`)
+    const hostRepository = new ConfigRepository(hostDb)
+    await hostRepository.apply(snapshotFor('shared'), metadata('2026-08-19T10:00:00+09:00'))
+    const active = await hostRepository.getActiveVersion('shared-tournament' as TournamentId)
+    const exported = await createConfigUpdateService(hostDb).exportVersion(active!.configVersionId, 90)
+
+    const courtName = `config-court-restore-${crypto.randomUUID()}`
+    const courtDb1 = db(courtName)
+    const courtService1 = createConfigUpdateService(courtDb1)
+    expect(await courtService1.restoreLatestTransfer()).toBeNull()
+
+    await courtService1.ingestFrame(exported.frames[0]!, '2026-08-19T10:10:00+09:00')
+    courtDb1.close()
+
+    const courtDb2 = db(courtName)
+    const courtService2 = createConfigUpdateService(courtDb2)
+    const partial = await courtService2.restoreLatestTransfer()
+    expect(partial?.progress.receivedCount).toBe(1)
+    expect(partial?.progress.complete).toBe(false)
+    expect(partial?.importedConfigVersionId).toBeUndefined()
+
+    for (const frame of exported.frames.slice(1)) {
+      await courtService2.ingestFrame(frame, '2026-08-19T10:11:00+09:00')
+    }
+    courtDb2.close()
+
+    const courtDb3 = db(courtName)
+    const restored = await createConfigUpdateService(courtDb3).restoreLatestTransfer()
+    expect(restored?.progress.complete).toBe(true)
+    expect(restored?.importedConfigVersionId).toBe(active!.configVersionId)
+  })
+
   it('keeps the prior ConfigVersion immutable until explicit compatible activation', async () => {
     const hostDb = db(`config-host-activate-${crypto.randomUUID()}`)
     const hostRepository = new ConfigRepository(hostDb)

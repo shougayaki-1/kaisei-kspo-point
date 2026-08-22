@@ -1,15 +1,16 @@
 import { useEffect, useState } from 'react'
 import type { ConfigActivationMetadata } from '../db/config-repository'
-import type { TournamentId } from '../domain/ids'
-import type { ConfigUpdateActivationResult } from './config-update-service'
+import type {
+  ConfigUpdateActivationResult,
+  ConfigUpdateIngestResult,
+  ConfigUpdateStatus,
+  ConfigUpdateSummary,
+  RestoredConfigUpdate,
+} from './config-update-service'
 
 export type ConfigUpdatePanelMode = 'HOST' | 'COURT'
 
-export interface ConfigUpdatePanelStatus {
-  tournamentId: TournamentId | null
-  activeConfigVersionId: string | null
-  versions: Array<{ configVersionId: string; version: number }>
-}
+export type ConfigUpdatePanelStatus = ConfigUpdateStatus
 
 export interface ConfigUpdatePanelServices {
   loadStatus(): Promise<ConfigUpdatePanelStatus>
@@ -17,11 +18,9 @@ export interface ConfigUpdatePanelServices {
     configVersionId: string
     frames: string[]
   }>
-  ingestFrame(encoded: string, receivedAt: string): Promise<{
-    complete: boolean
-    importedConfigVersionId?: string
-    tournamentId?: TournamentId
-  }>
+  ingestFrame(encoded: string, receivedAt: string): Promise<ConfigUpdateIngestResult>
+  restoreLatestTransfer(): Promise<RestoredConfigUpdate | null>
+  getVersionSummary(configVersionId: string): Promise<ConfigUpdateSummary>
   activate(configVersionId: string, activation: ConfigActivationMetadata): Promise<ConfigUpdateActivationResult>
 }
 
@@ -90,7 +89,7 @@ export function ConfigUpdatePanel({
     setMessage('')
     try {
       const result = await services.ingestFrame(input.trim(), now())
-      if (result.complete && result.importedConfigVersionId) {
+      if (result.progress.complete && result.importedConfigVersionId) {
         setImportedId(result.importedConfigVersionId)
         setMessage('ConfigVersionを保存しました。まだ有効化されていません。')
         await reloadStatus()

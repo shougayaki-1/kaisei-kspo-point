@@ -51,11 +51,33 @@ function configUpdateServices(): ConfigUpdatePanelServices {
   return {
     loadStatus: vi.fn(async () => ({
       tournamentId: activeConfigVersionId ? 'tournament-1' as never : null,
+      tournamentName: activeConfigVersionId ? 'テスト大会' : null,
       activeConfigVersionId,
+      activeVersion: activeConfigVersionId ? 2 : null,
       versions: activeConfigVersionId ? [{ configVersionId: activeConfigVersionId, version: 2 }] : [],
     })),
     exportVersion: vi.fn(async () => ({ configVersionId: 'config-v2', frames: ['frame'] })),
-    ingestFrame: vi.fn(async () => ({ complete: true, importedConfigVersionId: 'config-v2', tournamentId: 'tournament-1' as never })),
+    ingestFrame: vi.fn(async () => ({
+      progress: {
+        transferId: 'config-v2',
+        receivedCount: 1,
+        totalParts: 1,
+        remainingCount: 0,
+        missingPartIndexes: [],
+        complete: true,
+      },
+      importedConfigVersionId: 'config-v2',
+      tournamentId: 'tournament-1' as never,
+    })),
+    restoreLatestTransfer: vi.fn(async () => null),
+    getVersionSummary: vi.fn(async () => ({
+      configVersionId: 'config-v2',
+      tournamentId: 'tournament-1' as never,
+      tournamentName: 'テスト大会',
+      version: 2,
+      competitionCount: 1,
+      scoringSessionCount: 1,
+    })),
     activate: vi.fn(async () => {
       activeConfigVersionId = 'config-v2'
       return { configVersionId: 'config-v2', version: 2, tournamentId: 'tournament-1' as never }
