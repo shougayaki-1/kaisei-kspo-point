@@ -113,7 +113,7 @@ describe('CourtModeScreen entry gate', () => {
     renderScreen(bootstrapServices(ready))
 
     expect(await screen.findByRole('combobox', { name: 'ScoringSession' })).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: /コートA 入力/ })).toBeInTheDocument()
+    expect(await screen.findByRole('option', { name: /コートA 入力/ })).toBeInTheDocument()
     expect(screen.queryByRole('option', { name: /全体入力/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('region', { name: '大会設定を受信' })).not.toBeInTheDocument()
   })
