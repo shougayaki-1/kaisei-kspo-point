@@ -153,13 +153,41 @@ describe('App', () => {
     render(<App configRepository={configRepository()} pwaRuntime={waitingPwaRuntime()} />)
     fireEvent.click(screen.getByRole('button', { name: '表示モード' }))
 
-    expect(screen.getByRole('heading', { name: '表示モード' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '16:9 表示ステージ' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '大会設定' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '結果QR転送' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'QR受信' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '本部バックアップ・復元' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'データ管理' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '新しいアプリ版を有効化' })).not.toBeInTheDocument()
+  })
+
+  it('renders Display mode outside the operator shell', () => {
+    render(<App configRepository={configRepository()} />)
+    fireEvent.click(screen.getByRole('button', { name: '表示モード' }))
+
+    expect(screen.getByRole('region', { name: '16:9 表示ステージ' })).toBeInTheDocument()
+    expect(screen.queryByText('端末状態')).not.toBeInTheDocument()
+    expect(screen.queryByRole('contentinfo', { name: '端末状態' })).not.toBeInTheDocument()
+    expect(screen.queryByText('アプリの設定・データ管理')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'アプリを再読み込み' })).not.toBeInTheDocument()
+  })
+
+  it('requests fullscreen from the Display mode gesture and stays usable when it is refused', async () => {
+    const requestDisplayFullscreen = vi.fn().mockRejectedValue(new Error('denied'))
+    render(<App configRepository={configRepository()} requestDisplayFullscreen={requestDisplayFullscreen} />)
+    fireEvent.click(screen.getByRole('button', { name: '表示モード' }))
+
+    expect(requestDisplayFullscreen).toHaveBeenCalledOnce()
+    expect(screen.getByRole('region', { name: '16:9 表示ステージ' })).toBeInTheDocument()
+  })
+
+  it('returns from Display mode to mode selection through the exit control', () => {
+    render(<App configRepository={configRepository()} />)
+    fireEvent.click(screen.getByRole('button', { name: '表示モード' }))
+    fireEvent.click(screen.getByRole('button', { name: '表示モードを終了' }))
+
+    expect(screen.getByRole('region', { name: 'モードを選択' })).toBeInTheDocument()
   })
 
   it('updates the status bar when a ConfigVersion is applied', async () => {

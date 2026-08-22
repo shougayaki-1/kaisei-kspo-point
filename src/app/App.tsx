@@ -46,7 +46,7 @@ import { CourtTransferHistory } from './CourtTransferHistory'
 import { createCourtTransferHistoryServices } from './court-transfer-history-service'
 import { DataManagementPanel } from './DataManagementPanel'
 import { DeviceDiagnostics } from './DeviceDiagnostics'
-import { DisplayDashboard } from './DisplayDashboard'
+import { DisplayModeScreen } from './DisplayModeScreen'
 import { HostBackupPanel, type HostBackupPanelServices } from './HostBackupPanel'
 import { HostScoringDashboard } from './HostScoringDashboard'
 import { createHostScoringService } from './host-scoring-service'
@@ -75,6 +75,7 @@ export interface AppProps {
   resetPersistentData?: () => Promise<void> | void
   hostBackupServices?: HostBackupPanelServices
   configUpdateServices?: ConfigUpdatePanelServices
+  requestDisplayFullscreen?: () => Promise<void> | void
 }
 
 const RELOAD_CONFIRMATION = 'アプリを再読み込みします。保存済みの大会データは削除されません。続行しますか？'
@@ -115,6 +116,7 @@ export function App({
   resetPersistentData,
   hostBackupServices,
   configUpdateServices: injectedConfigUpdateServices,
+  requestDisplayFullscreen,
 }: AppProps = {}) {
   const [mode, setMode] = useState<AppMode>(null)
   const [hostTab, setHostTab] = useState<HostTab>('CONFIG')
@@ -222,10 +224,27 @@ export function App({
     setKnownConfigVersionId(result.configVersionId)
   }
   const returnToModeSelection = () => { setMode(null); setHostTab('CONFIG') }
+  const requestFullscreen =
+    requestDisplayFullscreen ?? (() => document.documentElement.requestFullscreen?.())
+  const enterDisplayMode = () => {
+    setMode('DISPLAY')
+    // Fullscreen is an enhancement requested from this user gesture. A refusal or an
+    // unsupported browser must never prevent Display mode from rendering.
+    try {
+      const result = requestFullscreen()
+      if (result) void Promise.resolve(result).catch(() => {})
+    } catch {
+      // Ignored on purpose: Display mode continues in the fitted 16:9 stage.
+    }
+  }
   const releaseGateActive = Boolean(releaseGate.error && knownConfigVersionId)
   const releaseGateBlocksMode = Boolean(
     releaseGateActive && !(mode === 'HOST' && hostTab === 'BACKUP'),
   )
+
+  if (mode === 'DISPLAY' && !releaseGateBlocksMode) {
+    return <DisplayModeScreen service={hostScoringServices} onExit={returnToModeSelection} />
+  }
 
   let content: ReactNode
   if (releaseGateBlocksMode) {
@@ -274,14 +293,6 @@ export function App({
       <TransferDemo mode="COURT" deviceId={deviceId} />
       <CourtTransferHistory services={courtTransferHistoryServices} />
     </>
-  } else if (mode === 'DISPLAY') {
-    content = <>
-      <div className="mode-header">
-        <div><h1>表示モード</h1><p>本部の統合済み得点・順位を読み取り専用で表示します。</p></div>
-        <button type="button" onClick={returnToModeSelection}>モード選択へ戻る</button>
-      </div>
-      <DisplayDashboard service={hostScoringServices} />
-    </>
   } else {
     content = <Stack spacing={4}>
       <Stack className="mode-hero" spacing={1.5}>
@@ -311,7 +322,7 @@ export function App({
           description="最新の得点と順位を確認"
           actionLabel="表示を開く"
           icon={<MonitorRoundedIcon fontSize="large" />}
-          onClick={() => setMode('DISPLAY')}
+          onClick={enterDisplayMode}
         />
       </Box>
     </Stack>
