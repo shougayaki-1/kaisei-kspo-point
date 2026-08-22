@@ -303,8 +303,8 @@ export function App({
         operatorName={operatorName}
         deviceId={deviceId}
         onConfigActivated={handleConfigUpdateActivated}
-        readyExtras={(courtDeviceId) => <>
-          <TransferDemo mode="COURT" deviceId={courtDeviceId} />
+        readyExtras={<>
+          <TransferDemo mode="COURT" deviceId={deviceId} />
           <CourtTransferHistory services={courtTransferHistoryServices} />
         </>}
       />

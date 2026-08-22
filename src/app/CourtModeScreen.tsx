@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import type { DeviceId, ScoringSessionId } from '../domain/ids'
+import type { ScoringSessionId } from '../domain/ids'
 import { CourtConfigTransfer, type CourtConfigTransferServices } from './config-transfer/CourtConfigTransfer'
 import type { ConfigUpdateActivationResult } from './config-update-service'
 import type { CourtBootstrapServices, CourtBootstrapState } from './court-bootstrap-service'
@@ -14,7 +14,7 @@ export interface CourtModeScreenProps {
   deviceId: string
   onConfigActivated(result: ConfigUpdateActivationResult): void
   /** Result transfer and history, rendered only once the device is READY. */
-  readyExtras?: (deviceId: DeviceId) => ReactNode
+  readyExtras?: ReactNode
 }
 
 type CourtView = 'GATE' | 'CHANGE_RESPONSIBILITY' | 'UPDATE_CONFIG'
@@ -118,7 +118,7 @@ export function CourtModeScreen({
         services={scoringServices}
         allowedScoringSessionIds={allowedScoringSessionIds}
       />
-      {readyExtras?.(deviceId as DeviceId)}
+      {readyExtras}
     </>
   )
 }
