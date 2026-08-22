@@ -30,6 +30,45 @@ function services() {
   }
 }
 
+const sessionB = 'session-b' as ScoringSessionId
+const sessionGrouped = 'session-grouped' as ScoringSessionId
+function multiSessionServices() {
+  const api = services()
+  api.listSessions = vi.fn().mockResolvedValue([
+    { scoringSessionId: sessionId, label: '第1展開 全体', competitionName: '計数競技', inputScope: 'PER_COURT', courtRunCount: 1 },
+    { scoringSessionId: sessionB, label: 'コートB 入力', competitionName: '計数競技', inputScope: 'PER_COURT', courtRunCount: 1 },
+    { scoringSessionId: sessionGrouped, label: '全体入力', competitionName: '計数競技', inputScope: 'WHOLE_SLOT', courtRunCount: 2 },
+  ])
+  return api
+}
+
+describe('CourtScoringSession responsibility filter', () => {
+  it('offers only the locally allowed ScoringSessions', async () => {
+    const api = multiSessionServices()
+    render(
+      <CourtScoringSession
+        services={api as unknown as CourtScoringSessionServices}
+        allowedScoringSessionIds={[sessionId]}
+      />,
+    )
+
+    const selector = await screen.findByRole('combobox', { name: 'ScoringSession' })
+    await waitFor(() => expect(selector).toHaveValue(sessionId))
+    expect(screen.getByRole('option', { name: /第1展開 全体/ })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /コートB 入力/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /全体入力/ })).not.toBeInTheDocument()
+  })
+
+  it('keeps every session available when no filter is provided', async () => {
+    const api = multiSessionServices()
+    render(<CourtScoringSession services={api as unknown as CourtScoringSessionServices} />)
+
+    await screen.findByRole('combobox', { name: 'ScoringSession' })
+    expect(screen.getByRole('option', { name: /コートB 入力/ })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /全体入力/ })).toBeInTheDocument()
+  })
+})
+
 describe('CourtScoringSession production UI', () => {
   it('loads one logical session and renders InputSchema fields for configured entries/courts dynamically', async () => {
     const api = services(); render(<CourtScoringSession services={api as unknown as CourtScoringSessionServices} />)
