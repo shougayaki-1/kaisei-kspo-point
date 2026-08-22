@@ -728,3 +728,68 @@ fieldset {
 .display-exit-button:focus-visible {
   opacity: 1;
 }
+
+/* ---------------------------------------------------------------------------
+ * Configuration QR distribution and Court bootstrap.
+ * The QR symbol keeps a stable, generous size on a white ground and is never
+ * blurred, filtered, or animated, so a Court camera can lock onto it.
+ * ------------------------------------------------------------------------- */
+.config-distribution__stage {
+  display: grid;
+  justify-items: center;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.config-distribution__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  gap: 1rem;
+  font-size: 1.05rem;
+}
+
+.qr-frame-display {
+  background: #ffffff;
+  padding: 16px;
+  border: 1px solid #e1e7f0;
+  border-radius: 12px;
+  line-height: 0;
+}
+
+.qr-frame-display svg {
+  width: clamp(240px, 34vw, 480px);
+  height: auto;
+  display: block;
+}
+
+.config-distribution__recovery,
+.court-config-transfer__recovery {
+  width: 100%;
+  max-width: 640px;
+  color: #5b6a82;
+  font-size: 0.9rem;
+}
+
+.config-distribution__recovery textarea,
+.court-config-transfer__recovery textarea {
+  width: 100%;
+}
+
+.court-bootstrap__progress {
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.court-responsibility__section {
+  display: grid;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.court-responsibility__quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
