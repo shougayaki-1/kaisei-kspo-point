@@ -228,7 +228,17 @@ export function projectResultEntry(input: ResultEntryProjectionInput): Canonical
           seen.add(entry.rank)
         }
       }
-      return { entries: ranked.sort((left, right) => left.rank - right.rank || left.entryId.localeCompare(right.entryId)) }
+      const sorted = ranked.sort((left, right) => left.rank - right.rank || left.entryId.localeCompare(right.entryId))
+      for (let index = 0; index < sorted.length;) {
+        const entry = sorted[index]
+        if (!entry) break
+        if (entry.rank !== index + 1) {
+          throw new ResultEntryProjectionError(`Field ${projection.fieldKey} must use occupied place ranks`)
+        }
+        const rank = entry.rank
+        while (index < sorted.length && sorted[index]?.rank === rank) index += 1
+      }
+      return { entries: sorted }
     }
     case 'DIRECT_OUTCOME':
       return projectDirectOutcomes(entries, projection.fieldKey)

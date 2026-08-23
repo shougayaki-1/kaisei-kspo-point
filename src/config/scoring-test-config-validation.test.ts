@@ -52,7 +52,7 @@ function snapshot(): TournamentConfigSnapshot {
       rounds: [{
         roundId: 'round-1',
         label: '第1試合',
-        values: [{ entryId, value: 100 }],
+        rawValues: [{ entryId, fields: { score: 100 } }],
       }],
       expected: [{
         entryId,
@@ -104,6 +104,37 @@ describe('scoring test config validation', () => {
     expect(codes).toContain('UNKNOWN_SCORING_TEST_METHOD')
   })
 
+  it('rejects a method-aware scoring test when its competition has no policy', () => {
+    const config = snapshot()
+    config.resultEntryPolicies = []
+
+    expect(errorCodes(config)).toContain('MISSING_SCORING_TEST_METHOD_POLICY')
+  })
+
+  it('rejects a method-aware scoring test when its policy resolves the method ambiguously', () => {
+    const config = snapshot()
+    config.resultEntryPolicies.push(structuredClone(config.resultEntryPolicies[0]))
+
+    expect(errorCodes(config)).toContain('AMBIGUOUS_SCORING_TEST_METHOD')
+  })
+
+  it('rejects a method-aware scoring test when its allowed method is missing', () => {
+    const config = snapshot()
+    const policy = config.resultEntryPolicies[0]!
+    policy.defaultMethodKey = 'detail'
+    policy.allowedMethodKeys = ['detail']
+    policy.methods[0]!.methodKey = 'detail'
+
+    expect(errorCodes(config)).toContain('UNKNOWN_SCORING_TEST_METHOD')
+  })
+
+  it('rejects a method-aware scoring test when its method schema belongs to another competition', () => {
+    const config = snapshot()
+    config.inputSchemas[0]!.competitionId = 'other-competition' as CompetitionId
+
+    expect(errorCodes(config)).toContain('SCORING_TEST_METHOD_SCHEMA_COMPETITION_MISMATCH')
+  })
+
   it('rejects an unknown competition and missing rounds', () => {
     const config = snapshot()
     config.scoringTestCases[0].competitionId = 'missing-competition' as CompetitionId
@@ -116,7 +147,7 @@ describe('scoring test config validation', () => {
 
   it('rejects a round entry that is unknown or belongs to another competition', () => {
     const config = snapshot()
-    config.scoringTestCases[0].rounds[0].values![0].entryId = 'missing-entry' as CompetitionEntryId
+    config.scoringTestCases[0].rounds[0].rawValues![0].entryId = 'missing-entry' as CompetitionEntryId
 
     expect(errorCodes(config)).toContain('UNKNOWN_SCORING_TEST_ENTRY')
   })

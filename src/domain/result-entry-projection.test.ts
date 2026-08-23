@@ -96,6 +96,51 @@ describe('projectResultEntry', () => {
     })
   })
 
+  it('accepts canonical occupied-place direct-rank ties', () => {
+    const directRankMethod = method({ type: 'DIRECT_RANK', fieldKey: 'rank' })
+    const directRankSchema = schema([{ key: 'rank', label: '順位', type: 'RANK', required: true, allowTies: true }])
+
+    expect(projectResultEntry({
+      method: directRankMethod,
+      schema: directRankSchema,
+      entries: {
+        [entries.red]: { rank: 1 },
+        [entries.white]: { rank: 1 },
+        [entries.blue]: { rank: 3 },
+      },
+    }).entries.map(({ entryId, rank }) => ({ entryId, rank }))).toEqual([
+      { entryId: entries.red, rank: 1 },
+      { entryId: entries.white, rank: 1 },
+      { entryId: entries.blue, rank: 3 },
+    ])
+
+    expect(projectResultEntry({
+      method: directRankMethod,
+      schema: directRankSchema,
+      entries: {
+        [entries.red]: { rank: 1 },
+        [entries.white]: { rank: 2 },
+        [entries.blue]: { rank: 2 },
+      },
+    }).entries.map(({ entryId, rank }) => ({ entryId, rank }))).toEqual([
+      { entryId: entries.red, rank: 1 },
+      { entryId: entries.blue, rank: 2 },
+      { entryId: entries.white, rank: 2 },
+    ])
+  })
+
+  it.each([
+    ['skips an occupied place after a tie', { [entries.red]: { rank: 1 }, [entries.white]: { rank: 1 }, [entries.blue]: { rank: 2 } }],
+    ['does not start at first place', { [entries.red]: { rank: 2 }, [entries.white]: { rank: 2 }, [entries.blue]: { rank: 3 } }],
+    ['assigns a rank beyond the participant count', { [entries.red]: { rank: 1 }, [entries.white]: { rank: 2 }, [entries.blue]: { rank: 4 } }],
+  ])('rejects a direct-rank sequence that %s', (_reason, rankEntries) => {
+    expect(() => projectResultEntry({
+      method: method({ type: 'DIRECT_RANK', fieldKey: 'rank' }),
+      schema: schema([{ key: 'rank', label: '順位', type: 'RANK', required: true, allowTies: true }]),
+      entries: rankEntries,
+    })).toThrow(/occupied place/i)
+  })
+
   it('projects complementary WIN and LOSS outcomes into ranks and outcomes', () => {
     expect(projectResultEntry({
       method: method({ type: 'DIRECT_OUTCOME', fieldKey: 'outcome' }),

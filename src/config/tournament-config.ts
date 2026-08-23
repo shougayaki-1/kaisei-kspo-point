@@ -201,6 +201,9 @@ function validateScoringTestCase(
   testCase: ScoringTestCase,
   competitions: Map<string, Competition>,
   entries: Map<string, CompetitionEntry>,
+  profiles: Map<string, ScoringProfile>,
+  policiesByCompetition: Map<string, ResultEntryPolicy[]>,
+  schemasById: Map<string, InputSchema[]>,
 ): void {
   checkRequiredText(issues, testCase.name, '得点テスト名', testCase.testCaseId)
   if (!testCase.methodKey.trim()) {
@@ -218,6 +221,38 @@ function validateScoringTestCase(
       `${testCase.name || testCase.testCaseId} の競技が存在しません。`,
       testCase.testCaseId,
     )
+  }
+  const usesMethodProjection = testCase.rounds.some((round) => round.rawValues !== undefined) &&
+    !profiles.get(testCase.competitionId)?.scoringRule
+  const policies = policiesByCompetition.get(testCase.competitionId) ?? []
+  if (policies.length === 0) {
+    if (usesMethodProjection) {
+      error(issues, 'MISSING_SCORING_TEST_METHOD_POLICY', '得点テストの結果入力方式ポリシーがありません。', testCase.testCaseId)
+    }
+  } else if (policies.length !== 1) {
+    error(issues, 'AMBIGUOUS_SCORING_TEST_METHOD', '得点テストの結果入力方式ポリシーが一意に決まりません。', testCase.testCaseId)
+  } else {
+    const policy = policies[0]!
+    const methods = policy.methods.filter((method) =>
+      method.methodKey === testCase.methodKey && policy.allowedMethodKeys.includes(method.methodKey),
+    )
+    if (methods.length === 0) {
+      error(issues, 'UNKNOWN_SCORING_TEST_METHOD', `得点テストの入力方式 ${testCase.methodKey} は許可されていません。`, testCase.testCaseId)
+    } else if (methods.length !== 1) {
+      error(issues, 'AMBIGUOUS_SCORING_TEST_METHOD', `得点テストの入力方式 ${testCase.methodKey} が一意に決まりません。`, testCase.testCaseId)
+    } else if (usesMethodProjection) {
+      const method = methods[0]!
+      const schemas = (schemasById.get(method.inputSchemaId) ?? [])
+        .filter((schema) => schema.competitionId === testCase.competitionId)
+      if (schemas.length !== 1) {
+        error(
+          issues,
+          'SCORING_TEST_METHOD_SCHEMA_COMPETITION_MISMATCH',
+          '得点テストの入力方式とInputSchemaの競技が一致しないか一意に決まりません。',
+          testCase.testCaseId,
+        )
+      }
+    }
   }
   if (testCase.rounds.length === 0) {
     error(
@@ -459,6 +494,19 @@ export function validateTournamentConfig(snapshot: TournamentConfigSnapshot): Co
   const teams = new Map(snapshot.teams.map((item) => [item.teamId, item]))
   const competitions = new Map(snapshot.competitions.map((item) => [item.competitionId, item]))
   const entries = new Map(snapshot.competitionEntries.map((item) => [item.entryId, item]))
+  const profiles = new Map(snapshot.scoringProfiles.map((item) => [item.competitionId, item]))
+  const policiesByCompetition = new Map<string, ResultEntryPolicy[]>()
+  for (const policy of snapshot.resultEntryPolicies) {
+    const policies = policiesByCompetition.get(policy.competitionId) ?? []
+    policies.push(policy)
+    policiesByCompetition.set(policy.competitionId, policies)
+  }
+  const schemasById = new Map<string, InputSchema[]>()
+  for (const schema of snapshot.inputSchemas) {
+    const schemas = schemasById.get(schema.inputSchemaId) ?? []
+    schemas.push(schema)
+    schemasById.set(schema.inputSchemaId, schemas)
+  }
   const courtStations = new Map(snapshot.courtStations.map((item) => [item.courtStationId, item]))
   const slots = new Map(snapshot.scheduleSlots.map((item) => [item.slotId, item]))
   const runs = new Map(snapshot.courtRuns.map((item) => [item.courtRunId, item]))
@@ -684,7 +732,15 @@ export function validateTournamentConfig(snapshot: TournamentConfigSnapshot): Co
   }
 
   for (const testCase of snapshot.scoringTestCases) {
-    validateScoringTestCase(issues, testCase, competitions, entries)
+    validateScoringTestCase(
+      issues,
+      testCase,
+      competitions,
+      entries,
+      profiles,
+      policiesByCompetition,
+      schemasById,
+    )
   }
 
   const inputSchemas = new Map(snapshot.inputSchemas.map((schema) => [schema.inputSchemaId, schema]))
@@ -707,11 +763,6 @@ export function validateTournamentConfig(snapshot: TournamentConfigSnapshot): Co
     }
     if (!policy.allowedMethodKeys.includes(policy.defaultMethodKey)) {
       error(issues, 'DEFAULT_RESULT_ENTRY_METHOD_NOT_ALLOWED', '既定の結果入力方式は許可方式に含めてください。', policy.competitionId)
-    }
-    for (const testCase of snapshot.scoringTestCases.filter((item) => item.competitionId === policy.competitionId)) {
-      if (!policy.allowedMethodKeys.includes(testCase.methodKey)) {
-        error(issues, 'UNKNOWN_SCORING_TEST_METHOD', `得点テストの入力方式 ${testCase.methodKey} は許可されていません。`, testCase.testCaseId)
-      }
     }
   }
 
