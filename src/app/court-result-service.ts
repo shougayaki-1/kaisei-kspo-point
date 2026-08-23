@@ -99,6 +99,15 @@ export interface CourtResultServiceOptions {
   now?: () => string
 }
 
+export const RESULT_ENTRY_DRAFT_KEY = 'court.resultEntryDraft.v1' as const
+
+export interface ResultEntryDraft {
+  scoringSessionId: ScoringSessionId
+  methodKey: string
+  values: Record<string, Record<string, unknown>>
+  updatedAt: string
+}
+
 export interface PreviewCourtResultInput {
   scoringSessionId: ScoringSessionId
   courtRunIds?: CourtRunId[]
@@ -497,5 +506,21 @@ export function createCourtResultService(db: AppDatabase, options: CourtResultSe
     },
 
     getResultHistory: history,
+
+    async saveDraft(draft: Omit<ResultEntryDraft, 'updatedAt'>): Promise<void> {
+      await db.localSettings.put({
+        key: RESULT_ENTRY_DRAFT_KEY,
+        value: { ...draft, updatedAt: now() } satisfies ResultEntryDraft,
+      })
+    },
+
+    async loadDraft(): Promise<ResultEntryDraft | undefined> {
+      const record = await db.localSettings.get(RESULT_ENTRY_DRAFT_KEY)
+      return record?.value as ResultEntryDraft | undefined
+    },
+
+    async discardDraft(): Promise<void> {
+      await db.localSettings.delete(RESULT_ENTRY_DRAFT_KEY)
+    },
   }
 }

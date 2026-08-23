@@ -245,4 +245,23 @@ describe('Court production Result service', () => {
       expect(switched.revision.rawData).toMatchObject({ inputSchemaId: 'schema-outcome' })
     })
   })
+
+  describe('in-progress draft', () => {
+    it('persists, reloads, and discards a local result-entry draft', async () => {
+      const db = open(); await seed(db); const target = service(db) as unknown as {
+        saveDraft(draft: { scoringSessionId: ScoringSessionId; methodKey: string; values: Record<string, Record<string, unknown>> }): Promise<void>
+        loadDraft(): Promise<{ scoringSessionId: ScoringSessionId; methodKey: string } | undefined>
+        discardDraft(): Promise<void>
+      }
+
+      expect(await target.loadDraft()).toBeUndefined()
+
+      await target.saveDraft({ scoringSessionId: ids.session, methodKey: 'score', values: { [ids.entryA]: { count: '5' } } })
+      const loaded = await target.loadDraft()
+      expect(loaded).toMatchObject({ scoringSessionId: ids.session, methodKey: 'score' })
+
+      await target.discardDraft()
+      expect(await target.loadDraft()).toBeUndefined()
+    })
+  })
 })

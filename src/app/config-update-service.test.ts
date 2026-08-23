@@ -214,6 +214,31 @@ describe('Config Update service', () => {
     expect((await courtRepository.listVersions(originalDraft.tournament.tournamentId))[0].snapshot.tournament.name).toBe('shared大会')
   })
 
+  it('blocks activation while an in-progress Court result draft is unsaved and unblocks after save/discard', async () => {
+    const courtDb = db(`config-court-draft-gate-${crypto.randomUUID()}`)
+    const hostRepository = new ConfigRepository(courtDb)
+    const draftSnapshot = snapshotFor('draft-gate')
+    await hostRepository.apply(draftSnapshot, metadata('2026-08-19T10:00:00+09:00'))
+    const v1 = await hostRepository.getActiveVersion(draftSnapshot.tournament.tournamentId)
+
+    const service = createConfigUpdateService(courtDb)
+    await courtDb.localSettings.put({
+      key: 'court.resultEntryDraft.v1',
+      value: { scoringSessionId: 'session-1', methodKey: 'score', values: {}, updatedAt: '2026-08-19T10:05:00+09:00' },
+    })
+
+    await expect(service.activate(v1!.configVersionId!, {
+      operator: 'Court担当',
+      activatedAt: '2026-08-19T10:06:00+09:00',
+    })).rejects.toThrow(/保存|破棄/)
+
+    await service.discardResultEntryDraft()
+    await expect(service.activate(v1!.configVersionId!, {
+      operator: 'Court担当',
+      activatedAt: '2026-08-19T10:07:00+09:00',
+    })).resolves.toMatchObject({ version: 1 })
+  })
+
   it('rejects same ConfigVersion ID with different immutable content and rejects incompatible activation', async () => {
     const courtDb = db(`config-court-collision-${crypto.randomUUID()}`)
     const repository = new ConfigRepository(courtDb)

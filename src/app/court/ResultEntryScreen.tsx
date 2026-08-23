@@ -21,6 +21,9 @@ export interface ResultEntryScreenServices {
   saveResult(input: { scoringSessionId: ScoringSessionId; operator: string; methodKey: string; values: Record<string, Record<string, unknown>> }): Promise<unknown>
   correctResult(input: { resultId: ResultId; operator: string; methodKey?: string; values: Record<string, Record<string, unknown>> }): Promise<unknown>
   getResultHistory(resultId: ResultId): Promise<CourtResultHistory>
+  saveDraft(draft: { scoringSessionId: ScoringSessionId; methodKey: string; values: Record<string, Record<string, unknown>> }): Promise<void>
+  loadDraft(): Promise<{ scoringSessionId: ScoringSessionId; methodKey: string; values: Record<string, Record<string, unknown>> } | undefined>
+  discardDraft(): Promise<void>
 }
 
 export interface ResultEntryScreenProps {
@@ -70,7 +73,14 @@ export function ResultEntryScreen({
         setMethodKey(originalMethodKey)
         setValues(rawData?.entries ?? {})
       } else {
-        setMethodKey(loaded.policy.defaultMethodKey)
+        const draft = await services.loadDraft()
+        if (cancelled) return
+        if (draft && draft.scoringSessionId === scoringSessionId) {
+          setMethodKey(draft.methodKey)
+          setValues(draft.values)
+        } else {
+          setMethodKey(loaded.policy.defaultMethodKey)
+        }
       }
     })().catch((cause: unknown) => {
       if (!cancelled) setError(cause instanceof Error ? cause.message : '読み込みに失敗しました')
@@ -90,16 +100,23 @@ export function ResultEntryScreen({
     [task],
   )
 
+  const persistDraft = (nextMethodKey: string, nextValues: EntryValues) => {
+    if (correctionOfResultId) return
+    void services.saveDraft({ scoringSessionId, methodKey: nextMethodKey, values: nextValues })
+  }
+
   const handleMethodSelect = (nextMethodKey: string) => {
     setMethodKey(nextMethodKey)
     setValues({})
+    persistDraft(nextMethodKey, {})
   }
 
   const handleFieldChange = (entryId: CompetitionEntryId, fieldKey: string, value: unknown) => {
-    setValues((current) => ({
-      ...current,
-      [entryId]: { ...current[entryId], [fieldKey]: value },
-    }))
+    setValues((current) => {
+      const next = { ...current, [entryId]: { ...current[entryId], [fieldKey]: value } }
+      persistDraft(methodKey, next)
+      return next
+    })
   }
 
   const handleConfirm = async () => {
@@ -121,6 +138,7 @@ export function ResultEntryScreen({
         await services.correctResult({ resultId: correctionOfResultId, operator, methodKey, values })
       } else {
         await services.saveResult({ scoringSessionId, operator, methodKey, values })
+        await services.discardDraft()
       }
       onSaved()
     } catch (cause) {
