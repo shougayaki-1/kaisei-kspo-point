@@ -7,6 +7,13 @@ import type {
   TournamentId,
 } from './ids'
 
+export function resultIdForScoringSession(
+  tournamentId: TournamentId,
+  scoringSessionId: ScoringSessionId,
+): ResultId {
+  return `result:v1:${tournamentId}:${scoringSessionId}` as ResultId
+}
+
 export type InputMode =
   | 'TIMER'
   | 'TIME_MANUAL'

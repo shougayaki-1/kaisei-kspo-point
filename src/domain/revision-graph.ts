@@ -7,7 +7,6 @@ export type RevisionGraphErrorCode =
   | 'MISSING_PARENT'
   | 'SELF_PARENT'
   | 'CYCLE'
-  | 'NO_COMMON_ANCESTOR'
   | 'AMBIGUOUS_COMMON_ANCESTOR'
 
 export class RevisionGraphError extends Error {
@@ -185,13 +184,10 @@ function latestCommonConfirmedAncestor(
     }
   }
 
-  if (common.size === 0) {
-    throw new RevisionGraphError(
-      'NO_COMMON_ANCESTOR',
-      [...headIds].sort(compareId),
-      'Divergent revision heads do not have a common confirmed ancestor',
-    )
-  }
+  // Two or more independently created root revisions (a "virtual root" conflict,
+  // e.g. two Court devices entering the same task offline) legitimately share no
+  // ancestor; that is a normal unresolved-conflict state, not a graph error.
+  if (common.size === 0) return null
 
   const commonIds = [...common]
   const maximal = commonIds.filter((candidateId) =>

@@ -124,11 +124,31 @@ describe('Court production Result service', () => {
     const corrected = await target.correctResult({ resultId: first.result.resultId, operator: '担当者B', inputMode: 'NUMBER', values: allValues('3', '4') })
     expect(corrected.revision.revisionNumber).toBe(2); expect(corrected.revision.parentRevisionIds).toEqual([first.revision.revisionId]); expect((await target.getResultHistory(first.result.resultId)).revisions).toHaveLength(2); expect(await db.resultRevisions.get(first.revision.revisionId)).toEqual(firstSnapshot)
   })
-  it('allows multiple configured physical CourtRuns to feed one ScoringSession without assuming a fixed court topology', async () => {
+  it('keeps one logical Result per ScoringSession even when different CourtRun subsets are entered independently', async () => {
     const db = open(); await seed(db); const target = service(db)
     await target.saveResult({ scoringSessionId: ids.session, courtRunIds: [ids.runA], operator: '東担当', inputMode: 'NUMBER', values: { [ids.entryA]: { count: '7', verified: true } } })
     await target.saveResult({ scoringSessionId: ids.session, courtRunIds: [ids.runB], operator: '西担当', inputMode: 'NUMBER', values: { [ids.entryB]: { count: '8', verified: true } } })
-    const saved = await target.listSessionResults(ids.session); expect(saved).toHaveLength(2); expect(saved.map((item) => item.result.scoringSessionId)).toEqual([ids.session, ids.session])
+    const saved = await target.listSessionResults(ids.session)
+    expect(saved).toHaveLength(1)
+    expect(saved[0]!.result.scoringSessionId).toBe(ids.session)
+    expect(saved[0]!.revisions).toHaveLength(2)
+    expect(saved[0]!.projection.conflictState.status).toBe('UNRESOLVED')
+    expect(saved[0]!.projection.conflictState.commonConfirmedAncestorRevisionId).toBeNull()
+  })
+
+  it('produces one logical Result with an unresolved conflict when two devices independently save the same task', async () => {
+    const db = open(); await seed(db)
+    const deviceA = createCourtResultService(db, { deviceId: 'device-a' as DeviceId }) as unknown as ExpectedCourtResultService
+    const deviceB = createCourtResultService(db, { deviceId: 'device-b' as DeviceId }) as unknown as ExpectedCourtResultService
+    const savedA = await deviceA.saveResult({ scoringSessionId: ids.session, operator: '東担当', inputMode: 'NUMBER', values: allValues('1', '2') })
+    const savedB = await deviceB.saveResult({ scoringSessionId: ids.session, operator: '西担当', inputMode: 'NUMBER', values: allValues('3', '4') })
+    expect(savedA.result.resultId).toBe(savedB.result.resultId)
+    expect(await db.results.count()).toBe(1)
+    const history = await deviceA.getResultHistory(savedA.result.resultId)
+    expect(history.revisions).toHaveLength(2)
+    expect(history.projection.conflictState.status).toBe('UNRESOLVED')
+    expect(history.projection.candidateHeads.map((head) => head.revisionId).sort())
+      .toEqual([savedA.revision.revisionId, savedB.revision.revisionId].sort())
   })
   it('fails explicitly when the active ScoringSession/InputSchema configuration is inconsistent', async () => {
     const db = open(); await seed(db); await db.inputSchemas.clear(); const target = service(db)

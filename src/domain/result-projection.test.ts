@@ -186,4 +186,52 @@ describe('projectResultRevisions', () => {
 
     expect(projectResultRevisions([b, a]).effectiveRevision?.revisionId).toBe(b.revisionId)
   })
+
+  it('reports an unresolved conflict with no effective revision for two independent device roots', () => {
+    const a = revision('a')
+    const b = revision('b')
+
+    const projection = projectResultRevisions([a, b])
+
+    expect(projection.effectiveRevision).toBeNull()
+    expect(projection.conflictState).toEqual({
+      status: 'UNRESOLVED',
+      resolved: false,
+      candidateHeadRevisionIds: ['a', 'b'],
+      commonConfirmedAncestorRevisionId: null,
+    })
+  })
+
+  it('resolves a virtual-root conflict by selecting one candidate even without a common ancestor', () => {
+    const a = revision('a')
+    const b = revision('b')
+
+    const created = createConflictResolution([a, b], [], {
+      operator: '本部担当',
+      createdAt: '2026-08-19T11:00:00+09:00',
+      choice: { kind: 'SELECT_REVISION', selectedRevisionId: a.revisionId },
+    })
+
+    expect(created.resolution.commonConfirmedAncestorRevisionId).toBeNull()
+    expect(created.revision.parentRevisionIds.slice().sort()).toEqual(['a', 'b'])
+
+    const projection = projectResultRevisions([a, b, created.revision], [created.resolution])
+    expect(projection.effectiveRevision?.revisionId).toBe(created.revision.revisionId)
+    expect(projection.conflictState.status).toBe('RESOLVED')
+  })
+
+  it('resolves a virtual-root conflict by merging without a common ancestor', () => {
+    const a = revision('a')
+    const b = revision('b')
+
+    const created = createConflictResolution([a, b], [], {
+      operator: '本部担当',
+      createdAt: '2026-08-19T11:00:00+09:00',
+      choice: { kind: 'MERGE', rawData: { value: 'merged' }, inputMode: 'NUMBER', configVersion: 1 },
+    })
+
+    const projection = projectResultRevisions([a, b, created.revision], [created.resolution])
+    expect(projection.effectiveRevision?.revisionId).toBe(created.revision.revisionId)
+    expect(projection.conflictState.status).toBe('RESOLVED')
+  })
 })

@@ -21,12 +21,13 @@ import {
   type ScoringSessionId,
   type TournamentId,
 } from '../domain/ids'
-import type {
-  InputMode,
-  RawResultData,
-  RawValue,
-  Result,
-  ResultRevision,
+import {
+  resultIdForScoringSession,
+  type InputMode,
+  type RawResultData,
+  type RawValue,
+  type Result,
+  type ResultRevision,
 } from '../domain/result'
 import type { ResultProjection } from '../domain/result-projection'
 import type { CompetitionEntry, CourtRun, InputScope, ScoringSession } from '../domain/tournament'
@@ -337,7 +338,7 @@ export function createCourtResultService(db: AppDatabase, options: CourtResultSe
       const definition = await sessionDefinition(input.scoringSessionId)
       const selected = selectedContext(definition, input.courtRunIds)
       const entries = canonicalValues(definition.inputSchema, selected.entries, input.values)
-      const resultId = createId<ResultId>()
+      const resultId = resultIdForScoringSession(definition.tournamentId, definition.session.scoringSessionId)
       const revisionId = createId<RevisionId>()
       const createdAt = now()
       const result: Result = {

@@ -11,7 +11,7 @@ export interface ConflictResolutionRecord {
   resolutionId: string
   resultId: ResultId
   candidateHeadRevisionIds: RevisionId[]
-  commonConfirmedAncestorRevisionId: RevisionId
+  commonConfirmedAncestorRevisionId: RevisionId | null
   selectedCandidateRevisionId: RevisionId | null
   effectiveRevisionId: RevisionId
   decision: ConflictResolutionDecision
@@ -95,8 +95,9 @@ function validateResolutionRecord(
   }
 
   const effective = byId.get(resolution.effectiveRevisionId)
-  const common = byId.get(resolution.commonConfirmedAncestorRevisionId)
-  if (!effective || !common || effective.source !== 'CONFLICT_RESOLUTION') {
+  const commonAncestorId = resolution.commonConfirmedAncestorRevisionId
+  const common = commonAncestorId === null ? null : byId.get(commonAncestorId)
+  if (!effective || effective.source !== 'CONFLICT_RESOLUTION' || (commonAncestorId !== null && !common)) {
     throw new ResultProjectionError(
       'INVALID_RESOLUTION_RECORD',
       `Resolution ${resolution.resolutionId} references missing or invalid revisions`,
@@ -112,11 +113,8 @@ function validateResolutionRecord(
   }
 
   for (const candidateId of candidates) {
-    if (!byId.has(candidateId) || !isRevisionAncestor(
-      revisions,
-      resolution.commonConfirmedAncestorRevisionId,
-      candidateId,
-    )) {
+    const isValidAncestry = commonAncestorId === null || isRevisionAncestor(revisions, commonAncestorId, candidateId)
+    if (!byId.has(candidateId) || !isValidAncestry) {
       throw new ResultProjectionError(
         'INVALID_RESOLUTION_RECORD',
         `Resolution ${resolution.resolutionId} has an invalid candidate/common ancestor relationship`,
@@ -223,13 +221,11 @@ export function projectResultRevisions(
   }
 
   if (graph.status === 'CONFLICT') {
+    // Divergent root revisions (e.g. two Court devices entering the same task
+    // offline) have no common confirmed ancestor; that is a legitimate
+    // unresolved-conflict state, not an error, and no revision is effective
+    // (i.e. authoritative for scoring) until a Host resolves it.
     const common = graph.latestCommonConfirmedAncestor
-    if (!common) {
-      throw new ResultProjectionError(
-        'NOT_UNRESOLVED_CONFLICT',
-        'Unresolved conflict does not have a common confirmed ancestor',
-      )
-    }
     const candidateHeadRevisionIds = graph.heads.map((head) => head.revisionId)
     return {
       effectiveRevision: common,
@@ -239,7 +235,7 @@ export function projectResultRevisions(
         status: 'UNRESOLVED',
         resolved: false,
         candidateHeadRevisionIds,
-        commonConfirmedAncestorRevisionId: common.revisionId,
+        commonConfirmedAncestorRevisionId: common?.revisionId ?? null,
       },
     }
   }
@@ -294,12 +290,6 @@ export function createConflictResolution(
   const candidateHeads = projection.candidateHeads
   const candidateHeadRevisionIds = candidateHeads.map((head) => head.revisionId)
   const commonAncestorRevisionId = projection.conflictState.commonConfirmedAncestorRevisionId
-  if (!commonAncestorRevisionId) {
-    throw new ResultProjectionError(
-      'NOT_UNRESOLVED_CONFLICT',
-      'Conflict does not have a common confirmed ancestor',
-    )
-  }
 
   const resultId = candidateHeads[0]!.resultId
   const revisionId = input.revisionId ?? createId<RevisionId>()
