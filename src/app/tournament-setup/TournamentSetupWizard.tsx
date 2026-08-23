@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
@@ -56,7 +55,7 @@ function mergeFinalCheckIssues(
   return [
     ...setupIssues,
     ...mappedDomainIssues.filter((issue) => {
-      if (issue.code === 'EMPTY_LABEL' && issue.step === 'BASIC') {
+      if (issue.code === 'EMPTY_LABEL' && issue.step === 'CHANGES') {
         return !setupIssues.some((setupIssue) => setupIssue.code === 'EMPTY_TOURNAMENT_NAME')
       }
 
@@ -87,18 +86,20 @@ function createDefaultDraft(): TournamentSetupDraft {
   const now = createDraftTimestamp()
 
   return {
-    draftFormatVersion: 1,
+    draftFormatVersion: 2,
     draftId: createId('setup-draft'),
     createdAt: now,
     updatedAt: now,
-    currentStep: 'BASIC',
+    currentStep: 'SOURCE',
     tournament: {
       name: '',
     },
     teams: [],
-    templateSource: {
-      type: 'NONE',
-    },
+    source: { type: 'STANDARD', templateId: 'exchange-festival-v2' },
+    courtStations: [
+      { stationKey: 'court-a', label: 'Aコート', displayOrder: 0 },
+      { stationKey: 'court-b', label: 'Bコート', displayOrder: 1 },
+    ],
     competitions: [],
   }
 }
@@ -279,7 +280,7 @@ export function TournamentSetupWizard({
           {
             severity: 'ERROR',
             code: 'SETUP_COMPILATION_FAILED',
-            step: 'FINAL_CHECK',
+            step: 'OPERATIONS_CHECK',
             message: '設定内容を作成できませんでした。入力内容を確認してください。',
           },
         ],
@@ -310,87 +311,55 @@ export function TournamentSetupWizard({
 
   const renderStep = () => {
     switch (draft.currentStep) {
-      case 'BASIC':
-        return (
-          <BasicStep
-            name={draft.tournament.name}
-            eventDate={draft.tournament.eventDate}
-            disabled={controlsDisabled}
-            onNameChange={(value) => {
-              updateDraft((nextDraft) => {
-                nextDraft.tournament.name = value
-              })
-            }}
-            onEventDateChange={(value) => {
-              updateDraft((nextDraft) => {
-                nextDraft.tournament.eventDate = value || undefined
-              })
-            }}
-          />
-        )
-      case 'TEAMS':
-        return (
-          <TeamsStep
-            teams={draft.teams}
-            disabled={controlsDisabled}
-            onTeamCountChange={(count) => {
-              updateDraft((nextDraft) => {
-                nextDraft.teams = resizeTeams(nextDraft.teams, count)
-              })
-            }}
-            onTeamNameChange={(index, value) => {
-              updateDraft((nextDraft) => {
-                if (!nextDraft.teams[index]) return
-                nextDraft.teams[index] = {
-                  ...nextDraft.teams[index],
-                  name: value,
-                }
-              })
-            }}
-          />
-        )
-      case 'TEMPLATES':
+      case 'SOURCE':
         return (
           <TemplateStep
-            templateSource={draft.templateSource}
+            source={draft.source}
             competitions={draft.competitions}
             disabled={controlsDisabled}
-            onTemplateChange={(templateSource, competitions) => {
+            onTemplateChange={(source, competitions) => {
               updateDraft((nextDraft) => {
-                nextDraft.templateSource = templateSource
+                nextDraft.source = source
                 nextDraft.competitions = competitions
               })
             }}
           />
         )
-      case 'COMPETITIONS':
+      case 'CHANGES':
         return (
-          <CompetitionStep
-            competitions={draft.competitions}
-            disabled={controlsDisabled}
-            focusedCompetitionKey={focusedCompetitionKey}
-            onCompetitionsChange={(competitions) => {
-              updateDraft((nextDraft) => {
-                nextDraft.competitions = competitions
-              })
-            }}
-          />
+          <Stack spacing={3}>
+            <BasicStep
+              name={draft.tournament.name}
+              eventDate={draft.tournament.eventDate}
+              disabled={controlsDisabled}
+              onNameChange={(value) => updateDraft((nextDraft) => { nextDraft.tournament.name = value })}
+              onEventDateChange={(value) => updateDraft((nextDraft) => { nextDraft.tournament.eventDate = value || undefined })}
+            />
+            <TeamsStep
+              teams={draft.teams}
+              disabled={controlsDisabled}
+              onTeamCountChange={(count) => updateDraft((nextDraft) => { nextDraft.teams = resizeTeams(nextDraft.teams, count) })}
+              onTeamNameChange={(index, value) => updateDraft((nextDraft) => {
+                if (nextDraft.teams[index]) nextDraft.teams[index] = { ...nextDraft.teams[index], name: value }
+              })}
+            />
+            <CompetitionStep
+              competitions={draft.competitions}
+              disabled={controlsDisabled}
+              focusedCompetitionKey={focusedCompetitionKey}
+              onCompetitionsChange={(competitions) => updateDraft((nextDraft) => { nextDraft.competitions = competitions })}
+            />
+            <ScheduleStep
+              competitions={draft.competitions}
+              teams={draft.teams}
+              courtStations={draft.courtStations}
+              disabled={controlsDisabled}
+              focusedCompetitionKey={focusedCompetitionKey}
+              onCompetitionsChange={(competitions) => updateDraft((nextDraft) => { nextDraft.competitions = competitions })}
+            />
+          </Stack>
         )
-      case 'SCHEDULE':
-        return (
-          <ScheduleStep
-            competitions={draft.competitions}
-            teams={draft.teams}
-            disabled={controlsDisabled}
-            focusedCompetitionKey={focusedCompetitionKey}
-            onCompetitionsChange={(competitions) => {
-              updateDraft((nextDraft) => {
-                nextDraft.competitions = competitions
-              })
-            }}
-          />
-        )
-      case 'SCORING_REVIEW':
+      case 'INPUT_AND_SCORING':
         return (
           <ScoringReviewStep
             competitions={draft.competitions}
@@ -398,7 +367,7 @@ export function TournamentSetupWizard({
             focusedCompetitionKey={focusedCompetitionKey}
           />
         )
-      case 'FINAL_CHECK':
+      case 'OPERATIONS_CHECK':
         return (
           <FinalCheckStep
             snapshot={finalCheck.snapshot}

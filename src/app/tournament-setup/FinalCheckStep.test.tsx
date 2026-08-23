@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { TournamentConfigSnapshot } from '../../config/tournament-config'
@@ -46,7 +45,7 @@ describe('FinalCheckStep', () => {
   it('requires acknowledgement of a warning before handing off the supplied snapshot', () => {
     const onReadyToApply = vi.fn()
     const warning: SetupIssue = {
-      severity: 'WARNING', code: 'SCHEDULE_TIME_ORDER', step: 'SCHEDULE',
+      severity: 'WARNING', code: 'SCHEDULE_TIME_ORDER', step: 'OPERATIONS_CHECK',
       competitionKey: 'competition-1', message: '玉入れ の開始・終了予定を確認してください。',
     }
 
@@ -72,11 +71,11 @@ describe('FinalCheckStep', () => {
 
   it('requires a fresh acknowledgement when the warning changes', () => {
     const firstWarning: SetupIssue = {
-      severity: 'WARNING', code: 'SCHEDULE_TIME_ORDER', step: 'SCHEDULE',
+      severity: 'WARNING', code: 'SCHEDULE_TIME_ORDER', step: 'OPERATIONS_CHECK',
       message: '玉入れ の開始・終了予定を確認してください。',
     }
     const nextWarning: SetupIssue = {
-      severity: 'WARNING', code: 'SCHEDULE_TIME_ORDER', step: 'SCHEDULE',
+      severity: 'WARNING', code: 'SCHEDULE_TIME_ORDER', step: 'OPERATIONS_CHECK',
       message: 'リレー の開始・終了予定を確認してください。',
     }
     const view = render(
@@ -365,22 +364,16 @@ describe('FinalCheckStep', () => {
     expect(screen.getByText('大会を作成しました。')).toBeInTheDocument()
   })
 
-  it.each([
-    ['順位競技', 'RANK', 'rank', '順位を入力'],
-    ['タイム競技', 'TIME', 'time', 'タイムを入力'],
-    ['回数競技', 'NUMBER', 'value', '記録を入力'],
-    ['勝敗競技', 'WIN_LOSS', 'result', '勝敗を入力'],
-  ] as const)('keeps %s operator previews free of raw type and field-key tokens', (
-    competitionName,
-    inputType,
-    fieldKey,
-    expectedHeading,
-  ) => {
-    render(<CourtInputPreview competitionName={competitionName} inputType={inputType} />)
+  it('keeps v2 method previews free of raw type and field-key tokens', () => {
+    render(<CourtInputPreview competitionName="回数競技" method={{
+      methodKey: 'score', label: '競技内ポイント', kind: 'SCORE', inputMode: 'NUMBER',
+      fields: [{ key: 'score', label: '得点', type: 'NUMBER', required: true }],
+      projection: { type: 'SINGLE_FIELD', fieldKey: 'score', direction: 'HIGHER_IS_BETTER' },
+    }} />)
 
-    const preview = screen.getByRole('region', { name: `${competitionName} の入力プレビュー` })
-    expect(within(preview).getByText(expectedHeading)).toBeInTheDocument()
-    expect(within(preview).queryByText(inputType, { exact: true })).not.toBeInTheDocument()
-    expect(within(preview).queryByText(fieldKey, { exact: true })).not.toBeInTheDocument()
+    const preview = screen.getByRole('region', { name: '回数競技 の入力プレビュー' })
+    expect(within(preview).getByText('競技内ポイント: 記録を入力')).toBeInTheDocument()
+    expect(within(preview).queryByText('NUMBER', { exact: true })).not.toBeInTheDocument()
+    expect(within(preview).queryByText('score', { exact: true })).not.toBeInTheDocument()
   })
 })

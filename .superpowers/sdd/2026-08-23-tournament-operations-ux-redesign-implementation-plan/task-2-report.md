@@ -40,3 +40,30 @@ Also adjusted `src/config/tournament-config.ts` so explicit zero-based display o
 ## Self-review
 
 `git diff --check` is clean. The compiler has no label/index-based entity identity lookup: station, slot, run, and task identities use persisted semantic keys. No legacy draft/snapshot fallback was added to compiler or validation code.
+
+## Pre-review correction
+
+The previous full-suite RED run had 16 failures in three categories: legacy seven-step wizard tests/steps (`BASIC` through `FINAL_CHECK`), template tests and consumers that supplied v1 `templateSource`/template payloads, and schedule tests/consumers that used `WHOLE_ROUND` and numeric `courtIndexes`. The temporary `@ts-nocheck` comments added during the first pass have all been removed.
+
+Changed files for the correction:
+
+- `src/app/tournament-setup/SetupProgress.tsx`
+- `src/app/tournament-setup/TournamentSetupWizard.tsx`
+- `src/app/tournament-setup/TournamentSetupWizard.test.tsx`
+- `src/app/tournament-setup/TemplateStep.tsx`
+- `src/app/tournament-setup/TemplateStep.test.tsx`
+- `src/app/tournament-setup/ScheduleStep.tsx`
+- `src/app/tournament-setup/ScheduleStep.test.tsx`
+- `src/app/tournament-setup/CompetitionQuickEditor.tsx`
+- `src/app/tournament-setup/CompetitionStep.test.tsx`
+- `src/app/tournament-setup/ScoringReviewStep.tsx`
+- `src/app/tournament-setup/CourtInputPreview.tsx`
+- `src/app/tournament-setup/FinalCheckStep.test.tsx`
+
+The transitional UI now uses exactly the v2 draft source, four human steps, method definitions, and Court station keys. It deliberately retains existing basic component composition and does not introduce Task 8’s polished layout/settings home/operations preview.
+
+Verification after correction:
+
+- `npm run test:run -- src/app/tournament-setup src/config/setup src/config/tournament-config.test.ts` — PASS (13 files, 58 tests)
+- `npm run typecheck` — PASS
+- `npm run test:run` — PASS (80 files, 359 tests)

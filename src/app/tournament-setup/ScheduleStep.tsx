@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { useEffect, useRef, useState } from 'react'
 import Alert from '@mui/material/Alert'
 import Card from '@mui/material/Card'
@@ -15,12 +14,13 @@ import {
   autoAssignCompetitionSchedule,
   type SetupCompetitionSchedule,
 } from '../../config/setup/schedule-assignment'
-import type { SetupCompetitionDraft, SetupTeamDraft } from '../../config/setup/setup-types'
+import type { SetupCompetitionDraft, SetupCourtStationDraft, SetupTeamDraft } from '../../config/setup/setup-types'
 import { ScheduleGridEditor } from './ScheduleGridEditor'
 
 export interface ScheduleStepProps {
   competitions: SetupCompetitionDraft[]
   teams: SetupTeamDraft[]
+  courtStations: SetupCourtStationDraft[]
   disabled?: boolean
   focusedCompetitionKey?: string
   onCompetitionsChange: (competitions: SetupCompetitionDraft[]) => void
@@ -42,8 +42,9 @@ function sameSchedule(
 function normalizeCompetition(
   competition: SetupCompetitionDraft,
   teams: SetupTeamDraft[],
+  courtStations: SetupCourtStationDraft[],
 ): SetupCompetitionDraft {
-  const schedule = autoAssignCompetitionSchedule(competition, teams)
+  const schedule = autoAssignCompetitionSchedule(competition, teams, courtStations)
 
   if (sameSchedule(competition.schedule, schedule)) {
     return competition
@@ -57,7 +58,7 @@ function normalizeCompetition(
 
 function groupingValue(
   competition: SetupCompetitionDraft,
-): 'WHOLE_ROUND' | 'PER_COURT' | '' {
+): 'WHOLE_SLOT' | 'PER_COURT' | '' {
   if (competition.inputGrouping === 'CUSTOM_GROUP') return ''
   return competition.inputGrouping
 }
@@ -65,6 +66,7 @@ function groupingValue(
 export function ScheduleStep({
   competitions,
   teams,
+  courtStations,
   disabled = false,
   focusedCompetitionKey,
   onCompetitionsChange,
@@ -74,12 +76,12 @@ export function ScheduleStep({
 
   useEffect(() => {
     const nextCompetitions = competitions.map((competition) =>
-      normalizeCompetition(competition, teams),
+      normalizeCompetition(competition, teams, courtStations),
     )
 
     if (nextCompetitions.every((competition, index) => competition === competitions[index])) return
     onCompetitionsChange(nextCompetitions)
-  }, [competitions, onCompetitionsChange, teams])
+  }, [competitions, courtStations, onCompetitionsChange, teams])
 
   useEffect(() => {
     if (!focusedCompetitionKey) return
@@ -107,7 +109,7 @@ export function ScheduleStep({
         mutate(nextCompetition)
 
         if (refreshSchedule) {
-          nextCompetition.schedule = autoAssignCompetitionSchedule(nextCompetition, teams)
+          nextCompetition.schedule = autoAssignCompetitionSchedule(nextCompetition, teams, courtStations)
         }
 
         return nextCompetition
@@ -139,7 +141,7 @@ export function ScheduleStep({
       ) : null}
 
       {competitions.map((competition, index) => {
-        const schedule = competition.schedule ?? autoAssignCompetitionSchedule(competition, teams)
+        const schedule = competition.schedule ?? autoAssignCompetitionSchedule(competition, teams, courtStations)
         const expanded = expandedKeys.includes(competition.competitionKey)
         const preservesDetailedGrouping = competition.inputGrouping === 'CUSTOM_GROUP'
         const focused = competition.competitionKey === focusedCompetitionKey
@@ -207,7 +209,7 @@ export function ScheduleStep({
                       }, true)
                     }}
                   >
-                    <FormControlLabel value="WHOLE_ROUND" control={<Radio />} label="同じ回をまとめて入力" />
+                    <FormControlLabel value="WHOLE_SLOT" control={<Radio />} label="同じ回をまとめて入力" />
                     <FormControlLabel value="PER_COURT" control={<Radio />} label="コートごとに入力" />
                   </RadioGroup>
                 </FormControl>

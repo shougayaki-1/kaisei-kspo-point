@@ -1,15 +1,14 @@
-// @ts-nocheck
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
 import Chip from '@mui/material/Chip'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import type { SetupScoringInputType } from '../../config/setup/template-schema'
+import type { SetupResultMethodTemplate } from '../../config/setup/template-schema'
 
 export interface CourtInputPreviewProps {
   competitionName: string
-  inputType: SetupScoringInputType
+  method: SetupResultMethodTemplate
 }
 
 interface PreviewContent {
@@ -19,15 +18,16 @@ interface PreviewContent {
   options?: string[]
 }
 
-function previewContent(inputType: SetupScoringInputType): PreviewContent {
-  switch (inputType) {
-    case 'RANK':
+function previewContent(method: SetupResultMethodTemplate): PreviewContent {
+  switch (method.inputMode) {
+    case 'RANK_MANUAL':
       return {
         heading: '順位を入力',
         helper: '各チームの順位を入力する画面です。',
         fieldLabel: '順位',
       }
-    case 'TIME':
+    case 'TIMER':
+    case 'TIME_MANUAL':
       return {
         heading: 'タイムを入力',
         helper: '計測したタイムを入力する画面です。',
@@ -45,18 +45,24 @@ function previewContent(inputType: SetupScoringInputType): PreviewContent {
         helper: '試合の結果を選択する画面です。',
         options: ['勝ち', '引き分け', '負け'],
       }
+    case 'SPECIAL':
+      return {
+        heading: '結果を入力',
+        helper: '競技ごとの入力項目を確認して入力する画面です。',
+        fieldLabel: '結果',
+      }
   }
 }
 
-export function CourtInputPreview({ competitionName, inputType }: CourtInputPreviewProps) {
-  const content = previewContent(inputType)
+export function CourtInputPreview({ competitionName, method }: CourtInputPreviewProps) {
+  const content = previewContent(method)
 
   return (
     <Card variant="outlined" component="section" aria-label={`${competitionName} の入力プレビュー`}>
       <CardContent>
         <Stack spacing={1.5}>
           <div>
-            <Typography component="h3" variant="subtitle1">{content.heading}</Typography>
+            <Typography component="h3" variant="subtitle1">{method.label}: {content.heading}</Typography>
             <Typography color="text.secondary" variant="body2">{content.helper}</Typography>
           </div>
           {content.fieldLabel ? (
