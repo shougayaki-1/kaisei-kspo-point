@@ -21,7 +21,7 @@ import ExpandMoreRoundedIcon from '@mui/icons-material/ExpandMoreRounded'
 import GroupsRoundedIcon from '@mui/icons-material/GroupsRounded'
 import MonitorRoundedIcon from '@mui/icons-material/MonitorRounded'
 import StadiumRoundedIcon from '@mui/icons-material/StadiumRounded'
-import type { TournamentId } from '../domain/ids'
+import type { CompetitionId, CourtStationId, ResultId, ScoringSessionId, TournamentId } from '../domain/ids'
 import { getOrCreateDeviceId } from '../device/device-service'
 import { ConfigRepository } from '../db/config-repository'
 import { createDatabase } from '../db/database'
@@ -35,13 +35,23 @@ import {
   type PwaRuntime,
   type PwaRuntimeSnapshot,
 } from '../pwa/runtime'
+import type { TournamentConfigSnapshot } from '../config/tournament-config'
+import { SetupDraftRepository as BrowserSetupDraftRepository } from '../config/setup/setup-draft-repository'
+import type { SetupDraftRepository, SetupStep } from '../config/setup/setup-types'
+import { TournamentSetupWizard } from './tournament-setup/TournamentSetupWizard'
+import { createTournamentConfigApplyService } from './tournament-setup/tournament-config-apply-service'
+import { TournamentSettingsHome } from './tournament-settings/TournamentSettingsHome'
 import { ConfigFilePanel } from './ConfigFilePanel'
 import { createConfigFilePanelServices } from './config-file-panel-service'
 import { ConfigUpdatePanel } from './ConfigUpdatePanel'
 import { createConfigUpdateService, type ConfigUpdateActivationResult } from './config-update-service'
 import type { ConfigUpdatePanelServices } from './ConfigUpdatePanel'
-import { CourtScoringSession } from './CourtScoringSession'
+import { createCourtAssignmentService, type CourtAssignment } from './court-assignment-service'
 import { createCourtResultService } from './court-result-service'
+import { createCourtTaskService, type CourtTaskCard } from './court-task-service'
+import { CourtAssignmentPanel } from './court/CourtAssignmentPanel'
+import { CourtTaskHome } from './court/CourtTaskHome'
+import { ResultEntryScreen } from './court/ResultEntryScreen'
 import { CourtTransferHistory } from './CourtTransferHistory'
 import { createCourtTransferHistoryServices } from './court-transfer-history-service'
 import { DataManagementPanel } from './DataManagementPanel'
@@ -50,7 +60,6 @@ import { DisplayDashboard } from './DisplayDashboard'
 import { HostBackupPanel, type HostBackupPanelServices } from './HostBackupPanel'
 import { HostScoringDashboard } from './HostScoringDashboard'
 import { createHostScoringService } from './host-scoring-service'
-import { TournamentConfigEditor } from './TournamentConfigEditor'
 import { TransferDemo } from './TransferDemo'
 
 type AppMode = 'HOST' | 'COURT' | 'DISPLAY' | null
@@ -75,6 +84,7 @@ export interface AppProps {
   resetPersistentData?: () => Promise<void> | void
   hostBackupServices?: HostBackupPanelServices
   configUpdateServices?: ConfigUpdatePanelServices
+  setupDraftRepository?: SetupDraftRepository
 }
 
 const RELOAD_CONFIRMATION = 'アプリを再読み込みします。保存済みの大会データは削除されません。続行しますか？'
@@ -115,6 +125,7 @@ export function App({
   resetPersistentData,
   hostBackupServices,
   configUpdateServices: injectedConfigUpdateServices,
+  setupDraftRepository: injectedSetupDraftRepository,
 }: AppProps = {}) {
   const [mode, setMode] = useState<AppMode>(null)
   const [hostTab, setHostTab] = useState<HostTab>('CONFIG')
@@ -164,6 +175,63 @@ export function App({
       return result
     },
   }), [browserConfigRepository, configRepository, resolvedConfigRepository])
+  const browserSetupDraftRepository = useMemo(() => new BrowserSetupDraftRepository(appDatabase), [appDatabase])
+  const setupDraftRepository = injectedSetupDraftRepository ?? browserSetupDraftRepository
+  const courtAssignmentServices = useMemo(() => createCourtAssignmentService(appDatabase), [appDatabase])
+  const courtTaskServices = useMemo(() => createCourtTaskService(appDatabase), [appDatabase])
+
+  const [hostSnapshot, setHostSnapshot] = useState<TournamentConfigSnapshot | undefined>()
+  const [editNotice, setEditNotice] = useState(false)
+  const [courtAssignment, setCourtAssignment] = useState<CourtAssignment | null>(null)
+  const [courtSnapshot, setCourtSnapshot] = useState<TournamentConfigSnapshot | undefined>()
+  const [courtTasks, setCourtTasks] = useState<CourtTaskCard[]>([])
+  const [courtEntryTask, setCourtEntryTask] = useState<{ scoringSessionId: ScoringSessionId; taskLabel: string; correctionOfResultId?: ResultId } | null>(null)
+
+  const tournamentConfigApplyFlow = useMemo(() => ({
+    service: createTournamentConfigApplyService({
+      repository: editorConfigRepository,
+      getCurrentSnapshot: () => hostSnapshot ?? null,
+    }),
+    metadata: { operator: operatorName, createdAt: new Date().toISOString(), changeClass: 'SCORING' as const },
+  }), [editorConfigRepository, hostSnapshot, operatorName])
+
+  useEffect(() => {
+    if (!activeTournamentId) {
+      setHostSnapshot(undefined)
+      return
+    }
+    let cancelled = false
+    void resolvedConfigRepository.loadCurrent(activeTournamentId).then((snapshot) => {
+      if (!cancelled) setHostSnapshot(snapshot)
+    })
+    return () => { cancelled = true }
+  }, [activeTournamentId, resolvedConfigRepository, knownConfigVersion])
+
+  const refreshCourtState = useMemo(() => async () => {
+    const assignment = await courtAssignmentServices.load()
+    let snapshot: TournamentConfigSnapshot | undefined
+    try {
+      const tournament = assignment
+        ? await resolvedConfigRepository.loadCurrent(assignment.tournamentId)
+        : undefined
+      snapshot = tournament
+    } catch {
+      snapshot = undefined
+    }
+    setCourtSnapshot(snapshot)
+    const validAssignment = assignment && snapshot ? assignment : null
+    setCourtAssignment(validAssignment)
+    if (validAssignment) {
+      setCourtTasks(await courtTaskServices.listAssignedTasks(validAssignment))
+    } else {
+      setCourtTasks([])
+    }
+  }, [courtAssignmentServices, courtTaskServices, resolvedConfigRepository])
+
+  useEffect(() => {
+    if (mode !== 'COURT') return
+    void refreshCourtState()
+  }, [mode, refreshCourtState, knownConfigVersion])
 
   useEffect(() => {
     let cancelled = false
@@ -222,6 +290,31 @@ export function App({
     setKnownConfigVersionId(result.configVersionId)
   }
   const returnToModeSelection = () => { setMode(null); setHostTab('CONFIG') }
+  const handleOpenSettingsStage = (_step: SetupStep) => setEditNotice(true)
+  const handleAssignmentSubmit = async (input: { courtStationId: CourtStationId; competitionId?: CompetitionId; source: 'QR' | 'MANUAL' }) => {
+    if (!courtSnapshot) throw new Error('大会の設定がありません。')
+    await courtAssignmentServices.validateAndSave({ tournamentId: courtSnapshot.tournament.tournamentId, ...input })
+    await refreshCourtState()
+  }
+  const handleChangeAssignment = async () => {
+    await courtAssignmentServices.clear()
+    setCourtEntryTask(null)
+    await refreshCourtState()
+  }
+  const handleOpenTask = (scoringSessionId: ScoringSessionId) => {
+    const task = courtTasks.find((item) => item.scoringSessionId === scoringSessionId)
+    if (!task) return
+    const isNewEntry = task.state === 'NEXT' || task.state === 'LATER'
+    setCourtEntryTask({
+      scoringSessionId,
+      taskLabel: task.taskLabel,
+      ...(isNewEntry ? {} : { correctionOfResultId: task.resultId }),
+    })
+  }
+  const handleResultSaved = () => {
+    setCourtEntryTask(null)
+    void refreshCourtState()
+  }
   const releaseGateActive = Boolean(releaseGate.error && knownConfigVersionId)
   const releaseGateBlocksMode = Boolean(
     releaseGateActive && !(mode === 'HOST' && hostTab === 'BACKUP'),
@@ -252,11 +345,32 @@ export function App({
       {hostTab === 'SCORING' ? (
         <HostScoringDashboard service={hostScoringServices} />
       ) : hostTab === 'CONFIG' ? (
-        <>
-          <TournamentConfigEditor repository={editorConfigRepository} tournamentId={activeTournamentId} operatorName={operatorName} />
-          <ConfigFilePanel services={configFileServices} operatorName={operatorName} deviceId={deviceId} onActivated={handleConfigFileActivated} />
-          <ConfigUpdatePanel mode="HOST" services={configUpdateServices} operatorName={operatorName} deviceId={deviceId} onActivated={handleConfigUpdateActivated} />
-        </>
+        <Stack spacing={2}>
+          <Typography component="h2" variant="h5">大会設定</Typography>
+          {editNotice ? (
+            <Chip
+              label="この項目の編集は「詳細管理」のJSON編集から行えます。"
+              onDelete={() => setEditNotice(false)}
+            />
+          ) : null}
+          {activeTournamentId && hostSnapshot ? (
+            <TournamentSettingsHome
+              snapshot={hostSnapshot}
+              onOpenStage={handleOpenSettingsStage}
+              advancedManagement={<>
+                <ConfigFilePanel services={configFileServices} operatorName={operatorName} deviceId={deviceId} onActivated={handleConfigFileActivated} />
+                <ConfigUpdatePanel mode="HOST" services={configUpdateServices} operatorName={operatorName} deviceId={deviceId} onActivated={handleConfigUpdateActivated} />
+              </>}
+            />
+          ) : (
+            <TournamentSetupWizard
+              repository={setupDraftRepository}
+              onCancel={() => {}}
+              onReadyToApply={() => {}}
+              applyFlow={tournamentConfigApplyFlow}
+            />
+          )}
+        </Stack>
       ) : hostTab === 'QR' ? (
         <TransferDemo mode="HOST" deviceId={deviceId} />
       ) : (
@@ -269,7 +383,35 @@ export function App({
         <div><h1>コートモード</h1><p>競技結果を端末内に記録します。</p></div>
         <button type="button" onClick={returnToModeSelection}>モード選択へ戻る</button>
       </div>
-      <CourtScoringSession services={courtResultServices} />
+      {courtAssignment && courtSnapshot ? (
+        courtEntryTask ? (
+          <ResultEntryScreen
+            services={courtResultServices}
+            scoringSessionId={courtEntryTask.scoringSessionId}
+            correctionOfResultId={courtEntryTask.correctionOfResultId}
+            operator={operatorName}
+            taskLabel={courtEntryTask.taskLabel}
+            onSaved={handleResultSaved}
+            onCancel={() => setCourtEntryTask(null)}
+          />
+        ) : (
+          <CourtTaskHome
+            tournamentName={courtSnapshot.tournament.name}
+            courtLabel={courtSnapshot.courtStations.find((station) => station.courtStationId === courtAssignment.courtStationId)?.label ?? ''}
+            competitionLabel={courtSnapshot.competitions.find((competition) => competition.competitionId === courtAssignment.competitionId)?.name}
+            tasks={courtTasks}
+            onOpenTask={handleOpenTask}
+            onChangeAssignment={() => { void handleChangeAssignment() }}
+          />
+        )
+      ) : (
+        <CourtAssignmentPanel
+          hasActiveConfig={Boolean(courtSnapshot)}
+          courtStations={(courtSnapshot?.courtStations ?? []).map((station) => ({ courtStationId: station.courtStationId, label: station.label }))}
+          competitions={(courtSnapshot?.competitions ?? []).map((competition) => ({ competitionId: competition.competitionId, name: competition.name }))}
+          onSubmit={handleAssignmentSubmit}
+        />
+      )}
       <ConfigUpdatePanel mode="COURT" services={configUpdateServices} operatorName={operatorName} deviceId={deviceId} onActivated={handleConfigUpdateActivated} />
       <TransferDemo mode="COURT" deviceId={deviceId} />
       <CourtTransferHistory services={courtTransferHistoryServices} />

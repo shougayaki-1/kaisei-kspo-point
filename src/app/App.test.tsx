@@ -2,9 +2,34 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { ConfigRepository } from '../db/config-repository'
 import type { PwaRuntime, PwaRuntimeSnapshot } from '../pwa/runtime'
+import { EXCHANGE_FESTIVAL_TEMPLATE } from '../config/setup/builtin-templates'
+import type { SetupDraftRepository, TournamentSetupDraft } from '../config/setup/setup-types'
 import { App, loadHostBootstrapState } from './App'
 import type { ConfigVersionRecord } from '../db/schema'
 import type { ConfigUpdatePanelServices } from './ConfigUpdatePanel'
+
+function readyToApplySetupDraftRepository(): SetupDraftRepository {
+  const draft: TournamentSetupDraft = {
+    draftFormatVersion: 2,
+    draftId: 'app-test-draft',
+    createdAt: '2026-08-24T00:00:00Z',
+    updatedAt: '2026-08-24T00:00:00Z',
+    currentStep: 'OPERATIONS_CHECK',
+    source: { type: 'STANDARD', templateId: EXCHANGE_FESTIVAL_TEMPLATE.templateId },
+    tournament: { name: '開成運動交流祭' },
+    teams: [{ teamKey: 'team-red', name: '赤組' }, { teamKey: 'team-blue', name: '青組' }],
+    courtStations: [{ stationKey: 'court-a', label: 'Aコート', displayOrder: 0 }, { stationKey: 'court-b', label: 'Bコート', displayOrder: 1 }],
+    competitions: structuredClone(EXCHANGE_FESTIVAL_TEMPLATE.competitions),
+  }
+  return {
+    loadSetupDraft: vi.fn(async () => structuredClone(draft)),
+    saveSetupDraft: vi.fn(async () => {}),
+    clearSetupDraft: vi.fn(async () => {}),
+    loadEditDraft: vi.fn(async () => ({ status: 'NONE' as const })),
+    saveEditDraft: vi.fn(async () => {}),
+    clearEditDraft: vi.fn(async () => {}),
+  }
+}
 
 function configRepository(): Pick<ConfigRepository, 'loadCurrent' | 'apply'> {
   let version = 0
@@ -122,14 +147,14 @@ describe('App', () => {
     expect(screen.getByLabelText('Device diagnostics')).toBeInTheDocument()
   })
 
-  it('shows tournament configuration and QR receive tabs in Host mode', () => {
+  it('shows tournament configuration and QR receive tabs in Host mode', async () => {
     render(<App configRepository={configRepository()} />)
     fireEvent.click(screen.getByRole('button', { name: '本部モード' }))
 
     expect(screen.getByRole('button', { name: '大会設定' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'QR受信' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '大会設定' })).toBeInTheDocument()
-    expect(screen.getByLabelText('新規大会名')).toBeInTheDocument()
+    expect(await screen.findByText('大会セットアップ')).toBeInTheDocument()
   })
 
   it('switches Host mode back to the existing QR receive flow', async () => {
@@ -149,6 +174,14 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: '大会設定' })).not.toBeInTheDocument()
   })
 
+  it('guides Court mode to wait for a configuration before assignment is possible', async () => {
+    render(<App configRepository={configRepository()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'コートモード' }))
+
+    expect(await screen.findByText(/設定が届いていません/)).toBeInTheDocument()
+    expect(screen.queryByText('担当を変更')).not.toBeInTheDocument()
+  })
+
   it('keeps Display mode read-only and hides Host/Court destructive and write surfaces', async () => {
     render(<App configRepository={configRepository()} pwaRuntime={waitingPwaRuntime()} />)
     fireEvent.click(screen.getByRole('button', { name: '表示モード' }))
@@ -163,24 +196,20 @@ describe('App', () => {
   })
 
   it('updates the status bar when a ConfigVersion is applied', async () => {
-    render(<App configRepository={configRepository()} />)
+    render(<App configRepository={configRepository()} setupDraftRepository={readyToApplySetupDraftRepository()} />)
     fireEvent.click(screen.getByRole('button', { name: '本部モード' }))
-    fireEvent.change(screen.getByLabelText('新規大会名'), { target: { value: '開成運動交流祭' } })
-    fireEvent.click(screen.getByRole('button', { name: '新しい大会を作成' }))
-    fireEvent.click(screen.getByRole('button', { name: '設定を適用' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'この内容で大会を作成する' }))
 
     const statusBar = screen.getByLabelText('端末状態')
     expect(await within(statusBar).findByText('Config v1')).toBeInTheDocument()
   })
 
   it('blocks event operations when an active ConfigVersion has no embedded release SHA', async () => {
-    render(<App configRepository={configRepositoryWithActiveVersion()} />)
+    render(<App configRepository={configRepositoryWithActiveVersion()} setupDraftRepository={readyToApplySetupDraftRepository()} />)
     fireEvent.click(screen.getByRole('button', { name: '本部モード' }))
-    fireEvent.change(screen.getByLabelText('新規大会名'), { target: { value: '開成運動交流祭' } })
-    fireEvent.click(screen.getByRole('button', { name: '新しい大会を作成' }))
-    fireEvent.click(screen.getByRole('button', { name: '設定を適用' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'この内容で大会を作成する' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/release SHA|埋め込まれた/i)
+    expect(await screen.findByText(/release SHA|埋め込まれた/i)).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'データ管理' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'バックアップ/復元へ' }))
     expect(await screen.findByRole('heading', { name: '本部バックアップ・復元' })).toBeInTheDocument()

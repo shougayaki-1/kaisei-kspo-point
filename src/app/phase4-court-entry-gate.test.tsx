@@ -11,9 +11,10 @@ function configRepository(): Pick<ConfigRepository, 'loadCurrent' | 'apply'> {
 }
 
 describe('Phase 4 Court production entry gate', () => {
-  it('exposes production ScoringSession selection in Court mode instead of QR transfer alone', () => {
+  it('exposes a production Court assignment/task entry surface instead of QR transfer alone', async () => {
     render(<App configRepository={configRepository()} />)
     fireEvent.click(screen.getByRole('button', { name: 'コートモード' }))
-    expect(screen.getByRole('combobox', { name: 'ScoringSession' })).toBeInTheDocument()
+    expect(await screen.findByText(/設定が届いていません/)).toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: 'ScoringSession' })).not.toBeInTheDocument()
   })
 })
