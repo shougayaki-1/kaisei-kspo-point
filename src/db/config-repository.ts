@@ -1,4 +1,4 @@
-import { createId, type TournamentId } from '../domain/ids'
+import { createId, type ScoringSessionId, type TournamentId } from '../domain/ids'
 import {
   canonicalizeDecimalInput,
   canonicalizeExactValue,
@@ -20,6 +20,7 @@ import {
 } from '../config/config-version'
 import type { TournamentConfigSnapshot } from '../config/tournament-config'
 import { validateTournamentConfig } from '../config/tournament-config'
+import { analyzeConfigIdentityImpact, type ConfigIdentityImpactIssue } from '../config/config-identity-impact'
 import type { AppDatabase } from './database'
 import type { AuditEventRecord, ConfigChangeClass, ConfigVersionRecord } from './schema'
 import type { Tournament } from '../domain/tournament'
@@ -54,6 +55,16 @@ export class ScoringRegressionError extends Error {
     const detail = results.map((result) => result.message).filter(Boolean).join('; ')
     super(detail ? `scoring regression approval required: ${detail}` : 'scoring regression approval required')
     this.name = 'ScoringRegressionError'
+  }
+}
+
+export class ConfigIdentityImpactError extends Error {
+  constructor(public readonly issues: ConfigIdentityImpactIssue[]) {
+    const detail = issues
+      .map((issue) => `${issue.competitionLabel} / ${issue.taskLabel}`)
+      .join('; ')
+    super(`結果が保存済みのタスクの構成は変更できません: ${detail}`)
+    this.name = 'ConfigIdentityImpactError'
   }
 }
 
@@ -407,6 +418,19 @@ export class ConfigRepository {
     const active = await this.getActiveVersion(tournamentId)
 
     if (active) {
+      const resultCounts = new Map<ScoringSessionId, number>()
+      for (const session of active.snapshot.scoringSessions) {
+        const count = await this.db.results
+          .where('scoringSessionId')
+          .equals(session.scoringSessionId)
+          .count()
+        if (count > 0) resultCounts.set(session.scoringSessionId, count)
+      }
+      if (resultCounts.size > 0) {
+        const impact = analyzeConfigIdentityImpact(active.snapshot, normalizedInput, resultCounts)
+        if (impact.blocked) throw new ConfigIdentityImpactError(impact.issues)
+      }
+
       const activeTestCases = new Map(active.snapshot.scoringTestCases.map((testCase) => [testCase.testCaseId, testCase]))
       const removedTestCases = active.snapshot.scoringTestCases.filter(
         (testCase) => !normalizedInput.scoringTestCases.some((candidate) => candidate.testCaseId === testCase.testCaseId),

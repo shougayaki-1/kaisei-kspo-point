@@ -11,8 +11,9 @@ import type {
   TournamentId,
 } from '../domain/ids'
 import type { TournamentConfigSnapshot } from '../config/tournament-config'
+import type { Result } from '../domain/result'
 import { createDatabase, type AppDatabase } from './database'
-import { ConfigRepository } from './config-repository'
+import { ConfigIdentityImpactError, ConfigRepository } from './config-repository'
 
 const openDatabases: AppDatabase[] = []
 
@@ -275,5 +276,56 @@ describe('ConfigRepository', () => {
     expect((await repository.loadCurrent(first.tournament.tournamentId))?.tournament.name).toBe('rollback大会')
     expect((await db.teams.get(first.teams[0].teamId))?.name).toBe('1組')
     expect((await repository.listVersions(first.tournament.tournamentId)).map((item) => item.version)).toEqual([1])
+  })
+
+  it('blocks a v2 apply that changes the topology of a result-bearing task', async () => {
+    const db = makeDb()
+    const repository = new ConfigRepository(db)
+    const first = snapshotFor('identity')
+    await repository.apply(first, metadata())
+
+    const result: Result = {
+      resultId: 'identity-result-1' as never,
+      tournamentId: first.tournament.tournamentId,
+      competitionId: first.competitions[0].competitionId,
+      scoringSessionId: first.scoringSessions[0].scoringSessionId,
+      currentRevisionId: null,
+      createdAt: '2026-08-19T12:05:00+09:00',
+      createdByDeviceId: 'device-1' as never,
+    }
+    await db.results.add(result)
+
+    const second = snapshotFor('identity', '第2版')
+    second.scoringSessions[0].leadCourtStationId = `${second.courtStations[0].courtStationId}-other` as never
+    second.courtStations.push({
+      courtStationId: `${second.courtStations[0].courtStationId}-other` as never,
+      tournamentId: second.tournament.tournamentId,
+      label: 'Bコート',
+      displayOrder: 2,
+    })
+
+    await expect(
+      repository.apply(second, metadata('2026-08-19T12:30:00+09:00')),
+    ).rejects.toThrow(ConfigIdentityImpactError)
+    expect((await repository.listVersions(first.tournament.tournamentId)).map((item) => item.version)).toEqual([1])
+  })
+
+  it('allows a v2 apply that changes result-bearing task topology once its Results are gone', async () => {
+    const db = makeDb()
+    const repository = new ConfigRepository(db)
+    const first = snapshotFor('reset')
+    await repository.apply(first, metadata())
+
+    const second = snapshotFor('reset', '第2版')
+    second.scoringSessions[0].leadCourtStationId = `${second.courtStations[0].courtStationId}-other` as never
+    second.courtStations.push({
+      courtStationId: `${second.courtStations[0].courtStationId}-other` as never,
+      tournamentId: second.tournament.tournamentId,
+      label: 'Bコート',
+      displayOrder: 2,
+    })
+
+    const applied = await repository.apply(second, metadata('2026-08-19T12:30:00+09:00'))
+    expect(applied.version).toBe(2)
   })
 })
