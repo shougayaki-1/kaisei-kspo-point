@@ -117,6 +117,17 @@ describe('TournamentConfigEditor', () => {
     expect(screen.getByLabelText('入力範囲 1')).toHaveValue('WHOLE_SLOT')
   })
 
+  it('prevents adding a scoring session before its slot has a CourtRun', () => {
+    render(<TournamentConfigEditor repository={repository()} operatorName="本部担当" />)
+    createTournament()
+    fireEvent.click(screen.getByRole('button', { name: '競技を追加' }))
+    expandFirstCompetition()
+
+    fireEvent.click(screen.getByRole('button', { name: '展開を追加' }))
+
+    expect(screen.getByRole('button', { name: '入力セッションを追加' })).toBeDisabled()
+  })
+
   it('shows validation errors and does not apply an incomplete scoring rule', () => {
     const repo = repository()
     render(<TournamentConfigEditor repository={repo} operatorName="本部担当" />)

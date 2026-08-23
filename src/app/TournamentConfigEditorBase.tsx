@@ -908,6 +908,7 @@ export function TournamentConfigEditor({
                           <strong>入力セッション</strong>
                           <button
                             type="button"
+                            disabled={runs.length === 0}
                             onClick={() => setDraft((current) => current
                               ? addScoringSession(current, {
                                   competitionId: competition.competitionId,
