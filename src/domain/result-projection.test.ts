@@ -234,4 +234,19 @@ describe('projectResultRevisions', () => {
     expect(projection.effectiveRevision?.revisionId).toBe(created.revision.revisionId)
     expect(projection.conflictState.status).toBe('RESOLVED')
   })
+
+  it('rejects a stored resolution that falsely claims no common ancestor when one actually exists', () => {
+    const a = revision('a')
+    const b = revision('b', ['a'])
+    const c = revision('c', ['a'])
+    const created = createConflictResolution([a, b, c], [], {
+      operator: '本部担当',
+      createdAt: '2026-08-19T11:00:00+09:00',
+      choice: { kind: 'SELECT_REVISION', selectedRevisionId: b.revisionId },
+    })
+    const tamperedResolution = { ...created.resolution, commonConfirmedAncestorRevisionId: null }
+
+    expect(() => projectResultRevisions([a, b, c, created.revision], [tamperedResolution]))
+      .toThrow(/no common ancestor but one exists/)
+  })
 })

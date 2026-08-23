@@ -1,6 +1,7 @@
 import { createId, type ResultId, type RevisionId } from './ids'
 import type { InputMode, RawResultData, ResultRevision } from './result'
 import {
+  findLatestCommonConfirmedAncestor,
   inspectRevisionGraph,
   isRevisionAncestor,
 } from './revision-graph'
@@ -113,11 +114,28 @@ function validateResolutionRecord(
   }
 
   for (const candidateId of candidates) {
-    const isValidAncestry = commonAncestorId === null || isRevisionAncestor(revisions, commonAncestorId, candidateId)
-    if (!byId.has(candidateId) || !isValidAncestry) {
+    if (!byId.has(candidateId)) {
       throw new ResultProjectionError(
         'INVALID_RESOLUTION_RECORD',
         `Resolution ${resolution.resolutionId} has an invalid candidate/common ancestor relationship`,
+      )
+    }
+    if (commonAncestorId !== null && !isRevisionAncestor(revisions, commonAncestorId, candidateId)) {
+      throw new ResultProjectionError(
+        'INVALID_RESOLUTION_RECORD',
+        `Resolution ${resolution.resolutionId} has an invalid candidate/common ancestor relationship`,
+      )
+    }
+  }
+
+  // A stored null must reflect a genuine virtual-root conflict (candidates share no
+  // real ancestor), not merely an unverified claim — recompute it from the graph.
+  if (commonAncestorId === null) {
+    const actualCommonAncestor = findLatestCommonConfirmedAncestor(revisions, candidates)
+    if (actualCommonAncestor !== null) {
+      throw new ResultProjectionError(
+        'INVALID_RESOLUTION_RECORD',
+        `Resolution ${resolution.resolutionId} claims no common ancestor but one exists`,
       )
     }
   }

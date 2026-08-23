@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   Accordion,
   AccordionDetails,
@@ -186,6 +186,7 @@ export function App({
   const [courtSnapshot, setCourtSnapshot] = useState<TournamentConfigSnapshot | undefined>()
   const [courtTasks, setCourtTasks] = useState<CourtTaskCard[]>([])
   const [courtEntryTask, setCourtEntryTask] = useState<{ scoringSessionId: ScoringSessionId; taskLabel: string; correctionOfResultId?: ResultId } | null>(null)
+  const courtRefreshRequestIdRef = useRef(0)
 
   const tournamentConfigApplyFlow = useMemo(() => ({
     service: createTournamentConfigApplyService({
@@ -208,6 +209,7 @@ export function App({
   }, [activeTournamentId, resolvedConfigRepository, knownConfigVersion])
 
   const refreshCourtState = useMemo(() => async () => {
+    const requestId = ++courtRefreshRequestIdRef.current
     const assignment = await courtAssignmentServices.load()
     let snapshot: TournamentConfigSnapshot | undefined
     try {
@@ -218,14 +220,12 @@ export function App({
     } catch {
       snapshot = undefined
     }
-    setCourtSnapshot(snapshot)
     const validAssignment = assignment && snapshot ? assignment : null
+    const tasks = validAssignment ? await courtTaskServices.listAssignedTasks(validAssignment) : []
+    if (requestId !== courtRefreshRequestIdRef.current) return
+    setCourtSnapshot(snapshot)
     setCourtAssignment(validAssignment)
-    if (validAssignment) {
-      setCourtTasks(await courtTaskServices.listAssignedTasks(validAssignment))
-    } else {
-      setCourtTasks([])
-    }
+    setCourtTasks(tasks)
   }, [courtAssignmentServices, courtTaskServices, resolvedConfigRepository])
 
   useEffect(() => {
