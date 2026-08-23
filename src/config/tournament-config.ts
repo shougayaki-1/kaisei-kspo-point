@@ -203,6 +203,14 @@ function validateScoringTestCase(
   entries: Map<string, CompetitionEntry>,
 ): void {
   checkRequiredText(issues, testCase.name, '得点テスト名', testCase.testCaseId)
+  if (!testCase.methodKey.trim()) {
+    error(
+      issues,
+      'MISSING_SCORING_TEST_METHOD',
+      '得点テストの結果入力方式を指定してください。',
+      testCase.testCaseId,
+    )
+  }
   if (!competitions.has(testCase.competitionId)) {
     error(
       issues,

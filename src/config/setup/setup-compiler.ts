@@ -11,8 +11,9 @@ import type {
 } from '../../domain/ids'
 import type { InputScope } from '../../domain/tournament'
 import type { InputSchema } from '../input-schema'
-import type { ResultEntryPolicy } from '../result-entry-policy'
-import { canonicalizeExactValue, isDecimalInputValue, sumExactValues, type ExactValue } from '../../domain/exact-decimal'
+import type { ResultEntryMethodDefinition, ResultEntryPolicy } from '../result-entry-policy'
+import { canonicalizeExactValue } from '../../domain/exact-decimal'
+import { projectResultEntry } from '../../domain/result-entry-projection'
 import type { ScoringTestCase } from '../scoring-test-case'
 import type { TournamentConfigSnapshot } from '../tournament-config'
 import { autoAssignCompetitionSchedule } from './schedule-assignment'
@@ -206,57 +207,46 @@ function compileScoringProfile(
   }
 }
 
-function representativeProjectionValue(
-  method: SetupCompetitionDraft['methods'][number],
-  fields: Record<string, string | number | boolean>,
-): ExactValue {
-  const exactField = (fieldKey: string): ExactValue => {
-    const value = fields[fieldKey]
-    if (!isDecimalInputValue(value)) throw new Error(`Representative input for ${method.methodKey}.${fieldKey} must be numeric`)
-    return canonicalizeExactValue(value)
-  }
-  switch (method.projection.type) {
-    case 'SINGLE_FIELD':
-    case 'DIRECT_RANK':
-      return exactField(method.projection.fieldKey)
-    case 'SUM_FIELDS':
-      return sumExactValues(method.projection.fieldKeys.map(exactField))
-    case 'DIRECT_OUTCOME': {
-      const value = fields[method.projection.fieldKey]
-      if (value === 'WIN') return 1
-      if (value === 'DRAW') return 0
-      if (value === 'LOSS') return -1
-      throw new Error(`Representative input for ${method.methodKey}.${method.projection.fieldKey} must be WIN, DRAW, or LOSS`)
-    }
-  }
-}
-
 function compileScoringTestCases(
   draft: TournamentSetupDraft,
   competition: SetupCompetitionDraft,
   competitionId: CompetitionId,
   entryIds: Map<string, CompetitionEntryId>,
+  policy: ResultEntryPolicy,
+  schemas: InputSchema[],
   options: SetupCompilerOptions,
 ): ScoringTestCase[] {
-  const methods = new Map(competition.methods.map((method) => [method.methodKey, method]))
+  const methods = new Map(policy.methods.map((method) => [method.methodKey, method]))
+  const schemasById = new Map(schemas.map((schema) => [schema.inputSchemaId, schema]))
   return competition.scoringTests.flatMap((test) => competition.allowedMethodKeys.map((methodKey) => {
     const method = methods.get(methodKey)
+    const schema = method ? schemasById.get(method.inputSchemaId) : undefined
     const inputs = test.methodInputs[methodKey]
-    if (!method || !inputs) throw new Error(`Representative input is missing for result method: ${methodKey}`)
+    if (!method || !schema || !inputs) throw new Error(`Representative input is missing for result method: ${methodKey}`)
     const inputByTeam = new Map(inputs.map((input) => [input.teamKey, input]))
+    const rawValues = inputs.map((input) => {
+      const entryId = entryIds.get(`${input.teamKey}:group-1`)
+      if (!entryId) throw new Error(`Representative input references unknown team: ${input.teamKey}`)
+      return { entryId, fields: structuredClone(input.fields) }
+    })
+    const projected = projectResultEntry({
+      method: method as ResultEntryMethodDefinition,
+      schema,
+      entries: Object.fromEntries(rawValues.map((value) => [value.entryId, value.fields])),
+    })
     const rounds = [{
       roundId: `${test.testKey}:${methodKey}`,
       label: test.name,
-      values: inputs.map((input) => {
-        const entryId = entryIds.get(`${input.teamKey}:group-1`)
-        if (!entryId) throw new Error(`Representative input references unknown team: ${input.teamKey}`)
-        return { entryId, value: representativeProjectionValue(method, input.fields) }
-      }),
+      rawValues,
     }]
     const expected = Object.keys(test.expectedRanks).sort().map((teamKey) => {
       const entryId = entryIds.get(`${teamKey}:group-1`)
       if (!entryId || !inputByTeam.has(teamKey)) throw new Error(`Representative expectation references unknown team: ${teamKey}`)
       const rank = test.expectedRanks[teamKey]!
+      const actualRank = projected.entries.find((value) => value.entryId === entryId)?.rank
+      if (actualRank !== rank) {
+        throw new Error(`Representative input for ${methodKey} does not produce the expected rank for ${teamKey}`)
+      }
       const points = test.expectedAwardPoints[teamKey]
       if (points === undefined) throw new Error(`Representative award points are missing for team: ${teamKey}`)
       return { entryId, roundRanks: [rank], roundAwardScores: [canonicalizeExactValue(points)], aggregateScore: canonicalizeExactValue(points) }
@@ -318,7 +308,15 @@ export function compileTournamentSetup(
     snapshot.inputSchemas.push(...methods.schemas)
     snapshot.resultEntryPolicies.push(methods.policy)
     snapshot.scoringProfiles.push(compileScoringProfile(draft, competition, competitionId, resolved))
-    snapshot.scoringTestCases.push(...compileScoringTestCases(draft, competition, competitionId, entries.ids, resolved))
+    snapshot.scoringTestCases.push(...compileScoringTestCases(
+      draft,
+      competition,
+      competitionId,
+      entries.ids,
+      methods.policy,
+      methods.schemas,
+      resolved,
+    ))
   }
   return snapshot
 }

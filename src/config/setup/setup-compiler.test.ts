@@ -138,7 +138,25 @@ describe('compileTournamentSetup', () => {
     const testCases = snapshot.scoringTestCases
 
     expect(testCases.map((testCase) => testCase.methodKey).sort()).toEqual(['detail', 'outcome', 'score'])
-    expect(testCases.every((testCase) => runScoringTestCase(testCase, profile, entries).status === 'PASS')).toBe(true)
+    expect(testCases.every((testCase) => {
+      const method = policy.methods.find((item) => item.methodKey === testCase.methodKey)
+      const schema = snapshot.inputSchemas.find((item) => item.inputSchemaId === method?.inputSchemaId)
+      return !!method && !!schema && runScoringTestCase(testCase, profile, entries, { method, schema }).status === 'PASS'
+    })).toBe(true)
+    expect(testCases.map((testCase) => testCase.rounds[0]?.rawValues)).toEqual([
+      [
+        { entryId: 'competitionEntry:exchange-2026:tug-of-war:team-red:group-1', fields: { first: 4, second: 6 } },
+        { entryId: 'competitionEntry:exchange-2026:tug-of-war:team-blue:group-1', fields: { first: 2, second: 3 } },
+      ],
+      [
+        { entryId: 'competitionEntry:exchange-2026:tug-of-war:team-red:group-1', fields: { score: 10 } },
+        { entryId: 'competitionEntry:exchange-2026:tug-of-war:team-blue:group-1', fields: { score: 5 } },
+      ],
+      [
+        { entryId: 'competitionEntry:exchange-2026:tug-of-war:team-red:group-1', fields: { outcome: 'WIN' } },
+        { entryId: 'competitionEntry:exchange-2026:tug-of-war:team-blue:group-1', fields: { outcome: 'LOSS' } },
+      ],
+    ])
     const expected = [
       { entryId: 'competitionEntry:exchange-2026:tug-of-war:team-blue:group-1', roundRanks: [2], roundAwardScores: [20], aggregateScore: 20 },
       { entryId: 'competitionEntry:exchange-2026:tug-of-war:team-red:group-1', roundRanks: [1], roundAwardScores: [30], aggregateScore: 30 },

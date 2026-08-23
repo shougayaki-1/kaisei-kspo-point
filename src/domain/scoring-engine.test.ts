@@ -105,6 +105,65 @@ describe('calculateRankedScores', () => {
 })
 
 describe('calculateScoringScenario', () => {
+  it('awards canonical projected ranks with the existing occupied-place tie rule', () => {
+    const result = calculateScoringScenario({
+      rounds: [{
+        roundId: 'final',
+        projected: [
+          { participantId: 'entry-1', rank: 1, comparisonValue: 10 },
+          { participantId: 'entry-2', rank: 1, comparisonValue: 10 },
+          { participantId: 'entry-3', rank: 3, comparisonValue: 7 },
+        ],
+      }],
+    }, profile())
+
+    expect(result.participants.map((participant) => ({
+      participantId: participant.participantId,
+      rank: participant.rounds[0]?.rank,
+      awardScore: participant.rounds[0]?.awardScore,
+      comparisonValue: participant.rounds[0]?.comparisonValue,
+    }))).toEqual([
+      { participantId: 'entry-1', rank: 1, awardScore: 25, comparisonValue: 10 },
+      { participantId: 'entry-2', rank: 1, awardScore: 25, comparisonValue: 10 },
+      { participantId: 'entry-3', rank: 3, awardScore: 10, comparisonValue: 7 },
+    ])
+  })
+
+  it('retains canonical match outcomes in projected scoring traces', () => {
+    const result = calculateScoringScenario({
+      rounds: [{
+        roundId: 'match',
+        projected: [
+          { participantId: 'entry-1', rank: 1, outcome: 'WIN' },
+          { participantId: 'entry-2', rank: 2, outcome: 'LOSS' },
+        ],
+      }],
+    }, profile())
+
+    expect(result.participants.map((participant) => ({
+      participantId: participant.participantId,
+      rank: participant.rounds[0]?.rank,
+      awardScore: participant.rounds[0]?.awardScore,
+      outcome: participant.rounds[0]?.outcome,
+    }))).toEqual([
+      { participantId: 'entry-1', rank: 1, awardScore: 30, outcome: 'WIN' },
+      { participantId: 'entry-2', rank: 2, awardScore: 20, outcome: 'LOSS' },
+    ])
+    expect(result.participants[0]?.rounds[0]?.trace).toContainEqual(
+      expect.objectContaining({ code: 'OUTCOME', label: '結果: WIN' }),
+    )
+  })
+
+  it('rejects scoring rounds that provide more than one input representation', () => {
+    expect(() => calculateScoringScenario({
+      rounds: [{
+        roundId: 'invalid',
+        values: [{ participantId: 'entry-1', value: 10 }],
+        projected: [{ participantId: 'entry-1', rank: 1 }],
+      }],
+    }, profile())).toThrow(/exactly one/i)
+  })
+
   it('sums award scores across rounds and records the aggregate expression', () => {
     const result = calculateScoringScenario(twoRoundScenario(), profile())
 

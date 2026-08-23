@@ -76,6 +76,46 @@ function awardForGroup(
   }
 }
 
+function calculateProjectedParticipants<TId extends string>(
+  input: NonNullable<ScoringScenario<TId>['rounds'][number]['projected']>,
+  profile: ScoringProfile,
+): ParticipantScoreResult<TId>[] {
+  const sorted = [...input].sort((left, right) => left.rank - right.rank || left.participantId.localeCompare(right.participantId))
+  const results: ParticipantScoreResult<TId>[] = []
+  let index = 0
+
+  while (index < sorted.length) {
+    const first = sorted[index]
+    if (!first) break
+    if (!Number.isInteger(first.rank) || first.rank < 1) throw new Error('Projected scoring rank must be a positive integer')
+
+    let end = index + 1
+    while (end < sorted.length && sorted[end]?.rank === first.rank) end += 1
+    const award = awardForGroup(profile, first.rank, end - index)
+
+    for (const item of sorted.slice(index, end)) {
+      results.push({
+        participantId: item.participantId,
+        rank: item.rank,
+        awardScore: award.score,
+        ...(item.comparisonValue !== undefined ? { comparisonValue: canonicalizeExactValue(item.comparisonValue) } : {}),
+        ...(item.outcome ? { outcome: item.outcome } : {}),
+        trace: [
+          ...(item.comparisonValue !== undefined
+            ? [{ code: 'INPUT', label: `比較値: ${serializeExactValue(canonicalizeExactValue(item.comparisonValue))}`, value: canonicalizeExactValue(item.comparisonValue) }]
+            : []),
+          ...(item.outcome ? [{ code: 'OUTCOME', label: `結果: ${item.outcome}` }] : []),
+          { code: 'RANK', label: `${item.rank}位`, value: item.rank },
+          ...award.trace,
+        ],
+      })
+    }
+    index = end
+  }
+
+  return results
+}
+
 export function calculateRankedParticipants<TId extends string>(
   input: RankedParticipantValue<TId>[],
   profile: ScoringProfile,
@@ -240,6 +280,11 @@ export function calculateScoringScenario<TId extends string>(
   const scoringRule = profile.scoringRule
 
   for (const round of scenario.rounds) {
+    const representations = [round.values, round.rawValues, round.projected]
+      .filter((value) => value !== undefined)
+    if (representations.length !== 1) {
+      throw new Error('Scoring round requires exactly one of values, rawValues, or projected')
+    }
     let ranked: ParticipantScoreResult<TId>[]
     if (scoringRule?.type === 'KING_DODGEBALL') {
       if (!round.rawValues) throw new Error('KING_DODGEBALL requires rawValues for every round')
@@ -259,8 +304,10 @@ export function calculateScoringScenario<TId extends string>(
       ranked = calculateRankedParticipants(derived, profile)
     } else if (round.values) {
       ranked = calculateRankedParticipants(round.values, profile)
+    } else if (round.projected) {
+      ranked = calculateProjectedParticipants(round.projected, profile)
     } else {
-      throw new Error('Scoring round requires values or rawValues')
+      throw new Error('Scoring round requires exactly one of values, rawValues, or projected')
     }
     for (const result of ranked) {
       const existing = participants.get(result.participantId) ?? {

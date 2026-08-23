@@ -248,7 +248,26 @@ export class ConfigRepository {
       const entries = normalized.competitionEntries.filter(
         (entry) => entry.competitionId === testCase.competitionId,
       )
-      return runScoringTestCase(testCase, profile, entries)
+      if (!testCase.rounds.some((round) => round.rawValues !== undefined)) {
+        return runScoringTestCase(testCase, profile, entries)
+      }
+      const policy = normalized.resultEntryPolicies.find(
+        (item) => item.competitionId === testCase.competitionId,
+      )
+      const method = policy?.methods.find((item) => item.methodKey === testCase.methodKey)
+      const schema = method
+        ? normalized.inputSchemas.find((item) => item.inputSchemaId === method.inputSchemaId)
+        : undefined
+      if (!method || !schema) {
+        return {
+          testCaseId: testCase.testCaseId,
+          status: 'INVALID' as const,
+          actual: [],
+          diffs: [],
+          message: `入力方式 ${testCase.methodKey} の定義またはInputSchemaがありません。`,
+        }
+      }
+      return runScoringTestCase(testCase, profile, entries, { method, schema })
     })
   }
 

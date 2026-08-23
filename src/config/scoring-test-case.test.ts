@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { CompetitionEntryId, CompetitionId, ScoringProfileId, TeamId } from '../domain/ids'
+import type { InputSchema } from './input-schema'
+import type { ResultEntryMethodDefinition } from './result-entry-policy'
 import type { ScoringProfile } from '../domain/scoring'
 import type { CompetitionEntry } from '../domain/tournament'
 import taihuFixture from './fixtures/2026-taihu-no-me.scoring.json'
@@ -60,7 +62,84 @@ function testCase(): ScoringTestCase {
   }
 }
 
+function methodContext(methodKey: 'detail' | 'score' | 'outcome'): {
+  method: ResultEntryMethodDefinition
+  schema: InputSchema
+} {
+  const definitions = {
+    detail: {
+      methodKey: 'detail', label: '綱を取った本数', kind: 'DETAIL' as const, inputMode: 'NUMBER' as const,
+      inputSchemaId: 'schema-detail', projection: { type: 'SUM_FIELDS' as const, fieldKeys: ['first', 'second'], direction: 'HIGHER_IS_BETTER' as const },
+      schema: { inputSchemaId: 'schema-detail', competitionId, version: 1, fields: [
+        { key: 'first', label: '1本目', type: 'NUMBER' as const, required: true, min: 0 },
+        { key: 'second', label: '2本目', type: 'NUMBER' as const, required: true, min: 0 },
+      ] },
+    },
+    score: {
+      methodKey: 'score', label: '競技内ポイント', kind: 'SCORE' as const, inputMode: 'NUMBER' as const,
+      inputSchemaId: 'schema-score', projection: { type: 'SINGLE_FIELD' as const, fieldKey: 'score', direction: 'HIGHER_IS_BETTER' as const },
+      schema: { inputSchemaId: 'schema-score', competitionId, version: 1, fields: [{ key: 'score', label: '競技内ポイント', type: 'NUMBER' as const, required: true, min: 0 }] },
+    },
+    outcome: {
+      methodKey: 'outcome', label: '勝敗', kind: 'OUTCOME' as const, inputMode: 'WIN_LOSS' as const,
+      inputSchemaId: 'schema-outcome', projection: { type: 'DIRECT_OUTCOME' as const, fieldKey: 'outcome' },
+      schema: { inputSchemaId: 'schema-outcome', competitionId, version: 1, fields: [{ key: 'outcome', label: '勝敗', type: 'WIN_LOSS' as const, required: true }] },
+    },
+  } satisfies Record<'detail' | 'score' | 'outcome', { methodKey: string; label: string; kind: ResultEntryMethodDefinition['kind']; inputMode: ResultEntryMethodDefinition['inputMode']; inputSchemaId: string; projection: ResultEntryMethodDefinition['projection']; schema: InputSchema }>
+  const definition = definitions[methodKey]
+  return { method: definition, schema: definition.schema }
+}
+
 describe('runScoringTestCase', () => {
+  it('projects DETAIL, SCORE, and OUTCOME inputs to the same ranks and tournament award scores', () => {
+    const cases: ScoringTestCase[] = [
+      {
+        testCaseId: 'detail-case', competitionId, methodKey: 'detail', name: '綱を取った本数',
+        rounds: [{ roundId: 'match', label: '決勝', rawValues: [
+          { entryId: entries[0].entryId, fields: { first: 4, second: 6 } },
+          { entryId: entries[1].entryId, fields: { first: 2, second: 3 } },
+        ] }],
+        expected: [
+          { entryId: entries[0].entryId, roundRanks: [1], roundAwardScores: [30], aggregateScore: 30, roundComparisonValues: [10] },
+          { entryId: entries[1].entryId, roundRanks: [2], roundAwardScores: [20], aggregateScore: 20, roundComparisonValues: [5] },
+        ],
+      },
+      {
+        testCaseId: 'score-case', competitionId, methodKey: 'score', name: '競技内ポイント',
+        rounds: [{ roundId: 'match', label: '決勝', rawValues: [
+          { entryId: entries[0].entryId, fields: { score: 10 } },
+          { entryId: entries[1].entryId, fields: { score: 5 } },
+        ] }],
+        expected: [
+          { entryId: entries[0].entryId, roundRanks: [1], roundAwardScores: [30], aggregateScore: 30 },
+          { entryId: entries[1].entryId, roundRanks: [2], roundAwardScores: [20], aggregateScore: 20 },
+        ],
+      },
+      {
+        testCaseId: 'outcome-case', competitionId, methodKey: 'outcome', name: '勝敗',
+        rounds: [{ roundId: 'match', label: '決勝', rawValues: [
+          { entryId: entries[0].entryId, fields: { outcome: 'WIN' } },
+          { entryId: entries[1].entryId, fields: { outcome: 'LOSS' } },
+        ] }],
+        expected: [
+          { entryId: entries[0].entryId, roundRanks: [1], roundAwardScores: [30], aggregateScore: 30, roundOutcomes: ['WIN'] },
+          { entryId: entries[1].entryId, roundRanks: [2], roundAwardScores: [20], aggregateScore: 20, roundOutcomes: ['LOSS'] },
+        ],
+      },
+    ]
+
+    const results = cases.map((testCase) => runScoringTestCase(
+      testCase,
+      profile(),
+      entries,
+      methodContext(testCase.methodKey as 'detail' | 'score' | 'outcome'),
+    ))
+
+    expect(results.map((result) => result.status)).toEqual(['PASS', 'PASS', 'PASS'])
+    expect(results[0]?.actual[0]?.roundComparisonValues).toEqual([10])
+    expect(results[0]?.actual[0]?.roundAwardScores).toEqual([30])
+  })
+
   it('passes when semantic ranks and scores match the saved expectation', () => {
     const result = runScoringTestCase(testCase(), profile(), entries)
 
@@ -141,7 +220,7 @@ describe('runScoringTestCase', () => {
       ],
     }
 
-    const result = runScoringTestCase(rawCase, rawProfile, entries)
+    const result = runScoringTestCase(rawCase, rawProfile, entries, methodContext('score'))
 
     expect(result.status).toBe('PASS')
     expect(result.calculationTraces?.[entries[0].entryId].rounds[0]).toEqual(

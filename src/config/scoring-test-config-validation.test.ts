@@ -29,7 +29,12 @@ function snapshot(): TournamentConfigSnapshot {
     scheduleSlots: [],
     courtRuns: [],
     scoringSessions: [],
-    inputSchemas: [],
+    inputSchemas: [{
+      inputSchemaId: 'schema-score',
+      competitionId,
+      version: 1,
+      fields: [{ key: 'score', label: '得点', type: 'NUMBER', required: true, min: 0 }],
+    }],
     scoringProfiles: [{
       scoringProfileId: 'profile-1' as ScoringProfileId,
       competitionId,
@@ -56,7 +61,19 @@ function snapshot(): TournamentConfigSnapshot {
         aggregateScore: 30,
       }],
     }],
-    resultEntryPolicies: [],
+    resultEntryPolicies: [{
+      competitionId,
+      defaultMethodKey: 'score',
+      allowedMethodKeys: ['score'],
+      methods: [{
+        methodKey: 'score',
+        label: '得点',
+        kind: 'SCORE',
+        inputMode: 'NUMBER',
+        inputSchemaId: 'schema-score',
+        projection: { type: 'SINGLE_FIELD', fieldKey: 'score', direction: 'HIGHER_IS_BETTER' },
+      }],
+    }],
   }
 }
 
@@ -76,6 +93,15 @@ describe('scoring test config validation', () => {
     config.scoringTestCases.push(structuredClone(config.scoringTestCases[0]))
 
     expect(errorCodes(config)).toContain('DUPLICATE_ID')
+  })
+
+  it('requires every persisted scoring test to name an allowed input method', () => {
+    const config = snapshot()
+    config.scoringTestCases[0].methodKey = ''
+
+    const codes = errorCodes(config)
+    expect(codes).toContain('MISSING_SCORING_TEST_METHOD')
+    expect(codes).toContain('UNKNOWN_SCORING_TEST_METHOD')
   })
 
   it('rejects an unknown competition and missing rounds', () => {
