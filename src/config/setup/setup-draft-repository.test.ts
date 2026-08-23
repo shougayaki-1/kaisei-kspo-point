@@ -20,11 +20,11 @@ function open(name: string): AppDatabase {
 
 function setupDraft(): TournamentSetupDraft {
   return {
-    draftFormatVersion: 1 as const,
+    draftFormatVersion: 2 as const,
     draftId: 'draft-setup-1',
     createdAt: '2026-08-21T09:00:00+09:00',
     updatedAt: '2026-08-21T09:05:00+09:00',
-    currentStep: 'COMPETITIONS' as const,
+    currentStep: 'OPERATIONS_CHECK' as const,
     tournament: {
       name: '開成運動交流祭',
       eventDate: '2026-10-12',
@@ -35,25 +35,22 @@ function setupDraft(): TournamentSetupDraft {
         name: '1組',
       },
     ],
-    templateSource: {
-      type: 'BUILT_IN' as const,
-      templateId: 'generic-ranking-v1',
-      templateVersion: 1,
-    },
+    source: { type: 'STANDARD' as const, templateId: 'exchange-festival-v2' },
+    courtStations: [{ stationKey: 'court-a', label: 'Aコート', displayOrder: 0 }],
     competitions: [
       {
         competitionKey: 'competition-1',
         name: '玉入れ',
         competitionKind: 'RANKING',
-        inputGrouping: 'WHOLE_ROUND',
+        inputGrouping: 'WHOLE_SLOT',
         rounds: 1,
         courts: 1,
         groupsPerTeam: 1,
-        scoring: {
-          inputType: 'RANK',
-          rankingDirection: 'MANUAL',
-          rankPoints: {},
-        },
+        defaultMethodKey: 'rank',
+        allowedMethodKeys: ['rank'],
+        methods: [{ methodKey: 'rank', label: '順位', kind: 'RANK', inputMode: 'RANK_MANUAL', fields: [{ key: 'rank', label: '順位', type: 'RANK', required: true, allowTies: true }], projection: { type: 'DIRECT_RANK', fieldKey: 'rank' } }],
+        rankPoints: { 1: 30 },
+        scoringTests: [{ testKey: 'case', name: '代表', methodInputs: { rank: [{ teamKey: 'team-1', fields: { rank: 1 } }] }, expectedRanks: { 'team-1': 1 }, expectedAwardPoints: { 'team-1': 30 } }],
       },
     ],
   }
@@ -109,11 +106,11 @@ describe('SetupDraftRepository', () => {
     const loaded = await repository.loadSetupDraft()
 
     expect(loaded).toEqual({
-      draftFormatVersion: 1,
+      draftFormatVersion: 2,
       draftId: 'draft-setup-1',
       createdAt: '2026-08-21T09:00:00+09:00',
       updatedAt: '2026-08-21T09:05:00+09:00',
-      currentStep: 'COMPETITIONS',
+      currentStep: 'OPERATIONS_CHECK',
       tournament: {
         name: '開成運動交流祭',
         eventDate: '2026-10-12',
@@ -124,25 +121,22 @@ describe('SetupDraftRepository', () => {
           name: '1組',
         },
       ],
-      templateSource: {
-        type: 'BUILT_IN',
-        templateId: 'generic-ranking-v1',
-        templateVersion: 1,
-      },
+      source: { type: 'STANDARD', templateId: 'exchange-festival-v2' },
+      courtStations: [{ stationKey: 'court-a', label: 'Aコート', displayOrder: 0 }],
       competitions: [
         {
           competitionKey: 'competition-1',
           name: '玉入れ',
           competitionKind: 'RANKING',
-          inputGrouping: 'WHOLE_ROUND',
+          inputGrouping: 'WHOLE_SLOT',
           rounds: 1,
           courts: 1,
           groupsPerTeam: 1,
-          scoring: {
-            inputType: 'RANK',
-            rankingDirection: 'MANUAL',
-            rankPoints: {},
-          },
+          defaultMethodKey: 'rank',
+          allowedMethodKeys: ['rank'],
+          methods: [{ methodKey: 'rank', label: '順位', kind: 'RANK', inputMode: 'RANK_MANUAL', fields: [{ key: 'rank', label: '順位', type: 'RANK', required: true, allowTies: true }], projection: { type: 'DIRECT_RANK', fieldKey: 'rank' } }],
+          rankPoints: { 1: 30 },
+          scoringTests: [{ testKey: 'case', name: '代表', methodInputs: { rank: [{ teamKey: 'team-1', fields: { rank: 1 } }] }, expectedRanks: { 'team-1': 1 }, expectedAwardPoints: { 'team-1': 30 } }],
         },
       ],
     })

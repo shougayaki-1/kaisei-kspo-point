@@ -3,24 +3,28 @@ import type { TournamentId } from '../../domain/ids'
 import type { CompetitionSetupTemplate } from './template-schema'
 
 export type SetupStep =
-  | 'BASIC'
-  | 'TEAMS'
-  | 'TEMPLATES'
-  | 'COMPETITIONS'
-  | 'SCHEDULE'
-  | 'SCORING_REVIEW'
-  | 'FINAL_CHECK'
+  | 'SOURCE'
+  | 'CHANGES'
+  | 'INPUT_AND_SCORING'
+  | 'OPERATIONS_CHECK'
 
 export interface SetupTeamDraft {
   teamKey: string
   name: string
 }
 
+export interface SetupCourtStationDraft {
+  stationKey: string
+  label: string
+  shortLabel?: string
+  displayOrder: number
+}
+
 export interface SetupCustomCourtGroupDraft {
   groupKey: string
   label: string
   round: number
-  courtIndexes: number[]
+  courtStationKeys: string[]
 }
 
 export interface SetupCompetitionDraft extends CompetitionSetupTemplate {
@@ -28,20 +32,17 @@ export interface SetupCompetitionDraft extends CompetitionSetupTemplate {
 }
 
 export interface TournamentSetupDraft {
-  draftFormatVersion: 1
+  draftFormatVersion: 2
   draftId: string
   createdAt: string
   updatedAt: string
   currentStep: SetupStep
-  tournament: {
-    name: string
-    eventDate?: string
-  }
+  source:
+    | { type: 'STANDARD'; templateId: string }
+    | { type: 'PREVIOUS'; configVersionId: string }
+  tournament: { name: string; eventDate?: string }
   teams: SetupTeamDraft[]
-  templateSource:
-    | { type: 'NONE' }
-    | { type: 'BUILT_IN'; templateId: string; templateVersion: number }
-    | { type: 'IMPORTED'; templateId: string; templateVersion: number }
+  courtStations: SetupCourtStationDraft[]
   competitions: SetupCompetitionDraft[]
 }
 

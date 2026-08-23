@@ -91,14 +91,14 @@ function checkRequiredText(
   if (!value.trim()) error(issues, 'EMPTY_LABEL', `${label}を入力してください。`, targetId)
 }
 
-function checkPositiveInteger(
+function checkDisplayOrder(
   issues: ConfigValidationIssue[],
   value: number,
   label: string,
   targetId: string,
 ): void {
-  if (!Number.isInteger(value) || value < 1) {
-    error(issues, 'INVALID_DISPLAY_ORDER', `${label}の表示順は1以上の整数にしてください。`, targetId)
+  if (!Number.isInteger(value) || value < 0) {
+    error(issues, 'INVALID_DISPLAY_ORDER', `${label}の表示順は0以上の整数にしてください。`, targetId)
   }
 }
 
@@ -490,7 +490,7 @@ export function validateTournamentConfig(snapshot: TournamentConfigSnapshot): Co
     if (station.tournamentId !== tournamentId) {
       error(issues, 'COURT_STATION_TOURNAMENT_MISMATCH', 'CourtStationの大会IDが一致しません。', station.courtStationId)
     }
-    checkPositiveInteger(issues, station.displayOrder, 'コート', station.courtStationId)
+    checkDisplayOrder(issues, station.displayOrder, 'コート', station.courtStationId)
     if (courtDisplayOrders.has(station.displayOrder)) {
       error(issues, 'DUPLICATE_COURT_STATION_DISPLAY_ORDER', 'CourtStationの表示順が重複しています。', station.courtStationId)
     }
@@ -499,7 +499,7 @@ export function validateTournamentConfig(snapshot: TournamentConfigSnapshot): Co
 
   for (const slot of snapshot.scheduleSlots) {
     checkRequiredText(issues, slot.label, '展開名', slot.slotId)
-    checkPositiveInteger(issues, slot.displayOrder, '展開', slot.slotId)
+    checkDisplayOrder(issues, slot.displayOrder, '展開', slot.slotId)
     if (!competitions.has(slot.competitionId)) {
       error(issues, 'UNKNOWN_SLOT_COMPETITION', 'ScheduleSlot の競技が存在しません。', slot.slotId)
     }
@@ -538,7 +538,7 @@ export function validateTournamentConfig(snapshot: TournamentConfigSnapshot): Co
 
   for (const session of snapshot.scoringSessions) {
     checkRequiredText(issues, session.label, '入力セッション名', session.scoringSessionId)
-    checkPositiveInteger(issues, session.displayOrder, '入力セッション', session.scoringSessionId)
+    checkDisplayOrder(issues, session.displayOrder, '入力セッション', session.scoringSessionId)
     if (!courtStations.has(session.leadCourtStationId)) {
       error(issues, 'UNKNOWN_SESSION_LEAD_COURT_STATION', 'ScoringSession の代表CourtStationが存在しません。', session.scoringSessionId)
     }

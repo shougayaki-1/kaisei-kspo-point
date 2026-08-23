@@ -2,111 +2,97 @@ import { z } from 'zod'
 import { isDecimalInputValue } from '../../domain/exact-decimal'
 
 export type SetupCompetitionKind = 'RANKING' | 'TIME' | 'QUANTITY' | 'WIN_LOSS'
-export type SetupInputGrouping = 'PER_COURT' | 'WHOLE_ROUND' | 'CUSTOM_GROUP'
-export type SetupRankingDirection = 'HIGHER' | 'LOWER' | 'MANUAL'
-export type SetupScoringInputType = 'RANK' | 'TIME' | 'NUMBER' | 'WIN_LOSS'
+export type SetupInputGrouping = 'PER_COURT' | 'WHOLE_SLOT' | 'CUSTOM_GROUP'
 
 const exactValueSchema = z.union([z.number(), z.string()]).refine(isDecimalInputValue, {
   message: 'Rank point score must use supported decimal input semantics.',
 })
-
 const positiveIntegerSchema = z.int().min(1)
-
-const scoringSchema = z.strictObject({
-  inputType: z.enum(['RANK', 'TIME', 'NUMBER', 'WIN_LOSS']),
-  rankingDirection: z.enum(['HIGHER', 'LOWER', 'MANUAL']),
-  rankPoints: z.record(z.string(), exactValueSchema),
-}).superRefine((value, ctx) => {
-  const normalizedRanks = new Set<number>()
-
-  for (const [rawRank, score] of Object.entries(value.rankPoints)) {
-    const rank = Number(rawRank)
-    if (!Number.isInteger(rank) || rank < 1) {
-      ctx.addIssue({
-        code: 'custom',
-        message: `Invalid rank point key: ${rawRank}`,
-        path: ['rankPoints', rawRank],
-      })
-      continue
-    }
-    if (normalizedRanks.has(rank)) {
-      ctx.addIssue({
-        code: 'custom',
-        message: `Duplicate normalized rank point key: ${rawRank}`,
-        path: ['rankPoints', rawRank],
-      })
-    }
-    normalizedRanks.add(rank)
-
-    if (!isDecimalInputValue(score)) {
-      ctx.addIssue({
-        code: 'custom',
-        message: `Invalid rank point score for rank ${rawRank}`,
-        path: ['rankPoints', rawRank],
-      })
-    }
-  }
+const keySchema = z.string().trim().min(1)
+const inputFieldBase = { key: keySchema, label: keySchema, required: z.boolean() }
+const inputFieldSchema = z.discriminatedUnion('type', [
+  z.strictObject({ ...inputFieldBase, type: z.literal('NUMBER'), min: exactValueSchema.optional(), max: exactValueSchema.optional(), step: exactValueSchema.optional() }),
+  z.strictObject({ ...inputFieldBase, type: z.literal('TIME') }),
+  z.strictObject({ ...inputFieldBase, type: z.literal('RANK'), allowTies: z.boolean() }),
+  z.strictObject({ ...inputFieldBase, type: z.literal('BOOLEAN') }),
+  z.strictObject({ ...inputFieldBase, type: z.literal('SELECT'), options: z.array(z.strictObject({ value: keySchema, label: keySchema })).min(1) }),
+  z.strictObject({ ...inputFieldBase, type: z.literal('PENALTY'), min: exactValueSchema.optional(), max: exactValueSchema.optional(), step: exactValueSchema.optional() }),
+  z.strictObject({ ...inputFieldBase, type: z.literal('WIN_LOSS') }),
+  z.strictObject({ ...inputFieldBase, type: z.literal('SPECIAL'), specialKey: keySchema }),
+])
+const projectionSchema = z.discriminatedUnion('type', [
+  z.strictObject({ type: z.literal('SINGLE_FIELD'), fieldKey: keySchema, direction: z.enum(['HIGHER_IS_BETTER', 'LOWER_IS_BETTER']) }),
+  z.strictObject({ type: z.literal('SUM_FIELDS'), fieldKeys: z.array(keySchema).min(1), direction: z.enum(['HIGHER_IS_BETTER', 'LOWER_IS_BETTER']) }),
+  z.strictObject({ type: z.literal('DIRECT_RANK'), fieldKey: keySchema }),
+  z.strictObject({ type: z.literal('DIRECT_OUTCOME'), fieldKey: keySchema }),
+])
+const resultMethodSchema = z.strictObject({
+  methodKey: keySchema,
+  label: keySchema,
+  kind: z.enum(['DETAIL', 'SCORE', 'OUTCOME', 'TIME', 'RANK']),
+  inputMode: z.enum(['TIMER', 'TIME_MANUAL', 'RANK_MANUAL', 'NUMBER', 'WIN_LOSS', 'SPECIAL']),
+  fields: z.array(inputFieldSchema).min(1),
+  projection: projectionSchema,
+})
+const representativeInputSchema = z.strictObject({
+  testKey: keySchema,
+  name: keySchema,
+  methodInputs: z.record(keySchema, z.array(z.strictObject({ teamKey: keySchema, fields: z.record(keySchema, z.union([z.number(), z.string(), z.boolean()])) })).min(1)),
+  expectedRanks: z.record(keySchema, positiveIntegerSchema),
+  expectedAwardPoints: z.record(keySchema, exactValueSchema),
 })
 
 const competitionSetupTemplateSchema = z.strictObject({
-  competitionKey: z.string().trim().min(1),
-  name: z.string().trim().min(1),
+  competitionKey: keySchema,
+  name: keySchema,
   competitionKind: z.enum(['RANKING', 'TIME', 'QUANTITY', 'WIN_LOSS']),
-  inputGrouping: z.enum(['PER_COURT', 'WHOLE_ROUND', 'CUSTOM_GROUP']),
+  inputGrouping: z.enum(['PER_COURT', 'WHOLE_SLOT', 'CUSTOM_GROUP']),
   rounds: positiveIntegerSchema,
   courts: positiveIntegerSchema,
   groupsPerTeam: positiveIntegerSchema,
-  scoring: scoringSchema,
+  defaultMethodKey: keySchema,
+  allowedMethodKeys: z.array(keySchema).min(1),
+  methods: z.array(resultMethodSchema).min(1),
+  rankPoints: z.record(z.string(), exactValueSchema),
+  scoringTests: z.array(representativeInputSchema).min(1),
 }).superRefine((value, ctx) => {
-  const supported = (
-    value.competitionKind === 'RANKING' &&
-    value.scoring.inputType === 'RANK' &&
-    value.scoring.rankingDirection === 'MANUAL'
-  ) || (
-    value.competitionKind === 'TIME' &&
-    value.scoring.inputType === 'TIME' &&
-    (value.scoring.rankingDirection === 'LOWER' || value.scoring.rankingDirection === 'HIGHER')
-  ) || (
-    value.competitionKind === 'QUANTITY' &&
-    value.scoring.inputType === 'NUMBER' &&
-    (value.scoring.rankingDirection === 'LOWER' || value.scoring.rankingDirection === 'HIGHER')
-  ) || (
-    value.competitionKind === 'WIN_LOSS' &&
-    value.scoring.inputType === 'WIN_LOSS' &&
-    value.scoring.rankingDirection === 'MANUAL'
-  )
-
-  if (!supported) {
-    ctx.addIssue({
-      code: 'custom',
-      message: 'Unsupported input/scoring combination for competition kind.',
-      path: ['scoring'],
-    })
+  const methods = new Map(value.methods.map((method) => [method.methodKey, method]))
+  if (!methods.has(value.defaultMethodKey)) {
+    ctx.addIssue({ code: 'custom', message: 'Default result method must be defined.', path: ['defaultMethodKey'] })
+  }
+  for (const [index, methodKey] of value.allowedMethodKeys.entries()) {
+    if (!methods.has(methodKey)) {
+      ctx.addIssue({ code: 'custom', message: 'Allowed result method must be defined.', path: ['allowedMethodKeys', index] })
+    }
+  }
+  for (const [index, test] of value.scoringTests.entries()) {
+    for (const methodKey of value.allowedMethodKeys) {
+      if (!test.methodInputs[methodKey]) {
+        ctx.addIssue({ code: 'custom', message: 'Every allowed method requires representative scoring input.', path: ['scoringTests', index, 'methodInputs'] })
+      }
+    }
   }
 })
 
 const tournamentSetupTemplateFileSchema = z.strictObject({
-  templateFormatVersion: z.literal(1),
-  templateId: z.string().trim().min(1),
+  templateFormatVersion: z.literal(2),
+  templateId: keySchema,
   templateVersion: positiveIntegerSchema,
-  name: z.string().trim().min(1),
+  name: keySchema,
   eventYear: positiveIntegerSchema.optional(),
   competitions: z.array(competitionSetupTemplateSchema).min(1),
 }).superRefine((value, ctx) => {
   const seen = new Set<string>()
-
   for (const [index, competition] of value.competitions.entries()) {
     if (seen.has(competition.competitionKey)) {
-      ctx.addIssue({
-        code: 'custom',
-        message: `Duplicate competition template key: ${competition.competitionKey}`,
-        path: ['competitions', index, 'competitionKey'],
-      })
+      ctx.addIssue({ code: 'custom', message: `Duplicate competition template key: ${competition.competitionKey}`, path: ['competitions', index, 'competitionKey'] })
     }
     seen.add(competition.competitionKey)
   }
 })
 
+export type SetupResultMethodTemplate = z.infer<typeof resultMethodSchema>
+export type SetupScoringTestTemplate = z.infer<typeof representativeInputSchema>
 export type CompetitionSetupTemplate = z.infer<typeof competitionSetupTemplateSchema>
 export type TournamentSetupTemplateFile = z.infer<typeof tournamentSetupTemplateFileSchema>
 

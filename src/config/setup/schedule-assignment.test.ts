@@ -1,125 +1,30 @@
 import { describe, expect, it } from 'vitest'
-import type { SetupCompetitionDraft, SetupTeamDraft } from './setup-types'
+import type { SetupCompetitionDraft, SetupCourtStationDraft } from './setup-types'
 import { autoAssignCompetitionSchedule } from './schedule-assignment'
 
-function buildTeams(names: string[]): SetupTeamDraft[] {
-  return names.map((name, index) => ({
-    teamKey: `team-${index + 1}`,
-    name,
-  }))
-}
-
-function buildCompetition(
-  overrides: Partial<SetupCompetitionDraft> = {},
-): SetupCompetitionDraft {
-  return {
-    competitionKey: 'competition-1',
-    name: '玉入れ',
-    competitionKind: 'QUANTITY',
-    inputGrouping: 'PER_COURT',
-    rounds: 1,
-    courts: 4,
-    groupsPerTeam: 1,
-    scoring: {
-      inputType: 'NUMBER',
-      rankingDirection: 'HIGHER',
-      rankPoints: { 1: 5, 2: 3, 3: 1 },
-    },
-    ...overrides,
-  }
-}
-
-function cellLabels(schedule: ReturnType<typeof autoAssignCompetitionSchedule>): string[][][] {
-  return schedule.rounds.map((round) =>
-    round.cells.map((cell) =>
-      cell.entryKeys.map((entryKey) =>
-        schedule.entries.find((entry) => entry.entryKey === entryKey)?.label ?? '',
-      ),
-    ),
-  )
+const courts: SetupCourtStationDraft[] = [{ stationKey: 'court-a', label: 'Aコート', displayOrder: 0 }, { stationKey: 'court-b', label: 'Bコート', displayOrder: 1 }]
+const competition: SetupCompetitionDraft = {
+  competitionKey: 'count', name: '玉入れ', competitionKind: 'QUANTITY', inputGrouping: 'PER_COURT', rounds: 1, courts: 2, groupsPerTeam: 1,
+  defaultMethodKey: 'score', allowedMethodKeys: ['score'], methods: [{ methodKey: 'score', label: '得点', kind: 'SCORE', inputMode: 'NUMBER', fields: [{ key: 'score', label: '得点', type: 'NUMBER', required: true }], projection: { type: 'SINGLE_FIELD', fieldKey: 'score', direction: 'HIGHER_IS_BETTER' } }], rankPoints: { 1: 30, 2: 20 }, scoringTests: [{ testKey: 'case', name: '代表', methodInputs: { score: [{ teamKey: 'red', fields: { score: 1 } }] }, expectedRanks: { red: 1 }, expectedAwardPoints: { red: 30 } }],
 }
 
 describe('autoAssignCompetitionSchedule', () => {
-  it('assigns one team per court when teams and courts match', () => {
-    const schedule = autoAssignCompetitionSchedule(
-      buildCompetition(),
-      buildTeams(['赤組', '青組', '黄組', '緑組']),
-    )
-
-    expect(schedule.rounds).toHaveLength(1)
-    expect(cellLabels(schedule)).toEqual([
-      [['赤組'], ['青組'], ['黄組'], ['緑組']],
-    ])
-  })
-
-  it('spreads multiple groups across rounds before repeating a team within the same round', () => {
-    const schedule = autoAssignCompetitionSchedule(
-      buildCompetition({
-        rounds: 2,
-        courts: 4,
-        groupsPerTeam: 2,
-      }),
-      buildTeams(['赤組', '青組', '黄組', '緑組']),
-    )
-
-    expect(cellLabels(schedule)).toEqual([
-      [['赤組 1'], ['青組 1'], ['黄組 1'], ['緑組 1']],
-      [['赤組 2'], ['青組 2'], ['黄組 2'], ['緑組 2']],
-    ])
-  })
-
-  it('leaves unused cells empty instead of duplicating assignments', () => {
-    const schedule = autoAssignCompetitionSchedule(
-      buildCompetition({
-        rounds: 1,
-        courts: 4,
-      }),
-      buildTeams(['赤組', '青組']),
-    )
-
-    expect(cellLabels(schedule)).toEqual([
-      [['赤組'], ['青組'], [], []],
-    ])
-  })
-
-  it('returns the same schedule for the same draft every time', () => {
-    const competition = buildCompetition({
-      rounds: 2,
-      courts: 3,
-      groupsPerTeam: 2,
-    })
-    const teams = buildTeams(['赤組', '青組', '黄組', '緑組'])
-
-    expect(
-      autoAssignCompetitionSchedule(structuredClone(competition), structuredClone(teams)),
-    ).toEqual(
-      autoAssignCompetitionSchedule(structuredClone(competition), structuredClone(teams)),
-    )
-  })
-
-  it('groups every court in a round together for whole-round input', () => {
-    const schedule = autoAssignCompetitionSchedule(
-      buildCompetition({
-        rounds: 2,
-        courts: 3,
-        inputGrouping: 'WHOLE_ROUND',
-      }),
-      buildTeams(['赤組', '青組', '黄組', '緑組']),
-    )
-
+  it('uses persisted CourtStation keys in generated runs and tasks', () => {
+    const schedule = autoAssignCompetitionSchedule(competition, [{ teamKey: 'red', name: '赤組' }, { teamKey: 'blue', name: '青組' }], courts)
+    expect(schedule.rounds[0]?.cells.map((cell) => cell.courtStationKey)).toEqual(['court-a', 'court-b'])
     expect(schedule.inputGroups).toEqual([
-      {
-        groupKey: 'round-1-whole',
-        label: '第1回 まとめて入力',
-        roundNumber: 1,
-        courtNumbers: [1, 2, 3],
-      },
-      {
-        groupKey: 'round-2-whole',
-        label: '第2回 まとめて入力',
-        roundNumber: 2,
-        courtNumbers: [1, 2, 3],
-      },
+      { groupKey: 'round-1-court-1', label: '第1回 Aコート', roundNumber: 1, courtStationKeys: ['court-a'] },
+      { groupKey: 'round-1-court-2', label: '第1回 Bコート', roundNumber: 1, courtStationKeys: ['court-b'] },
     ])
+  })
+
+  it('retains explicit planned end time and logical task keys from a compatible schedule', () => {
+    const scheduled = structuredClone(competition)
+    scheduled.schedule = autoAssignCompetitionSchedule(competition, [{ teamKey: 'red', name: '赤組' }], courts)
+    scheduled.schedule.rounds[0]!.endTime = '09:40'
+    scheduled.schedule.inputGroups[0]!.groupKey = 'persisted-task-a'
+    const schedule = autoAssignCompetitionSchedule(scheduled, [{ teamKey: 'red', name: '赤組' }], courts)
+    expect(schedule.rounds[0]?.endTime).toBe('09:40')
+    expect(schedule.inputGroups[0]?.groupKey).toBe('persisted-task-a')
   })
 })

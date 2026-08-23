@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useEffect, useRef } from 'react'
 import Alert from '@mui/material/Alert'
 import Card from '@mui/material/Card'

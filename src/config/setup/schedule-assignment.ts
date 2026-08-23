@@ -1,4 +1,4 @@
-import type { SetupCompetitionDraft, SetupTeamDraft } from './setup-types'
+import type { SetupCompetitionDraft, SetupCourtStationDraft, SetupTeamDraft } from './setup-types'
 
 export interface SetupCompetitionScheduleEntry {
   entryKey: string
@@ -10,6 +10,7 @@ export interface SetupCompetitionScheduleEntry {
 
 export interface SetupCompetitionScheduleCell {
   cellKey: string
+  courtStationKey: string
   roundNumber: number
   courtNumber: number
   courtLabel: string
@@ -21,6 +22,7 @@ export interface SetupCompetitionScheduleRound {
   roundNumber: number
   label: string
   startTime: string
+  endTime: string
   cells: SetupCompetitionScheduleCell[]
 }
 
@@ -28,7 +30,7 @@ export interface SetupCompetitionScheduleInputGroup {
   groupKey: string
   label: string
   roundNumber: number
-  courtNumbers: number[]
+  courtStationKeys: string[]
 }
 
 export interface SetupCompetitionSchedule {
@@ -84,6 +86,7 @@ function buildEntries(
 
 function buildRounds(
   competition: SetupCompetitionDraft,
+  courtStations: SetupCourtStationDraft[],
 ): SetupCompetitionScheduleRound[] {
   return Array.from({ length: competition.rounds }, (_, roundIndex) => {
     const roundNumber = roundIndex + 1
@@ -93,11 +96,13 @@ function buildRounds(
       roundNumber,
       label: roundLabel(roundNumber),
       startTime: '',
-      cells: Array.from({ length: competition.courts }, (_, courtIndex) => {
+      endTime: '',
+      cells: courtStations.slice(0, competition.courts).map((station, courtIndex) => {
         const courtNumber = courtIndex + 1
 
         return {
-          cellKey: `round-${roundNumber}-court-${courtNumber}`,
+          cellKey: `round-${roundNumber}-${station.stationKey}`,
+          courtStationKey: station.stationKey,
           roundNumber,
           courtNumber,
           courtLabel: courtLabel(courtNumber),
@@ -110,8 +115,9 @@ function buildRounds(
 
 function buildInputGroups(
   competition: SetupCompetitionDraft,
+  courtStations: SetupCourtStationDraft[],
 ): SetupCompetitionScheduleInputGroup[] {
-  if (competition.inputGrouping === 'WHOLE_ROUND') {
+  if (competition.inputGrouping === 'WHOLE_SLOT') {
     return Array.from({ length: competition.rounds }, (_, roundIndex) => {
       const roundNumber = roundIndex + 1
 
@@ -119,7 +125,7 @@ function buildInputGroups(
         groupKey: `round-${roundNumber}-whole`,
         label: `${roundLabel(roundNumber)} まとめて入力`,
         roundNumber,
-        courtNumbers: Array.from({ length: competition.courts }, (_, courtIndex) => courtIndex + 1),
+        courtStationKeys: courtStations.slice(0, competition.courts).map((station) => station.stationKey),
       }
     })
   }
@@ -134,7 +140,7 @@ function buildInputGroups(
           groupKey: `round-${roundNumber}-court-${courtNumber}`,
           label: `${roundLabel(roundNumber)} ${courtLabel(courtNumber)}`,
           roundNumber,
-          courtNumbers: [courtNumber],
+          courtStationKeys: [courtStations[courtIndex]!.stationKey],
         }
       }),
     ).flat()
@@ -144,7 +150,7 @@ function buildInputGroups(
     groupKey: group.groupKey,
     label: group.label,
     roundNumber: group.round,
-    courtNumbers: [...group.courtIndexes],
+    courtStationKeys: [...group.courtStationKeys],
   }))
 }
 
@@ -178,6 +184,7 @@ function seedExistingSchedule(
     if (!existingRound) continue
 
     round.startTime = existingRound.startTime
+    round.endTime = existingRound.endTime
 
     for (const cell of round.cells) {
       const existingCell = existingRound.cells.find(
@@ -331,10 +338,15 @@ function fillRemainingAssignments(
 export function autoAssignCompetitionSchedule(
   competition: SetupCompetitionDraft,
   teams: SetupTeamDraft[],
+  courtStations: SetupCourtStationDraft[] = Array.from({ length: competition.courts }, (_, index) => ({
+    stationKey: `court-${index + 1}`,
+    label: courtLabel(index + 1),
+    displayOrder: index,
+  })),
 ): SetupCompetitionSchedule {
   const entries = buildEntries(competition, teams)
-  const rounds = buildRounds(competition)
-  const inputGroups = buildInputGroups(competition)
+  const rounds = buildRounds(competition, courtStations)
+  const defaultInputGroups = buildInputGroups(competition, courtStations)
   const entryMap = new Map(entries.map((entry) => [entry.entryKey, entry]))
   const entryKeys = new Set(entries.map((entry) => entry.entryKey))
   const existingSchedule = isCompatibleSchedule(competition.schedule, competition, entries)
@@ -358,6 +370,6 @@ export function autoAssignCompetitionSchedule(
     inputGrouping: competition.inputGrouping,
     entries,
     rounds,
-    inputGroups,
+    inputGroups: existingSchedule ? structuredClone(existingSchedule.inputGroups) : defaultInputGroups,
   }
 }
