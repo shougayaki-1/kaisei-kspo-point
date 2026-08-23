@@ -27,4 +27,22 @@ describe('autoAssignCompetitionSchedule', () => {
     expect(schedule.rounds[0]?.endTime).toBe('09:40')
     expect(schedule.inputGroups[0]?.groupKey).toBe('persisted-task-a')
   })
+
+  it('normalizes a persisted multi-Court group into one PER_COURT task for each Court', () => {
+    const scheduled = structuredClone(competition)
+    scheduled.schedule = autoAssignCompetitionSchedule(competition, [{ teamKey: 'red', name: '赤組' }], courts)
+    scheduled.schedule.inputGroups = [{
+      groupKey: 'persisted-whole-slot',
+      label: '誤ってまとめられた入力',
+      roundNumber: 1,
+      courtStationKeys: ['court-a', 'court-b'],
+    }]
+
+    const schedule = autoAssignCompetitionSchedule(scheduled, [{ teamKey: 'red', name: '赤組' }], courts)
+
+    expect(schedule.inputGroups.map((group) => group.courtStationKeys)).toEqual([
+      ['court-a'],
+      ['court-b'],
+    ])
+  })
 })

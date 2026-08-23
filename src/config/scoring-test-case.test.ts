@@ -41,6 +41,7 @@ function testCase(): ScoringTestCase {
   return {
     testCaseId: 'test-1',
     competitionId,
+    methodKey: 'score',
     name: '通常順位',
     rounds: [
       {
@@ -124,6 +125,7 @@ describe('runScoringTestCase', () => {
     const rawCase: ScoringTestCase = {
       testCaseId: 'raw-test-1',
       competitionId,
+      methodKey: 'score',
       name: '五色綱引き raw derived',
       rounds: [{
         roundId: 'set-1',
@@ -166,6 +168,7 @@ describe('runScoringTestCase', () => {
     const kingCase: ScoringTestCase = {
       testCaseId: 'king-dodgeball-2026',
       competitionId,
+      methodKey: 'score',
       name: '王様ドッジボール 引き分け + 王様外野',
       rounds: [{
         roundId: 'match-1',

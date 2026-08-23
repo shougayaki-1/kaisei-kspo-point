@@ -12,6 +12,8 @@ import type {
 import type { InputScope } from '../../domain/tournament'
 import type { InputSchema } from '../input-schema'
 import type { ResultEntryPolicy } from '../result-entry-policy'
+import { canonicalizeExactValue, isDecimalInputValue, sumExactValues, type ExactValue } from '../../domain/exact-decimal'
+import type { ScoringTestCase } from '../scoring-test-case'
 import type { TournamentConfigSnapshot } from '../tournament-config'
 import { autoAssignCompetitionSchedule } from './schedule-assignment'
 import type { SetupCompetitionDraft, TournamentSetupDraft } from './setup-types'
@@ -204,6 +206,72 @@ function compileScoringProfile(
   }
 }
 
+function representativeProjectionValue(
+  method: SetupCompetitionDraft['methods'][number],
+  fields: Record<string, string | number | boolean>,
+): ExactValue {
+  const exactField = (fieldKey: string): ExactValue => {
+    const value = fields[fieldKey]
+    if (!isDecimalInputValue(value)) throw new Error(`Representative input for ${method.methodKey}.${fieldKey} must be numeric`)
+    return canonicalizeExactValue(value)
+  }
+  switch (method.projection.type) {
+    case 'SINGLE_FIELD':
+    case 'DIRECT_RANK':
+      return exactField(method.projection.fieldKey)
+    case 'SUM_FIELDS':
+      return sumExactValues(method.projection.fieldKeys.map(exactField))
+    case 'DIRECT_OUTCOME': {
+      const value = fields[method.projection.fieldKey]
+      if (value === 'WIN') return 1
+      if (value === 'DRAW') return 0
+      if (value === 'LOSS') return -1
+      throw new Error(`Representative input for ${method.methodKey}.${method.projection.fieldKey} must be WIN, DRAW, or LOSS`)
+    }
+  }
+}
+
+function compileScoringTestCases(
+  draft: TournamentSetupDraft,
+  competition: SetupCompetitionDraft,
+  competitionId: CompetitionId,
+  entryIds: Map<string, CompetitionEntryId>,
+  options: SetupCompilerOptions,
+): ScoringTestCase[] {
+  const methods = new Map(competition.methods.map((method) => [method.methodKey, method]))
+  return competition.scoringTests.flatMap((test) => competition.allowedMethodKeys.map((methodKey) => {
+    const method = methods.get(methodKey)
+    const inputs = test.methodInputs[methodKey]
+    if (!method || !inputs) throw new Error(`Representative input is missing for result method: ${methodKey}`)
+    const inputByTeam = new Map(inputs.map((input) => [input.teamKey, input]))
+    const rounds = [{
+      roundId: `${test.testKey}:${methodKey}`,
+      label: test.name,
+      values: inputs.map((input) => {
+        const entryId = entryIds.get(`${input.teamKey}:group-1`)
+        if (!entryId) throw new Error(`Representative input references unknown team: ${input.teamKey}`)
+        return { entryId, value: representativeProjectionValue(method, input.fields) }
+      }),
+    }]
+    const expected = Object.keys(test.expectedRanks).sort().map((teamKey) => {
+      const entryId = entryIds.get(`${teamKey}:group-1`)
+      if (!entryId || !inputByTeam.has(teamKey)) throw new Error(`Representative expectation references unknown team: ${teamKey}`)
+      const rank = test.expectedRanks[teamKey]!
+      const points = test.expectedAwardPoints[teamKey]
+      if (points === undefined) throw new Error(`Representative award points are missing for team: ${teamKey}`)
+      return { entryId, roundRanks: [rank], roundAwardScores: [canonicalizeExactValue(points)], aggregateScore: canonicalizeExactValue(points) }
+    })
+    return {
+      testCaseId: id<string>(options, 'scoringTestCase', draft.draftId, `${competition.competitionKey}:${test.testKey}:${methodKey}`),
+      competitionId,
+      methodKey,
+      name: `${test.name} (${method.label})`,
+      rounds,
+      expected,
+    }
+  }))
+}
+
 export function compileTournamentSetup(
   draft: TournamentSetupDraft,
   options?: Partial<SetupCompilerOptions>,
@@ -250,6 +318,7 @@ export function compileTournamentSetup(
     snapshot.inputSchemas.push(...methods.schemas)
     snapshot.resultEntryPolicies.push(methods.policy)
     snapshot.scoringProfiles.push(compileScoringProfile(draft, competition, competitionId, resolved))
+    snapshot.scoringTestCases.push(...compileScoringTestCases(draft, competition, competitionId, entries.ids, resolved))
   }
   return snapshot
 }

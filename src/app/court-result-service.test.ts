@@ -15,6 +15,9 @@ import type {
 import type { InputMode, Result, ResultRevision } from '../domain/result'
 import type { ResultProjection } from '../domain/result-projection'
 import type { TournamentConfigSnapshot } from '../config/tournament-config'
+import { EXCHANGE_FESTIVAL_TEMPLATE } from '../config/setup/builtin-templates'
+import { compileTournamentSetup } from '../config/setup/setup-compiler'
+import type { TournamentSetupDraft } from '../config/setup/setup-types'
 import { ConfigRepository } from '../db/config-repository'
 import { createDatabase, type AppDatabase } from '../db/database'
 import { createCourtResultService } from './court-result-service'
@@ -49,6 +52,7 @@ function snapshot(): TournamentConfigSnapshot { return {
   scoringTestCases: [{
     testCaseId: 'test-1',
     competitionId: ids.competition,
+    methodKey: 'score',
     name: '通常順位',
     rounds: [{ roundId: 'test-round-1', label: '第1展開', values: [{ entryId: ids.entryA, value: 2 }, { entryId: ids.entryB, value: 1 }] }],
     expected: [
@@ -56,8 +60,22 @@ function snapshot(): TournamentConfigSnapshot { return {
       { entryId: ids.entryB, roundRanks: [2], roundAwardScores: [5], aggregateScore: 5 },
     ],
   }],
-  resultEntryPolicies: [],
+  resultEntryPolicies: [{
+    competitionId: ids.competition,
+    defaultMethodKey: 'score',
+    allowedMethodKeys: ['score'],
+    methods: [{ methodKey: 'score', label: '得点', kind: 'SCORE', inputMode: 'NUMBER', inputSchemaId: 'schema-1', projection: { type: 'SINGLE_FIELD', fieldKey: 'count', direction: 'HIGHER_IS_BETTER' } }],
+  }],
 } }
+function standardSetupDraft(): TournamentSetupDraft {
+  return {
+    draftFormatVersion: 2, draftId: 'standard-service-config', createdAt: '2026-08-23T00:00:00Z', updatedAt: '2026-08-23T00:00:00Z', currentStep: 'OPERATIONS_CHECK',
+    source: { type: 'STANDARD', templateId: EXCHANGE_FESTIVAL_TEMPLATE.templateId }, tournament: { name: '標準大会' },
+    teams: [{ teamKey: 'team-red', name: '赤組' }, { teamKey: 'team-blue', name: '青組' }],
+    courtStations: [{ stationKey: 'court-a', label: 'Aコート', displayOrder: 0 }, { stationKey: 'court-b', label: 'Bコート', displayOrder: 1 }],
+    competitions: structuredClone(EXCHANGE_FESTIVAL_TEMPLATE.competitions),
+  }
+}
 async function seed(db: AppDatabase) { return new ConfigRepository(db).apply(snapshot(), { operator: '本部', createdAt: '2026-08-19T09:00:00+09:00', changeClass: 'INPUT_SCHEMA' }) }
 interface ExpectedCourtResultService {
   listSessions(): Promise<Array<{ scoringSessionId: ScoringSessionId; label: string; competitionName: string; inputScope: string; courtRunCount: number }>>
@@ -76,6 +94,15 @@ describe('Court production Result service', () => {
     expect(await target.listSessions()).toEqual([expect.objectContaining({ scoringSessionId: ids.session, inputScope: 'WHOLE_SLOT', courtRunCount: 2 })])
     const loaded = await target.loadSession(ids.session)
     expect(loaded.courtRuns.map((run) => run.courtRunId)).toEqual([ids.runA, ids.runB]); expect(loaded.entries.map((entry) => entry.entryId)).toEqual([ids.entryA, ids.entryB])
+  })
+  it('uses the standard config default method schema when allowed methods share version one', async () => {
+    const db = open()
+    const standard = compileTournamentSetup(standardSetupDraft())
+    await new ConfigRepository(db).apply(standard, { operator: '本部', createdAt: '2026-08-23T00:00:00Z', changeClass: 'INPUT_SCHEMA' })
+
+    const loaded = await service(db).loadSession(standard.scoringSessions[0]!.scoringSessionId)
+
+    expect(loaded.inputSchema.fields.map((field) => field.key)).toEqual(['first', 'second'])
   })
   it('creates only raw Result + initial immutable Revision and canonicalizes decimal input', async () => {
     const db = open(); await seed(db); const target = service(db)
@@ -109,7 +136,7 @@ describe('Court production Result service', () => {
     await expect(target.saveResult({ scoringSessionId: 'missing-session' as ScoringSessionId, operator: '担当者', inputMode: 'NUMBER', values: {} })).rejects.toThrow(/ScoringSession|session/i)
   })
   it('keeps production Result data separate from simulator/test-case stores', async () => {
-    const db = open(); await seed(db); const sentinel = { testCaseId: 'simulator-only', name: 'simulator', competitionId: ids.competition, rounds: [], expected: [] }; await db.scoringTestCases.add(sentinel); const target = service(db)
+    const db = open(); await seed(db); const sentinel = { testCaseId: 'simulator-only', methodKey: 'score', name: 'simulator', competitionId: ids.competition, rounds: [], expected: [] }; await db.scoringTestCases.add(sentinel); const target = service(db)
     await target.saveResult({ scoringSessionId: ids.session, operator: '担当者', inputMode: 'NUMBER', values: allValues('5', '6') })
     expect(await db.scoringTestCases.get('simulator-only')).toEqual(sentinel); expect(await db.results.count()).toBe(1); expect(await db.resultRevisions.count()).toBe(1)
   })

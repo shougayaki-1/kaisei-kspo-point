@@ -149,6 +149,7 @@ export function ScoringSimulatorPanel({
     onSaveTestCase({
       testCaseId: createId<string>(),
       competitionId: competition.competitionId,
+      methodKey: 'score',
       name: testName.trim(),
       rounds: savedRounds,
       expected,

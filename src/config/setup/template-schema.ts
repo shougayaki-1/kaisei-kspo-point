@@ -60,6 +60,9 @@ const competitionSetupTemplateSchema = z.strictObject({
   if (!methods.has(value.defaultMethodKey)) {
     ctx.addIssue({ code: 'custom', message: 'Default result method must be defined.', path: ['defaultMethodKey'] })
   }
+  if (!value.allowedMethodKeys.includes(value.defaultMethodKey)) {
+    ctx.addIssue({ code: 'custom', message: 'Default result method must be allowed.', path: ['defaultMethodKey'] })
+  }
   for (const [index, methodKey] of value.allowedMethodKeys.entries()) {
     if (!methods.has(methodKey)) {
       ctx.addIssue({ code: 'custom', message: 'Allowed result method must be defined.', path: ['allowedMethodKeys', index] })

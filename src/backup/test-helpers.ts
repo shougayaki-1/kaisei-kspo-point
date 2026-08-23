@@ -41,7 +41,7 @@ export function backupTestConfig(): TournamentConfigSnapshot {
     inputSchemas: [{ inputSchemaId: 'backup-schema', competitionId: i.competition, version: 1, fields: [{ key: 'score', label: 'Score', type: 'NUMBER', required: true }] }],
     scoringProfiles: [{ scoringProfileId: i.profile, competitionId: i.competition, version: 1, rankingRule: { direction: 'HIGHER_IS_BETTER' }, tieRule: 'AVERAGE_OCCUPIED_PLACES', awardRule: { type: 'RANK_POINTS', rankPoints: { 1: 10, 2: 5 } }, aggregationRule: 'SUM' }],
     scoringTestCases: [{
-      testCaseId: 'backup-test-case', competitionId: i.competition, name: 'Regression',
+      testCaseId: 'backup-test-case', competitionId: i.competition, methodKey: 'score', name: 'Regression',
       rounds: [{ roundId: 'round-1', label: 'Round 1', values: [{ entryId: i.entryA, value: '2' }, { entryId: i.entryB, value: '1' }] }],
       expected: [
         { entryId: i.entryA, roundRanks: [1], roundAwardScores: [10], aggregateScore: 10 },
@@ -49,7 +49,15 @@ export function backupTestConfig(): TournamentConfigSnapshot {
       ],
       lastApprovedChange: { operator: 'Host', approvedAt: '2026-08-20T01:00:00.000Z' },
     }],
-    resultEntryPolicies: [],
+    resultEntryPolicies: [{
+      competitionId: i.competition,
+      defaultMethodKey: 'score',
+      allowedMethodKeys: ['score'],
+      methods: [{
+        methodKey: 'score', label: 'Score', kind: 'SCORE', inputMode: 'NUMBER', inputSchemaId: 'backup-schema',
+        projection: { type: 'SINGLE_FIELD', fieldKey: 'score', direction: 'HIGHER_IS_BETTER' },
+      }],
+    }],
   }
 }
 

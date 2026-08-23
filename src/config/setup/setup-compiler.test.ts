@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { validateTournamentConfig } from '../tournament-config'
+import { runScoringTestCase } from '../scoring-test-case'
+import { EXCHANGE_FESTIVAL_TEMPLATE } from './builtin-templates'
 import { compileTournamentSetup } from './setup-compiler'
 import type { SetupCompetitionDraft, TournamentSetupDraft } from './setup-types'
 
@@ -25,6 +27,13 @@ function draft(overrides: Partial<TournamentSetupDraft> = {}): TournamentSetupDr
     courtStations: [{ stationKey: 'court-a', label: 'Aコート', displayOrder: 0 }, { stationKey: 'court-b', label: 'Bコート', displayOrder: 1 }],
     competitions: [competition()], ...overrides,
   }
+}
+
+function standardDraft(): TournamentSetupDraft {
+  return draft({
+    teams: [{ teamKey: 'team-red', name: '赤組' }, { teamKey: 'team-blue', name: '青組' }],
+    competitions: structuredClone(EXCHANGE_FESTIVAL_TEMPLATE.competitions),
+  })
 }
 
 function withSchedule(inputGrouping: SetupCompetitionDraft['inputGrouping'], groups: Array<{ groupKey: string; label: string; courtStationKeys: string[] }>, time = { start: '09:30', end: '09:40' }): TournamentSetupDraft {
@@ -70,10 +79,15 @@ describe('compileTournamentSetup', () => {
   })
 
   it('uses one representative Court task for each persisted CUSTOM_GROUP', () => {
-    const snapshot = compileTournamentSetup(withSchedule('CUSTOM_GROUP', [
+    const input = withSchedule('CUSTOM_GROUP', [
       { groupKey: 'task-a', label: 'A担当', courtStationKeys: ['court-a'] },
       { groupKey: 'task-b', label: 'B担当', courtStationKeys: ['court-b'] },
-    ]), { createId: stableId })
+    ])
+    input.competitions[0]!.customGroups = [
+      { groupKey: 'task-a', label: 'A担当', round: 1, courtStationKeys: ['court-a'] },
+      { groupKey: 'task-b', label: 'B担当', round: 1, courtStationKeys: ['court-b'] },
+    ]
+    const snapshot = compileTournamentSetup(input, { createId: stableId })
     expect(snapshot.scoringSessions.map((session) => ({ scope: session.inputScope, lead: session.leadCourtStationId, runs: session.courtRunIds.length }))).toEqual([
       { scope: 'CUSTOM_GROUP', lead: 'courtStation:exchange-2026:court-a', runs: 1 },
       { scope: 'CUSTOM_GROUP', lead: 'courtStation:exchange-2026:court-b', runs: 1 },
@@ -99,5 +113,37 @@ describe('compileTournamentSetup', () => {
     expect(second).toEqual(first)
     expect(first.resultEntryPolicies).toEqual([expect.objectContaining({ defaultMethodKey: 'score', allowedMethodKeys: ['score'], methods: [expect.objectContaining({ inputSchemaId: 'inputSchema:exchange-2026:tug:score', projection: { type: 'SINGLE_FIELD', fieldKey: 'score', direction: 'HIGHER_IS_BETTER' } })] })])
     expect(validateTournamentConfig(first).filter((issue) => issue.severity === 'ERROR')).toEqual([])
+  })
+
+  it('normalizes malformed persisted PER_COURT groups before compiling Court tasks', () => {
+    const snapshot = compileTournamentSetup(withSchedule('PER_COURT', [
+      { groupKey: 'malformed-whole', label: '誤った全体入力', courtStationKeys: ['court-a', 'court-b'] },
+    ]), { createId: stableId })
+
+    expect(snapshot.scoringSessions.map((session) => session.courtRunIds)).toHaveLength(2)
+    expect(snapshot.scoringSessions.map((session) => ({
+      leadCourtStationId: session.leadCourtStationId,
+      runCount: session.courtRunIds.length,
+    }))).toEqual([
+      { leadCourtStationId: 'courtStation:exchange-2026:court-a', runCount: 1 },
+      { leadCourtStationId: 'courtStation:exchange-2026:court-b', runCount: 1 },
+    ])
+  })
+
+  it('materializes an executable representative scoring case for every allowed standard method', () => {
+    const snapshot = compileTournamentSetup(standardDraft(), { createId: stableId })
+    const policy = snapshot.resultEntryPolicies[0]!
+    const profile = snapshot.scoringProfiles[0]!
+    const entries = snapshot.competitionEntries
+    const testCases = snapshot.scoringTestCases
+
+    expect(testCases.map((testCase) => testCase.methodKey).sort()).toEqual(['detail', 'outcome', 'score'])
+    expect(testCases.every((testCase) => runScoringTestCase(testCase, profile, entries).status === 'PASS')).toBe(true)
+    const expected = [
+      { entryId: 'competitionEntry:exchange-2026:tug-of-war:team-blue:group-1', roundRanks: [2], roundAwardScores: [20], aggregateScore: 20 },
+      { entryId: 'competitionEntry:exchange-2026:tug-of-war:team-red:group-1', roundRanks: [1], roundAwardScores: [30], aggregateScore: 30 },
+    ]
+    expect(testCases.map((testCase) => testCase.expected)).toEqual([expected, expected, expected])
+    expect(testCases.map((testCase) => testCase.methodKey).sort()).toEqual([...policy.allowedMethodKeys].sort())
   })
 })

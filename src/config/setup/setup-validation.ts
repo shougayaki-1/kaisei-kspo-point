@@ -31,9 +31,20 @@ export function validateSetupDraft(draft: TournamentSetupDraft): SetupIssue[] {
   for (const competition of draft.competitions) {
     if (!competition.name.trim()) issues.push(issue('ERROR', 'EMPTY_COMPETITION_NAME', '競技名を入力してください。', 'CHANGES', competition.competitionKey))
     if (!competition.methods.some((method) => method.methodKey === competition.defaultMethodKey)) issues.push(issue('ERROR', 'UNKNOWN_DEFAULT_METHOD', '既定の入力方法を設定してください。', 'INPUT_AND_SCORING', competition.competitionKey))
+    if (!competition.allowedMethodKeys.includes(competition.defaultMethodKey)) issues.push(issue('ERROR', 'DEFAULT_METHOD_NOT_ALLOWED', '既定の入力方法を許可してください。', 'INPUT_AND_SCORING', competition.competitionKey))
     if (competition.allowedMethodKeys.some((key) => !competition.methods.some((method) => method.methodKey === key))) issues.push(issue('ERROR', 'UNKNOWN_ALLOWED_METHOD', '許可する入力方法を確認してください。', 'INPUT_AND_SCORING', competition.competitionKey))
     if (competition.scoringTests.some((test) => competition.allowedMethodKeys.some((key) => !test.methodInputs[key]))) issues.push(issue('ERROR', 'INCOMPLETE_METHOD_SCORING_TEST', 'すべての許可入力方法に代表テストを設定してください。', 'INPUT_AND_SCORING', competition.competitionKey))
-    if (competition.inputGrouping === 'CUSTOM_GROUP' && (competition.customGroups ?? []).some((group) => group.courtStationKeys.some((key) => !stationKeys.has(key)))) issues.push(issue('ERROR', 'UNKNOWN_GROUP_COURT', '入力グループに存在しないコートがあります。', 'OPERATIONS_CHECK', competition.competitionKey))
+    if (competition.inputGrouping === 'CUSTOM_GROUP') {
+      const groups = competition.customGroups ?? []
+      if (groups.length === 0) issues.push(issue('ERROR', 'EMPTY_CUSTOM_GROUPS', '入力グループを1つ以上設定してください。', 'OPERATIONS_CHECK', competition.competitionKey))
+      const groupKeys = new Set<string>()
+      for (const group of groups) {
+        if (!group.groupKey.trim() || groupKeys.has(group.groupKey)) issues.push(issue('ERROR', 'INVALID_CUSTOM_GROUP_KEY', '入力グループの識別キーが重複しています。', 'OPERATIONS_CHECK', competition.competitionKey))
+        groupKeys.add(group.groupKey)
+        if (!group.label.trim() || !Number.isInteger(group.round) || group.round < 1 || group.round > competition.rounds || group.courtStationKeys.length === 0) issues.push(issue('ERROR', 'INVALID_CUSTOM_GROUP', '入力グループの内容を確認してください。', 'OPERATIONS_CHECK', competition.competitionKey))
+        if (group.courtStationKeys.some((key) => !stationKeys.has(key))) issues.push(issue('ERROR', 'UNKNOWN_GROUP_COURT', '入力グループに存在しないコートがあります。', 'OPERATIONS_CHECK', competition.competitionKey))
+      }
+    }
   }
   return issues
 }

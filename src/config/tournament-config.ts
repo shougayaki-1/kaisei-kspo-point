@@ -700,6 +700,11 @@ export function validateTournamentConfig(snapshot: TournamentConfigSnapshot): Co
     if (!policy.allowedMethodKeys.includes(policy.defaultMethodKey)) {
       error(issues, 'DEFAULT_RESULT_ENTRY_METHOD_NOT_ALLOWED', '既定の結果入力方式は許可方式に含めてください。', policy.competitionId)
     }
+    for (const testCase of snapshot.scoringTestCases.filter((item) => item.competitionId === policy.competitionId)) {
+      if (!policy.allowedMethodKeys.includes(testCase.methodKey)) {
+        error(issues, 'UNKNOWN_SCORING_TEST_METHOD', `得点テストの入力方式 ${testCase.methodKey} は許可されていません。`, testCase.testCaseId)
+      }
+    }
   }
 
   return issues

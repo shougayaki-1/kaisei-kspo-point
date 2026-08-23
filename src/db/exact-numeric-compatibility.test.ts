@@ -66,6 +66,7 @@ describe('legacy decimal number compatibility', () => {
     await db.scoringTestCases.put({
       testCaseId: 'legacy-test',
       competitionId,
+      methodKey: 'score',
       name: 'Legacy test',
       rounds: [{
         roundId: 'round-1',

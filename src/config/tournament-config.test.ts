@@ -179,6 +179,17 @@ describe('validateTournamentConfig', () => {
     expect(errorCodes(snapshot)).toContain('UNKNOWN_ALLOWED_RESULT_ENTRY_METHOD')
   })
 
+  it('rejects a representative scoring test that names a disallowed result method', () => {
+    const snapshot = snapshotWithPolicy()
+    snapshot.scoringTestCases = [{
+      testCaseId: 'test-rank', competitionId: snapshot.competitions[0]!.competitionId, methodKey: 'rank', name: '不正な方式',
+      rounds: [{ roundId: 'round-rank', label: '代表', values: [{ entryId: snapshot.competitionEntries[0]!.entryId, value: 1 }] }],
+      expected: [{ entryId: snapshot.competitionEntries[0]!.entryId, roundRanks: [1], roundAwardScores: [30], aggregateScore: 30 }],
+    }]
+
+    expect(errorCodes(snapshot)).toContain('UNKNOWN_SCORING_TEST_METHOD')
+  })
+
   it('rejects a policy method schema from another competition', () => {
     const snapshot = snapshotWithPolicy()
     snapshot.inputSchemas[0]!.competitionId = 'another-competition' as CompetitionId

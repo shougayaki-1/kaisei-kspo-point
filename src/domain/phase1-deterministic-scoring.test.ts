@@ -62,6 +62,7 @@ function exactTestCase(): ScoringTestCase {
   return {
     testCaseId: 'exact-test-1',
     competitionId,
+    methodKey: 'score',
     name: 'exact decimal regression',
     rounds: [
       {
@@ -199,6 +200,7 @@ describe('Phase 1 deterministic scoring RED', () => {
       scoringTestCases: [{
         testCaseId: 'persisted-config-test',
         competitionId,
+        methodKey: 'score',
         name: 'persisted config',
         rounds: [{
           roundId: 'persisted-round-1',

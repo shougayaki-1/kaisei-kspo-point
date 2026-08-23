@@ -42,6 +42,7 @@ function snapshot(): TournamentConfigSnapshot {
     scoringTestCases: [{
       testCaseId: 'test-1',
       competitionId,
+      methodKey: 'score',
       name: '通常順位',
       rounds: [{
         roundId: 'round-1',

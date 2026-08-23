@@ -1,4 +1,5 @@
 import type { InputField, InputSchema } from '../config/input-schema'
+import { defaultResultEntryMethod } from '../config/result-entry-policy'
 import { unsupportedScoringProfileMessage } from '../config/scoring-profile'
 import type { TournamentConfigSnapshot } from '../config/tournament-config'
 import { canonicalizeDecimalInput, type ExactValue } from '../domain/exact-decimal'
@@ -219,14 +220,16 @@ export function createHostScoringService(db: AppDatabase) {
     return structuredClone(profile)
   }
 
-  function activeInputSchema(
+  function defaultMethodInputSchema(
     snapshot: TournamentConfigSnapshot,
     competitionId: CompetitionId,
   ): InputSchema {
-    return structuredClone(selectHighestVersion(
-      snapshot.inputSchemas.filter((schema) => schema.competitionId === competitionId),
-      `InputSchema for ${competitionId}`,
-    ))
+    const policies = snapshot.resultEntryPolicies.filter((policy) => policy.competitionId === competitionId)
+    if (policies.length !== 1) throw new Error(`ResultEntryPolicy is missing or ambiguous for competition ${competitionId}`)
+    const method = defaultResultEntryMethod(policies[0]!)
+    const schemas = snapshot.inputSchemas.filter((schema) => schema.inputSchemaId === method.inputSchemaId)
+    if (schemas.length !== 1) throw new Error(`Default InputSchema is missing or ambiguous for competition ${competitionId}`)
+    return structuredClone(schemas[0]!)
   }
 
   async function projectAll(
@@ -286,7 +289,7 @@ export function createHostScoringService(db: AppDatabase) {
 
     for (const competition of snapshot.competitions) {
       const profile = await activeProfile(snapshot, competition.competitionId)
-      const schema = activeInputSchema(snapshot, competition.competitionId)
+      const schema = defaultMethodInputSchema(snapshot, competition.competitionId)
       const sessions = snapshot.scoringSessions.filter(
         (session) => session.competitionId === competition.competitionId,
       )
@@ -405,7 +408,7 @@ export function createHostScoringService(db: AppDatabase) {
         throw new Error('Conflict resolution Result is incompatible with active ConfigVersion')
       }
       const profile = await activeProfile(active.snapshot, result.competitionId)
-      const schema = activeInputSchema(active.snapshot, result.competitionId)
+      const schema = defaultMethodInputSchema(active.snapshot, result.competitionId)
       const allowed = sessionAllowedEntries(active.snapshot, session)
       if (profile.scoringRule) {
         extractRawValues(created.revision, schema, allowed)

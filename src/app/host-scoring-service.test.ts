@@ -5,6 +5,9 @@ import type {
 } from '../domain/ids'
 import type { Result, ResultRevision } from '../domain/result'
 import type { TournamentConfigSnapshot } from '../config/tournament-config'
+import { EXCHANGE_FESTIVAL_TEMPLATE } from '../config/setup/builtin-templates'
+import { compileTournamentSetup } from '../config/setup/setup-compiler'
+import type { TournamentSetupDraft } from '../config/setup/setup-types'
 import { ConfigRepository } from '../db/config-repository'
 import { createDatabase, type AppDatabase } from '../db/database'
 import { ResultRepository } from '../db/result-repository'
@@ -39,6 +42,7 @@ function config(rankPoints: Record<number, number | string> = { 1: 10, 2: 5 }): 
   scoringProfiles: [{ scoringProfileId: ids.profile, competitionId: ids.competition, version: 1, rankingRule: { direction: 'HIGHER_IS_BETTER' }, tieRule: 'AVERAGE_OCCUPIED_PLACES', awardRule: { type: 'RANK_POINTS', rankPoints }, aggregationRule: 'SUM' }], scoringTestCases: [{
     testCaseId: 'test-1',
     competitionId: ids.competition,
+    methodKey: 'score',
     name: '通常順位',
     rounds: [{ roundId: 'test-round-1', label: '第1ラウンド', values: [{ entryId: ids.entryA, value: 2 }, { entryId: ids.entryB, value: 1 }] }],
     expected: [
@@ -46,8 +50,22 @@ function config(rankPoints: Record<number, number | string> = { 1: 10, 2: 5 }): 
       { entryId: ids.entryB, roundRanks: [2], roundAwardScores: [rankPoints[2] ?? 0], aggregateScore: rankPoints[2] ?? 0 },
     ],
   }],
-  resultEntryPolicies: [],
+  resultEntryPolicies: [{
+    competitionId: ids.competition,
+    defaultMethodKey: 'score',
+    allowedMethodKeys: ['score'],
+    methods: [{ methodKey: 'score', label: '得点', kind: 'SCORE', inputMode: 'NUMBER', inputSchemaId: 'schema-number', projection: { type: 'SINGLE_FIELD', fieldKey: 'score', direction: 'HIGHER_IS_BETTER' } }],
+  }],
 } }
+function standardSetupDraft(): TournamentSetupDraft {
+  return {
+    draftFormatVersion: 2, draftId: 'standard-host-config', createdAt: '2026-08-23T00:00:00Z', updatedAt: '2026-08-23T00:00:00Z', currentStep: 'OPERATIONS_CHECK',
+    source: { type: 'STANDARD', templateId: EXCHANGE_FESTIVAL_TEMPLATE.templateId }, tournament: { name: '標準大会' },
+    teams: [{ teamKey: 'team-red', name: '赤組' }, { teamKey: 'team-blue', name: '青組' }],
+    courtStations: [{ stationKey: 'court-a', label: 'Aコート', displayOrder: 0 }, { stationKey: 'court-b', label: 'Bコート', displayOrder: 1 }],
+    competitions: structuredClone(EXCHANGE_FESTIVAL_TEMPLATE.competitions),
+  }
+}
 async function seedConfig(database: AppDatabase, rankPoints?: Record<number, number | string>) { const repository = new ConfigRepository(database); await repository.apply(config(rankPoints), { operator: 'Host', createdAt: '2026-08-19T10:00:00+09:00', changeClass: 'SCORING' }); return repository.getActiveVersion(ids.tournament) }
 function raw(a: string, b: string) { return { inputSchemaId: 'schema-number', inputSchemaVersion: 1, entries: { [ids.entryA]: { score: a }, [ids.entryB]: { score: b } } } }
 function derivedConfig(): TournamentConfigSnapshot {
@@ -93,6 +111,17 @@ async function saveConflict(database: AppDatabase) {
 }
 
 describe('Host authoritative scoring service', () => {
+  it('loads a multi-method standard config through its default method schema', async () => {
+    const database = db()
+    const snapshot = compileTournamentSetup(standardSetupDraft())
+    await new ConfigRepository(database).apply(snapshot, { operator: 'Host', createdAt: '2026-08-23T00:00:00Z', changeClass: 'INPUT_SCHEMA' })
+
+    const state = await createHostScoringService(database).loadAuthoritativeState()
+
+    expect(state.events).toHaveLength(1)
+    expect(state.events[0]!.participants).toEqual([])
+  })
+
   it('uses Task 4 projection and the shared Scoring Engine with Calculation Trace', async () => {
     const database = db(); const active = await seedConfig(database); const { child } = await saveLinear(database); const state = await createHostScoringService(database).loadAuthoritativeState()
     expect(state.configVersionId).toBe(active?.configVersionId); expect(state.projections.find((item) => item.resultId === 'result-r1')?.effectiveRevisionId).toBe(child.revisionId)

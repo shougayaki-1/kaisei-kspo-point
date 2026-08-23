@@ -23,3 +23,12 @@ export interface ResultEntryPolicy {
   allowedMethodKeys: string[]
   methods: ResultEntryMethodDefinition[]
 }
+
+export function defaultResultEntryMethod(policy: ResultEntryPolicy): ResultEntryMethodDefinition {
+  if (!policy.allowedMethodKeys.includes(policy.defaultMethodKey)) {
+    throw new Error(`Default result method ${policy.defaultMethodKey} is not allowed`)
+  }
+  const method = policy.methods.find((item) => item.methodKey === policy.defaultMethodKey)
+  if (!method) throw new Error(`Default result method ${policy.defaultMethodKey} is not defined`)
+  return method
+}

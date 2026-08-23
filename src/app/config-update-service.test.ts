@@ -94,6 +94,7 @@ function snapshotFor(prefix: string, name = `${prefix}大会`): TournamentConfig
     scoringTestCases: [{
       testCaseId: `${prefix}-test-1`,
       competitionId,
+      methodKey: 'score',
       name: '通常順位',
       rounds: [{
         roundId: `${prefix}-round-1`,

@@ -21,6 +21,7 @@ describe('normal reload persistence', () => {
     await before.table('scoringTestCases').put({
       testCaseId: 'test-1',
       competitionId: 'competition-1',
+      methodKey: 'score',
       name: 'regression',
       rounds: [],
       expected: [],

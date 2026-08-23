@@ -17,6 +17,7 @@ const recordByTable: Record<string, Record<string, unknown>> = {
   scoringTestCases: {
     testCaseId: 'test-1',
     competitionId: 'competition-1',
+    methodKey: 'score',
     name: 'regression',
     rounds: [],
     expected: [],

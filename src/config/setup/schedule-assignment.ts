@@ -158,6 +158,7 @@ function isCompatibleSchedule(
   schedule: SetupCompetitionSchedule | undefined,
   competition: SetupCompetitionDraft,
   entries: SetupCompetitionScheduleEntry[],
+  courtStations: SetupCourtStationDraft[],
 ): schedule is SetupCompetitionSchedule {
   if (!schedule) return false
   if (schedule.roundCount !== competition.rounds) return false
@@ -167,7 +168,15 @@ function isCompatibleSchedule(
   const expectedKeys = entries.map((entry) => entry.entryKey)
   const scheduleKeys = schedule.entries.map((entry) => entry.entryKey)
 
-  return JSON.stringify(scheduleKeys) === JSON.stringify(expectedKeys)
+  if (JSON.stringify(scheduleKeys) !== JSON.stringify(expectedKeys)) return false
+
+  const expectedGroups = buildInputGroups(competition, courtStations)
+  if (schedule.inputGroups.length !== expectedGroups.length) return false
+  return schedule.inputGroups.every((group, index) => {
+    const expected = expectedGroups[index]
+    return expected !== undefined && group.roundNumber === expected.roundNumber &&
+      JSON.stringify(group.courtStationKeys) === JSON.stringify(expected.courtStationKeys)
+  })
 }
 
 function seedExistingSchedule(
@@ -349,7 +358,7 @@ export function autoAssignCompetitionSchedule(
   const defaultInputGroups = buildInputGroups(competition, courtStations)
   const entryMap = new Map(entries.map((entry) => [entry.entryKey, entry]))
   const entryKeys = new Set(entries.map((entry) => entry.entryKey))
-  const existingSchedule = isCompatibleSchedule(competition.schedule, competition, entries)
+  const existingSchedule = isCompatibleSchedule(competition.schedule, competition, entries, courtStations)
     ? competition.schedule
     : undefined
 

@@ -30,6 +30,7 @@ export interface ScoringTestExpectedParticipant {
 export interface ScoringTestCase {
   testCaseId: string
   competitionId: CompetitionId
+  methodKey: string
   name: string
   rounds: ScoringTestRound[]
   expected: ScoringTestExpectedParticipant[]

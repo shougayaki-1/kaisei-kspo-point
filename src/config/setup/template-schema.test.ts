@@ -18,4 +18,12 @@ describe('parseTournamentSetupTemplate', () => {
     invalid.competitions[0]!.defaultMethodKey = 'missing'
     expect(() => parseTournamentSetupTemplate(invalid)).toThrow(/default result method/i)
   })
+
+  it('rejects a defined default result method that is not allowed for entry', () => {
+    const invalid = structuredClone(EXCHANGE_FESTIVAL_TEMPLATE)
+    invalid.competitions[0]!.defaultMethodKey = 'score'
+    invalid.competitions[0]!.allowedMethodKeys = ['detail', 'outcome']
+
+    expect(() => parseTournamentSetupTemplate(invalid)).toThrow(/default result method.*allowed/i)
+  })
 })

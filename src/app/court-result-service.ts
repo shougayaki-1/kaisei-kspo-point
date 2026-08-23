@@ -4,6 +4,7 @@ import type {
   NumberInputField,
   PenaltyInputField,
 } from '../config/input-schema'
+import { defaultResultEntryMethod } from '../config/result-entry-policy'
 import { validateTournamentConfig, type TournamentConfigSnapshot } from '../config/tournament-config'
 import {
   canonicalizeDecimalInput,
@@ -150,16 +151,16 @@ function canonicalFieldValue(field: InputField, value: unknown): RawValue | unde
   }
 }
 
-function selectActiveInputSchema(
+function selectDefaultMethodInputSchema(
   snapshot: TournamentConfigSnapshot,
   competitionId: string,
 ): InputSchema {
-  const candidates = snapshot.inputSchemas.filter((schema) => schema.competitionId === competitionId)
-  if (candidates.length === 0) throw new Error(`InputSchema is missing for competition ${competitionId}`)
-  const highestVersion = Math.max(...candidates.map((schema) => schema.version))
-  const highest = candidates.filter((schema) => schema.version === highestVersion)
-  if (highest.length !== 1) throw new Error(`InputSchema is ambiguous for competition ${competitionId}`)
-  return highest[0]!
+  const policies = snapshot.resultEntryPolicies.filter((policy) => policy.competitionId === competitionId)
+  if (policies.length !== 1) throw new Error(`ResultEntryPolicy is missing or ambiguous for competition ${competitionId}`)
+  const method = defaultResultEntryMethod(policies[0]!)
+  const schemas = snapshot.inputSchemas.filter((schema) => schema.inputSchemaId === method.inputSchemaId)
+  if (schemas.length !== 1) throw new Error(`Default InputSchema is missing or ambiguous for competition ${competitionId}`)
+  return schemas[0]!
 }
 
 function rawDataCourtRuns(rawData: RawResultData): CourtRunId[] | undefined {
@@ -199,7 +200,7 @@ export function createCourtResultService(db: AppDatabase, options: CourtResultSe
     if (!session) {
       throw new Error(`ScoringSession ${scoringSessionId} does not exist in the active ConfigVersion`)
     }
-    const inputSchema = selectActiveInputSchema(snapshot, session.competitionId)
+    const inputSchema = selectDefaultMethodInputSchema(snapshot, session.competitionId)
     const persistedSchema = await db.inputSchemas.get(inputSchema.inputSchemaId)
     if (
       !persistedSchema ||
