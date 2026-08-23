@@ -12,6 +12,7 @@ import {
   scoringTestResultFingerprint,
   type ScoringTestRunResult,
 } from '../config/scoring-test-case'
+import { selectUniqueHighestVersion } from '../config/scoring-profile'
 import {
   areConfigVersionsEquivalent,
   materializeConfigVersionId,
@@ -232,10 +233,10 @@ export class ConfigRepository {
     const normalized = normalizeSnapshot(snapshot)
 
     return normalized.scoringTestCases.map((testCase) => {
-      const profile = normalized.scoringProfiles.find(
-        (item) => item.competitionId === testCase.competitionId,
+      const profileSelection = selectUniqueHighestVersion(
+        normalized.scoringProfiles.filter((item) => item.competitionId === testCase.competitionId),
       )
-      if (!profile) {
+      if (profileSelection.status === 'MISSING') {
         return {
           testCaseId: testCase.testCaseId,
           status: 'INVALID' as const,
@@ -244,11 +245,23 @@ export class ConfigRepository {
           message: `ScoringProfile が競技 ${testCase.competitionId} に設定されていません。`,
         }
       }
+      if (profileSelection.status === 'AMBIGUOUS') {
+        return {
+          testCaseId: testCase.testCaseId,
+          status: 'INVALID' as const,
+          actual: [],
+          diffs: [],
+          message: `ScoringProfile for ${testCase.competitionId} highest version is ambiguous.`,
+        }
+      }
+      const profile = profileSelection.value
 
       const entries = normalized.competitionEntries.filter(
         (entry) => entry.competitionId === testCase.competitionId,
       )
-      if (!testCase.rounds.some((round) => round.rawValues !== undefined)) {
+      const usesMethodProjection = testCase.rounds.some((round) => round.rawValues !== undefined) &&
+        !profile.scoringRule
+      if (!usesMethodProjection) {
         return runScoringTestCase(testCase, profile, entries)
       }
       const policy = normalized.resultEntryPolicies.find(
@@ -458,10 +471,13 @@ export class ConfigRepository {
       if (index < 0) {
         throw new ScoringRegressionError(regressionResults)
       }
-      const profile = normalizedInput.scoringProfiles.find(
-        (candidate) => candidate.competitionId === appliedSnapshot.scoringTestCases[index]!.competitionId,
+      const profileSelection = selectUniqueHighestVersion(
+        normalizedInput.scoringProfiles.filter(
+          (candidate) => candidate.competitionId === appliedSnapshot.scoringTestCases[index]!.competitionId,
+        ),
       )
-      if (!profile) throw new ScoringRegressionError(regressionResults)
+      if (profileSelection.status !== 'SELECTED') throw new ScoringRegressionError(regressionResults)
+      const profile = profileSelection.value
       appliedSnapshot.scoringTestCases[index] = approveScoringTestChange(
         appliedSnapshot.scoringTestCases[index],
         result,

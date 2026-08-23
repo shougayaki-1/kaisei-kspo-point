@@ -135,6 +135,33 @@ describe('scoring test config validation', () => {
     expect(errorCodes(config)).toContain('SCORING_TEST_METHOD_SCHEMA_COMPETITION_MISMATCH')
   })
 
+  it.each([false, true])('uses the highest-version derived profile regardless of array order (%s)', (derivedFirst) => {
+    const config = snapshot()
+    config.resultEntryPolicies = []
+    const nonDerived = { ...config.scoringProfiles[0]!, version: 1 }
+    const derived = {
+      ...config.scoringProfiles[0]!,
+      scoringProfileId: 'profile-2' as ScoringProfileId,
+      version: 2,
+      scoringRule: { type: 'WEIGHTED_SUM' as const, terms: [{ fieldKey: 'score', weight: 1 }] },
+    }
+    config.scoringProfiles = derivedFirst ? [derived, nonDerived] : [nonDerived, derived]
+
+    expect(errorCodes(config)).not.toContain('MISSING_SCORING_TEST_METHOD_POLICY')
+  })
+
+  it('rejects an ambiguous highest-version scoring profile for a method-aware test', () => {
+    const config = snapshot()
+    const duplicateHighest = {
+      ...config.scoringProfiles[0]!,
+      scoringProfileId: 'profile-2' as ScoringProfileId,
+      version: 1,
+    }
+    config.scoringProfiles.push(duplicateHighest)
+
+    expect(errorCodes(config)).toContain('AMBIGUOUS_SCORING_PROFILE_VERSION')
+  })
+
   it('rejects an unknown competition and missing rounds', () => {
     const config = snapshot()
     config.scoringTestCases[0].competitionId = 'missing-competition' as CompetitionId

@@ -103,6 +103,51 @@ afterEach(async () => {
 })
 
 describe('ConfigRepository scoring regression gate', () => {
+  it.each([false, true])('previews raw regression input with the highest-version derived profile regardless of array order (%s)', async (derivedFirst) => {
+    const db = makeDb()
+    const repository = new ConfigRepository(db)
+    const config = snapshot()
+    const competitionId = config.competitions[0]!.competitionId
+    const entryOne = config.competitionEntries[0]!.entryId
+    const entryTwo = config.competitionEntries[1]!.entryId
+    const nonDerived = { ...config.scoringProfiles[0]!, version: 1 }
+    const derived = {
+      ...config.scoringProfiles[0]!,
+      scoringProfileId: 'profile-2' as ScoringProfileId,
+      version: 2,
+      scoringRule: { type: 'WEIGHTED_SUM' as const, terms: [{ fieldKey: 'score', weight: 1 }] },
+    }
+    config.scoringProfiles = derivedFirst ? [derived, nonDerived] : [nonDerived, derived]
+    config.inputSchemas = [{
+      inputSchemaId: 'schema-score', competitionId, version: 1,
+      fields: [{ key: 'score', label: '得点', type: 'NUMBER', required: true, min: 0 }],
+    }]
+    config.resultEntryPolicies = []
+    config.scoringTestCases[0]!.rounds = [{
+      roundId: 'raw-round', label: '代表', rawValues: [
+        { entryId: entryOne, fields: { score: 2 } },
+        { entryId: entryTwo, fields: { score: 1 } },
+      ],
+    }]
+
+    expect((await repository.previewRegression(config)).map((result) => result.status)).toEqual(['PASS'])
+  })
+
+  it('returns INVALID when the highest scoring-profile version is ambiguous', async () => {
+    const db = makeDb()
+    const repository = new ConfigRepository(db)
+    const config = snapshot()
+    config.scoringProfiles.push({
+      ...config.scoringProfiles[0]!,
+      scoringProfileId: 'profile-2' as ScoringProfileId,
+      version: 1,
+    })
+
+    const [result] = await repository.previewRegression(config)
+    expect(result?.status).toBe('INVALID')
+    expect(result?.message).toMatch(/highest version.*ambiguous/i)
+  })
+
   it('persists saved scoring tests in the normalized configuration store', async () => {
     const db = makeDb()
     const repository = new ConfigRepository(db)

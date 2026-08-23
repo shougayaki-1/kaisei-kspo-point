@@ -16,7 +16,7 @@ import type {
 } from '../domain/tournament'
 import type { InputField, InputSchema } from './input-schema'
 import type { ResultEntryMethodDefinition, ResultEntryPolicy } from './result-entry-policy'
-import { unsupportedScoringProfileMessage } from './scoring-profile'
+import { selectUniqueHighestVersion, unsupportedScoringProfileMessage } from './scoring-profile'
 import type { ScoringTestCase } from './scoring-test-case'
 
 export interface TournamentConfigSnapshot {
@@ -201,7 +201,7 @@ function validateScoringTestCase(
   testCase: ScoringTestCase,
   competitions: Map<string, Competition>,
   entries: Map<string, CompetitionEntry>,
-  profiles: Map<string, ScoringProfile>,
+  profilesByCompetition: Map<string, ScoringProfile[]>,
   policiesByCompetition: Map<string, ResultEntryPolicy[]>,
   schemasById: Map<string, InputSchema[]>,
 ): void {
@@ -222,8 +222,19 @@ function validateScoringTestCase(
       testCase.testCaseId,
     )
   }
+  const profileSelection = selectUniqueHighestVersion(
+    profilesByCompetition.get(testCase.competitionId) ?? [],
+  )
+  if (profileSelection.status === 'AMBIGUOUS') {
+    error(
+      issues,
+      'AMBIGUOUS_SCORING_PROFILE_VERSION',
+      `得点テストの競技にversion ${profileSelection.version} のScoringProfileが複数あります。`,
+      testCase.testCaseId,
+    )
+  }
   const usesMethodProjection = testCase.rounds.some((round) => round.rawValues !== undefined) &&
-    !profiles.get(testCase.competitionId)?.scoringRule
+    profileSelection.status === 'SELECTED' && !profileSelection.value.scoringRule
   const policies = policiesByCompetition.get(testCase.competitionId) ?? []
   if (policies.length === 0) {
     if (usesMethodProjection) {
@@ -494,7 +505,12 @@ export function validateTournamentConfig(snapshot: TournamentConfigSnapshot): Co
   const teams = new Map(snapshot.teams.map((item) => [item.teamId, item]))
   const competitions = new Map(snapshot.competitions.map((item) => [item.competitionId, item]))
   const entries = new Map(snapshot.competitionEntries.map((item) => [item.entryId, item]))
-  const profiles = new Map(snapshot.scoringProfiles.map((item) => [item.competitionId, item]))
+  const profilesByCompetition = new Map<string, ScoringProfile[]>()
+  for (const profile of snapshot.scoringProfiles) {
+    const profiles = profilesByCompetition.get(profile.competitionId) ?? []
+    profiles.push(profile)
+    profilesByCompetition.set(profile.competitionId, profiles)
+  }
   const policiesByCompetition = new Map<string, ResultEntryPolicy[]>()
   for (const policy of snapshot.resultEntryPolicies) {
     const policies = policiesByCompetition.get(policy.competitionId) ?? []
@@ -737,7 +753,7 @@ export function validateTournamentConfig(snapshot: TournamentConfigSnapshot): Co
       testCase,
       competitions,
       entries,
-      profiles,
+      profilesByCompetition,
       policiesByCompetition,
       schemasById,
     )
