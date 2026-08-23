@@ -1,8 +1,8 @@
-import type { InputField, InputSchema } from '../config/input-schema'
+import type { InputSchema } from '../config/input-schema'
 import { defaultResultEntryMethod } from '../config/result-entry-policy'
 import { unsupportedScoringProfileMessage } from '../config/scoring-profile'
 import type { TournamentConfigSnapshot } from '../config/tournament-config'
-import { canonicalizeDecimalInput, type ExactValue } from '../domain/exact-decimal'
+import type { ExactValue } from '../domain/exact-decimal'
 import type {
   CompetitionEntryId,
   CompetitionId,
@@ -13,13 +13,14 @@ import type {
   TeamId,
   TournamentId,
 } from '../domain/ids'
-import type { InputMode, RawResultData, RawValue, Result, ResultRevision } from '../domain/result'
+import type { RawResultData, RawValue, Result, ResultRevision } from '../domain/result'
 import {
   createConflictResolution,
   type ConflictResolutionChoice,
   type ConflictResolutionRecord,
   type ResultConflictState,
 } from '../domain/result-projection'
+import { projectResultEntry, type CanonicalCompetitionResult } from '../domain/result-entry-projection'
 import { calculateScoringScenario } from '../domain/scoring-engine'
 import type {
   CalculationTraceStep,
@@ -99,30 +100,6 @@ function selectHighestVersion<T extends { version: number }>(
   return selected[0]!
 }
 
-function comparisonField(schema: InputSchema, inputMode: InputMode): InputField {
-  let type: InputField['type']
-  switch (inputMode) {
-    case 'NUMBER':
-      type = 'NUMBER'
-      break
-    case 'TIMER':
-    case 'TIME_MANUAL':
-      type = 'TIME'
-      break
-    case 'RANK_MANUAL':
-      type = 'RANK'
-      break
-    case 'WIN_LOSS':
-    case 'SPECIAL':
-      throw new Error(`InputMode ${inputMode} does not define an exact production comparison value`)
-  }
-  const fields = schema.fields.filter((field) => field.type === type)
-  if (fields.length !== 1) {
-    throw new Error(`InputSchema must define exactly one ${type} comparison field for ${inputMode}`)
-  }
-  return fields[0]!
-}
-
 function readRawEntries(rawData: RawResultData): RawEntryMap {
   const entries = rawData.entries
   if (entries === null || typeof entries !== 'object' || Array.isArray(entries)) {
@@ -136,27 +113,6 @@ function readRawEntries(rawData: RawResultData): RawEntryMap {
     output[entryId] = row as Record<string, RawValue>
   }
   return output
-}
-
-function extractComparisonValues(
-  revision: ResultRevision,
-  schema: InputSchema,
-  allowedEntryIds: Set<CompetitionEntryId>,
-): Map<CompetitionEntryId, ExactValue> {
-  if (revision.rawData.inputSchemaId !== schema.inputSchemaId || revision.rawData.inputSchemaVersion !== schema.version) {
-    throw new Error(`Result revision ${revision.revisionId} is incompatible with active InputSchema`)
-  }
-  const field = comparisonField(schema, revision.inputMode)
-  const entries = extractRawValues(revision, schema, allowedEntryIds)
-  const values = new Map<CompetitionEntryId, ExactValue>()
-  for (const [entryId, row] of entries) {
-    const raw = row[field.key]
-    if (typeof raw !== 'string' && typeof raw !== 'number') {
-      throw new Error(`Comparison field ${field.key} for ${entryId} is missing or non-numeric`)
-    }
-    values.set(entryId, canonicalizeDecimalInput(raw))
-  }
-  return values
 }
 
 function extractRawValues(
@@ -232,6 +188,44 @@ export function createHostScoringService(db: AppDatabase) {
     return structuredClone(schemas[0]!)
   }
 
+  async function pinnedConfigSnapshot(
+    tournamentId: TournamentId,
+    active: { version: number; snapshot: TournamentConfigSnapshot },
+    revisionConfigVersion: number,
+  ): Promise<TournamentConfigSnapshot> {
+    if (revisionConfigVersion === active.version) return active.snapshot
+    const versions = await configRepository.listVersions(tournamentId)
+    const historical = versions.find((item) => item.version === revisionConfigVersion)
+    if (!historical) {
+      throw new Error(
+        `CONFIG_MISMATCH: 保存された結果の設定バージョン(v${revisionConfigVersion})が見つかりません。`,
+      )
+    }
+    return historical.snapshot
+  }
+
+  async function projectPinnedRevision(
+    tournamentId: TournamentId,
+    active: { version: number; snapshot: TournamentConfigSnapshot },
+    revision: ResultRevision,
+    competitionId: CompetitionId,
+    allowedEntryIds: Set<CompetitionEntryId>,
+  ): Promise<CanonicalCompetitionResult> {
+    const pinnedSnapshot = await pinnedConfigSnapshot(tournamentId, active, revision.configVersion)
+    const policy = pinnedSnapshot.resultEntryPolicies.find((item) => item.competitionId === competitionId)
+    if (!policy) {
+      throw new Error(`CONFIG_MISMATCH: 保存時点の入力方式設定が見つかりません（競技 ${competitionId}）。`)
+    }
+    const method = policy.methods.find((item) => item.inputSchemaId === revision.rawData.inputSchemaId)
+    const schema = pinnedSnapshot.inputSchemas.find((item) => item.inputSchemaId === revision.rawData.inputSchemaId)
+    if (!method || !schema) {
+      throw new Error(`CONFIG_MISMATCH: 保存時点の入力方式またはInputSchemaが見つかりません（Revision ${revision.revisionId}）。`)
+    }
+    const rawEntries = extractRawValues(revision, schema, allowedEntryIds)
+    const entries = Object.fromEntries(rawEntries) as Record<CompetitionEntryId, Record<string, RawValue>>
+    return projectResultEntry({ method, schema, entries })
+  }
+
   async function projectAll(
     snapshot: TournamentConfigSnapshot,
   ): Promise<{ views: HostProjectionView[]; effective: Map<ResultId, ResultRevision> }> {
@@ -295,13 +289,13 @@ export function createHostScoringService(db: AppDatabase) {
       )
       const rounds: Array<{
         roundId: string
-        values?: Array<{ participantId: CompetitionEntryId; value: ExactValue }>
         rawValues?: RawParticipantValue<CompetitionEntryId>[]
+        projected?: Array<{ participantId: CompetitionEntryId; rank: number; comparisonValue?: ExactValue; outcome?: import('../domain/scoring').MatchOutcome }>
       }> = []
 
       for (const session of sessions) {
         const allowed = sessionAllowedEntries(snapshot, session)
-        const merged = new Map<CompetitionEntryId, ExactValue>()
+        const mergedProjected = new Map<CompetitionEntryId, { rank: number; comparisonValue?: ExactValue; outcome?: import('../domain/scoring').MatchOutcome }>()
         const mergedRaw = new Map<CompetitionEntryId, Record<string, RawValue>>()
         for (const result of resultBySession.get(session.scoringSessionId) ?? []) {
           const revision = effective.get(result.resultId)
@@ -315,12 +309,22 @@ export function createHostScoringService(db: AppDatabase) {
               mergedRaw.set(entryId, value)
             }
           } else {
-            const values = extractComparisonValues(revision, schema, allowed)
-            for (const [entryId, value] of values) {
-              if (merged.has(entryId)) {
-                throw new Error(`Duplicate authoritative Result for CompetitionEntry ${entryId} in ScoringSession ${session.scoringSessionId}`)
+            const canonical = await projectPinnedRevision(
+              snapshot.tournament.tournamentId,
+              active,
+              revision,
+              competition.competitionId,
+              allowed,
+            )
+            for (const entryResult of canonical.entries) {
+              if (mergedProjected.has(entryResult.entryId)) {
+                throw new Error(`Duplicate authoritative Result for CompetitionEntry ${entryResult.entryId} in ScoringSession ${session.scoringSessionId}`)
               }
-              merged.set(entryId, value)
+              mergedProjected.set(entryResult.entryId, {
+                rank: entryResult.rank,
+                ...(entryResult.comparisonValue !== undefined ? { comparisonValue: entryResult.comparisonValue } : {}),
+                ...(entryResult.outcome !== undefined ? { outcome: entryResult.outcome } : {}),
+              })
             }
           }
         }
@@ -331,12 +335,12 @@ export function createHostScoringService(db: AppDatabase) {
               .sort(([left], [right]) => compareId(left, right))
               .map(([participantId, fields]) => ({ participantId, fields })),
           })
-        } else if (merged.size > 0) {
+        } else if (mergedProjected.size > 0) {
           rounds.push({
             roundId: session.scoringSessionId,
-            values: [...merged.entries()]
+            projected: [...mergedProjected.entries()]
               .sort(([left], [right]) => compareId(left, right))
-              .map(([participantId, value]) => ({ participantId, value })),
+              .map(([participantId, value]) => ({ participantId, ...value })),
           })
         }
       }
@@ -408,12 +412,18 @@ export function createHostScoringService(db: AppDatabase) {
         throw new Error('Conflict resolution Result is incompatible with active ConfigVersion')
       }
       const profile = await activeProfile(active.snapshot, result.competitionId)
-      const schema = defaultMethodInputSchema(active.snapshot, result.competitionId)
       const allowed = sessionAllowedEntries(active.snapshot, session)
       if (profile.scoringRule) {
+        const schema = defaultMethodInputSchema(active.snapshot, result.competitionId)
         extractRawValues(created.revision, schema, allowed)
       } else {
-        extractComparisonValues(created.revision, schema, allowed)
+        await projectPinnedRevision(
+          active.snapshot.tournament.tournamentId,
+          active,
+          created.revision,
+          result.competitionId,
+          allowed,
+        )
       }
       await resultRepository.saveConflictResolution(created.revision, created.resolution)
     },

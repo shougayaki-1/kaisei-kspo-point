@@ -203,6 +203,40 @@ describe('Host authoritative scoring service', () => {
     const database = db(); const repository = new ConfigRepository(database); const initial = config({ 1: 10, 2: 5 }); await repository.apply(initial, { operator: 'Host', createdAt: '2026-08-19T10:00:00+09:00', changeClass: 'SCORING' }); const changed = structuredClone(initial); changed.scoringProfiles[0]!.awardRule.rankPoints = { 1: 30, 2: 10 }; const preview = await repository.previewRegression(changed); await repository.apply(changed, { operator: 'Host', createdAt: '2026-08-19T10:01:00+09:00', changeClass: 'SCORING', scoringTestApprovals: preview.filter((item) => item.status === 'FAIL').map((item) => ({ testCaseId: item.testCaseId, actualFingerprint: scoringTestResultFingerprint(item), operator: 'Host', approvedAt: '2026-08-19T10:00:30+09:00' })) }); await saveLinear(database)
     const state = await createHostScoringService(database).loadAuthoritativeState(); expect(state.configVersion).toBe(2); expect(state.events[0]?.scoringProfileId).toBe(ids.profile); expect(state.events[0]?.participants.map((item) => item.aggregateScore).sort()).toEqual([40, 40]); expect(state.standings.map((row) => row.teamName).sort()).toEqual(['Configured Blue', 'Configured Red'])
   })
+  it("resolves scoring by the Revision's own pinned ConfigVersion, not merely the current active method/schema", async () => {
+    const database = db()
+    const repository = new ConfigRepository(database)
+    const v1 = config({ 1: 10, 2: 5 })
+    await repository.apply(v1, { operator: 'Host', createdAt: '2026-08-19T10:00:00+09:00', changeClass: 'SCORING' })
+    const resultRepository = new ResultRepository(database)
+    const r1 = result('pinned-result', ids.session1, 'pinned-rev')
+    const rev1 = revision('pinned-result', 'pinned-rev', 1, [], '3', '2')
+    await resultRepository.saveResultWithRevision(r1, rev1)
+
+    const v2 = structuredClone(v1)
+    v2.inputSchemas.push({ inputSchemaId: 'schema-rank', competitionId: ids.competition, version: 1, fields: [{ key: 'rank', label: '順位', type: 'RANK', required: true, allowTies: false }] })
+    v2.resultEntryPolicies[0]!.defaultMethodKey = 'rank'
+    v2.resultEntryPolicies[0]!.allowedMethodKeys = ['score', 'rank']
+    v2.resultEntryPolicies[0]!.methods.push({
+      methodKey: 'rank', label: '順位', kind: 'RANK', inputMode: 'RANK_MANUAL', inputSchemaId: 'schema-rank',
+      projection: { type: 'DIRECT_RANK', fieldKey: 'rank' },
+    })
+    const preview = await repository.previewRegression(v2)
+    await repository.apply(v2, {
+      operator: 'Host', createdAt: '2026-08-19T10:05:00+09:00', changeClass: 'INPUT_SCHEMA',
+      scoringTestApprovals: preview.filter((item) => item.status === 'FAIL').map((item) => ({
+        testCaseId: item.testCaseId, actualFingerprint: scoringTestResultFingerprint(item), operator: 'Host', approvedAt: '2026-08-19T10:04:30+09:00',
+      })),
+    })
+
+    const state = await createHostScoringService(database).loadAuthoritativeState()
+    expect(state.configVersion).toBe(2)
+    const round1 = state.events[0]!.participants
+      .find((participant) => participant.entryId === ids.entryA)!
+      .rounds.find((round) => round.roundId === ids.session1)!
+    expect(round1.rank).toBe(1)
+  })
+
   it('fails closed for incompatible raw Result/config or missing ScoringProfile', async () => {
     const database = db(); await seedConfig(database); const repository = new ResultRepository(database); const badResult = result('bad-result', ids.session1, 'bad-rev'); const badRevision = revision('bad-result', 'bad-rev', 1, [], '1', '2'); badRevision.rawData = { inputSchemaId: 'schema-number', inputSchemaVersion: 1, entries: { ['unknown-entry']: { score: '9' } } }; await repository.saveResultWithRevision(badResult, badRevision); await expect(createHostScoringService(database).loadAuthoritativeState()).rejects.toThrow(/entry|config|incompatible|unknown/i)
     await database.results.clear(); await database.resultRevisions.clear(); await saveLinear(database); await database.scoringProfiles.clear(); await expect(createHostScoringService(database).loadAuthoritativeState()).rejects.toThrow(/ScoringProfile|profile/i)

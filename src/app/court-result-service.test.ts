@@ -44,10 +44,15 @@ function snapshot(): TournamentConfigSnapshot { return {
   scheduleSlots: [{ slotId: ids.slot, competitionId: ids.competition, label: '第1展開', displayOrder: 1 }],
   courtRuns: [{ courtRunId: ids.runA, slotId: ids.slot, courtStationId: ids.courtA, participantEntryIds: [ids.entryA] }, { courtRunId: ids.runB, slotId: ids.slot, courtStationId: ids.courtB, participantEntryIds: [ids.entryB] }],
   scoringSessions: [{ scoringSessionId: ids.session, competitionId: ids.competition, slotId: ids.slot, label: '第1展開 全体', displayOrder: 1, leadCourtStationId: ids.courtA, courtRunIds: [ids.runA, ids.runB], inputScope: 'WHOLE_SLOT' }],
-  inputSchemas: [{ inputSchemaId: 'schema-1', competitionId: ids.competition, version: 1, fields: [
-    { key: 'count', label: '個数', type: 'NUMBER', required: true, min: '0', max: '100' },
-    { key: 'verified', label: '確認', type: 'BOOLEAN', required: true },
-  ] }],
+  inputSchemas: [
+    { inputSchemaId: 'schema-1', competitionId: ids.competition, version: 1, fields: [
+      { key: 'count', label: '個数', type: 'NUMBER', required: true, min: '0', max: '100' },
+      { key: 'verified', label: '確認', type: 'BOOLEAN', required: true },
+    ] },
+    { inputSchemaId: 'schema-outcome', competitionId: ids.competition, version: 1, fields: [
+      { key: 'winner', label: '勝敗', type: 'WIN_LOSS', required: true },
+    ] },
+  ],
   scoringProfiles: [{ scoringProfileId: 'profile-1' as ScoringProfileId, competitionId: ids.competition, version: 1, rankingRule: { direction: 'HIGHER_IS_BETTER' }, tieRule: 'AVERAGE_OCCUPIED_PLACES', awardRule: { type: 'RANK_POINTS', rankPoints: { 1: 10, 2: 5 } }, aggregationRule: 'SUM' }],
   scoringTestCases: [{
     testCaseId: 'test-1',
@@ -63,8 +68,11 @@ function snapshot(): TournamentConfigSnapshot { return {
   resultEntryPolicies: [{
     competitionId: ids.competition,
     defaultMethodKey: 'score',
-    allowedMethodKeys: ['score'],
-    methods: [{ methodKey: 'score', label: '得点', kind: 'SCORE', inputMode: 'NUMBER', inputSchemaId: 'schema-1', projection: { type: 'SINGLE_FIELD', fieldKey: 'count', direction: 'HIGHER_IS_BETTER' } }],
+    allowedMethodKeys: ['score', 'outcome'],
+    methods: [
+      { methodKey: 'score', label: '得点', kind: 'SCORE', inputMode: 'NUMBER', inputSchemaId: 'schema-1', projection: { type: 'SINGLE_FIELD', fieldKey: 'count', direction: 'HIGHER_IS_BETTER' } },
+      { methodKey: 'outcome', label: '勝敗', kind: 'OUTCOME', inputMode: 'WIN_LOSS', inputSchemaId: 'schema-outcome', projection: { type: 'DIRECT_OUTCOME', fieldKey: 'winner' } },
+    ],
   }],
 } }
 function standardSetupDraft(): TournamentSetupDraft {
@@ -164,5 +172,77 @@ describe('Court production Result service', () => {
     const name = `court-result-reload-${crypto.randomUUID()}`; const db1 = open(name); await seed(db1); const firstService = service(db1)
     const first = await firstService.saveResult({ scoringSessionId: ids.session, operator: '担当者A', inputMode: 'NUMBER', values: allValues('1', '2') }); await firstService.correctResult({ resultId: first.result.resultId, operator: '担当者B', inputMode: 'NUMBER', values: allValues('2', '3') }); db1.close()
     const db2 = open(name); const restored = await service(db2).getResultHistory(first.result.resultId); expect(restored.result.resultId).toBe(first.result.resultId); expect(restored.revisions).toHaveLength(2); expect(restored.projection.effectiveRevision?.revisionNumber).toBe(2)
+  })
+
+  describe('method-aware entry', () => {
+    function outcomeValues(winner: 'a' | 'b') {
+      return {
+        [ids.entryA]: { winner: winner === 'a' ? 'WIN' : 'LOSS' },
+        [ids.entryB]: { winner: winner === 'a' ? 'LOSS' : 'WIN' },
+      }
+    }
+
+    it('loads the policy, default method, allowed methods, and their schemas', async () => {
+      const db = open(); await seed(db); const target = service(db) as unknown as {
+        loadTask(scoringSessionId: ScoringSessionId): Promise<{
+          policy: { defaultMethodKey: string; allowedMethodKeys: string[] }
+          allowedMethods: Array<{ methodKey: string }>
+          schemasByMethodKey: Record<string, { inputSchemaId: string }>
+        }>
+      }
+      const task = await target.loadTask(ids.session)
+      expect(task.policy.defaultMethodKey).toBe('score')
+      expect(task.policy.allowedMethodKeys).toEqual(['score', 'outcome'])
+      expect(task.allowedMethods.map((method) => method.methodKey)).toEqual(['score', 'outcome'])
+      expect(task.schemasByMethodKey.score?.inputSchemaId).toBe('schema-1')
+      expect(task.schemasByMethodKey.outcome?.inputSchemaId).toBe('schema-outcome')
+    })
+
+    it('saves through a non-default allowed method using that method\'s own schema', async () => {
+      const db = open(); await seed(db); const target = service(db) as unknown as {
+        saveResult(input: { scoringSessionId: ScoringSessionId; operator: string; methodKey: string; values: Record<string, Record<string, unknown>> }): Promise<{ result: Result; revision: ResultRevision }>
+      }
+      const saved = await target.saveResult({ scoringSessionId: ids.session, operator: '担当者', methodKey: 'outcome', values: outcomeValues('a') })
+      expect(saved.revision.inputMode).toBe('WIN_LOSS')
+      expect(saved.revision.rawData).toMatchObject({ inputSchemaId: 'schema-outcome', inputSchemaVersion: 1 })
+    })
+
+    it('rejects a method that is not in the allowed list', async () => {
+      const db = open(); await seed(db); const target = service(db) as unknown as {
+        saveResult(input: { scoringSessionId: ScoringSessionId; operator: string; methodKey: string; values: Record<string, Record<string, unknown>> }): Promise<unknown>
+      }
+      await expect(target.saveResult({ scoringSessionId: ids.session, operator: '担当者', methodKey: 'not-a-method', values: {} }))
+        .rejects.toThrow(/not allowed|not defined/i)
+    })
+
+    it('previews the same projected rank/outcome that Host scoring would compute', async () => {
+      const db = open(); await seed(db); const target = service(db) as unknown as {
+        previewResult(input: { scoringSessionId: ScoringSessionId; methodKey: string; values: Record<string, Record<string, unknown>> }): Promise<{
+          methodKey: string
+          projection: { entries: Array<{ entryId: CompetitionEntryId; rank: number; outcome?: string }> }
+        }>
+      }
+      const preview = await target.previewResult({ scoringSessionId: ids.session, methodKey: 'outcome', values: outcomeValues('b') })
+      expect(preview.methodKey).toBe('outcome')
+      expect(preview.projection.entries).toEqual(expect.arrayContaining([
+        expect.objectContaining({ entryId: ids.entryA, rank: 2, outcome: 'LOSS' }),
+        expect.objectContaining({ entryId: ids.entryB, rank: 1, outcome: 'WIN' }),
+      ]))
+    })
+
+    it('defaults a correction to the original method and can switch to another allowed method', async () => {
+      const db = open(); await seed(db); const target = service(db) as unknown as {
+        saveResult(input: { scoringSessionId: ScoringSessionId; operator: string; methodKey: string; values: Record<string, Record<string, unknown>> }): Promise<{ result: Result; revision: ResultRevision }>
+        correctResult(input: { resultId: ResultId; operator: string; methodKey?: string; values: Record<string, Record<string, unknown>> }): Promise<{ result: Result; revision: ResultRevision }>
+      }
+      const first = await target.saveResult({ scoringSessionId: ids.session, operator: '担当者A', methodKey: 'score', values: allValues('1', '2') })
+
+      const sameMethodCorrection = await target.correctResult({ resultId: first.result.resultId, operator: '担当者B', values: allValues('9', '2') })
+      expect(sameMethodCorrection.revision.rawData).toMatchObject({ inputSchemaId: 'schema-1' })
+
+      const switched = await target.correctResult({ resultId: first.result.resultId, operator: '担当者C', methodKey: 'outcome', values: outcomeValues('a') })
+      expect(switched.revision.inputMode).toBe('WIN_LOSS')
+      expect(switched.revision.rawData).toMatchObject({ inputSchemaId: 'schema-outcome' })
+    })
   })
 })

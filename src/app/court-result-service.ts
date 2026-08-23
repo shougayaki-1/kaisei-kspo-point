@@ -5,6 +5,7 @@ import type {
   PenaltyInputField,
 } from '../config/input-schema'
 import { defaultResultEntryMethod } from '../config/result-entry-policy'
+import type { ResultEntryMethodDefinition, ResultEntryPolicy } from '../config/result-entry-policy'
 import { validateTournamentConfig, type TournamentConfigSnapshot } from '../config/tournament-config'
 import {
   canonicalizeDecimalInput,
@@ -29,6 +30,7 @@ import {
   type Result,
   type ResultRevision,
 } from '../domain/result'
+import { projectResultEntry, type CanonicalCompetitionResult } from '../domain/result-entry-projection'
 import type { ResultProjection } from '../domain/result-projection'
 import type { CompetitionEntry, CourtRun, InputScope, ScoringSession } from '../domain/tournament'
 import { ConfigRepository } from '../db/config-repository'
@@ -46,7 +48,11 @@ export interface CourtScoringSessionOption {
 export interface CourtSessionDefinition {
   tournamentId: TournamentId
   session: ScoringSession
+  /** @deprecated use schemasByMethodKey[policy.defaultMethodKey] */
   inputSchema: InputSchema
+  policy: ResultEntryPolicy
+  allowedMethods: ResultEntryMethodDefinition[]
+  schemasByMethodKey: Record<string, InputSchema>
   courtRuns: CourtRun[]
   entries: CompetitionEntry[]
   configVersion: number
@@ -65,14 +71,20 @@ export interface SaveCourtResultInput {
   scoringSessionId: ScoringSessionId
   courtRunIds?: CourtRunId[]
   operator: string
-  inputMode: InputMode
+  /** Selects an allowed method for this task; defaults to the Host's configured default method. */
+  methodKey?: string
+  /** @deprecated ignored once methodKey resolves a method; retained for source compatibility. */
+  inputMode?: InputMode
   values: Record<string, Record<string, unknown>>
 }
 
 export interface CorrectCourtResultInput {
   resultId: ResultId
   operator: string
-  inputMode: InputMode
+  /** Selects an allowed method for the correction; defaults to the original Revision's method. */
+  methodKey?: string
+  /** @deprecated ignored once methodKey resolves a method; retained for source compatibility. */
+  inputMode?: InputMode
   values: Record<string, Record<string, unknown>>
 }
 
@@ -85,6 +97,19 @@ export interface CourtResultHistory {
 export interface CourtResultServiceOptions {
   deviceId: DeviceId
   now?: () => string
+}
+
+export interface PreviewCourtResultInput {
+  scoringSessionId: ScoringSessionId
+  courtRunIds?: CourtRunId[]
+  methodKey?: string
+  values: Record<string, Record<string, unknown>>
+}
+
+export interface CourtResultPreview {
+  methodKey: string
+  schema: InputSchema
+  projection: CanonicalCompetitionResult
 }
 
 function clone<T>(value: T): T {
@@ -152,16 +177,23 @@ function canonicalFieldValue(field: InputField, value: unknown): RawValue | unde
   }
 }
 
-function selectDefaultMethodInputSchema(
-  snapshot: TournamentConfigSnapshot,
-  competitionId: string,
-): InputSchema {
-  const policies = snapshot.resultEntryPolicies.filter((policy) => policy.competitionId === competitionId)
-  if (policies.length !== 1) throw new Error(`ResultEntryPolicy is missing or ambiguous for competition ${competitionId}`)
-  const method = defaultResultEntryMethod(policies[0]!)
-  const schemas = snapshot.inputSchemas.filter((schema) => schema.inputSchemaId === method.inputSchemaId)
-  if (schemas.length !== 1) throw new Error(`Default InputSchema is missing or ambiguous for competition ${competitionId}`)
-  return schemas[0]!
+function resolveMethod(
+  policy: ResultEntryPolicy,
+  schemasByMethodKey: Record<string, InputSchema>,
+  methodKey: string | undefined,
+): { method: ResultEntryMethodDefinition; schema: InputSchema } {
+  const key = methodKey ?? policy.defaultMethodKey
+  if (!policy.allowedMethodKeys.includes(key)) {
+    throw new Error(`Result entry method ${key} is not allowed for competition ${policy.competitionId}`)
+  }
+  const method = policy.methods.find((item) => item.methodKey === key)
+  const schema = schemasByMethodKey[key]
+  if (!method || !schema) throw new Error(`Result entry method ${key} is not defined`)
+  return { method, schema }
+}
+
+function methodKeyForSchemaId(policy: ResultEntryPolicy, inputSchemaId: string): string | undefined {
+  return policy.methods.find((item) => item.inputSchemaId === inputSchemaId)?.methodKey
 }
 
 function rawDataCourtRuns(rawData: RawResultData): CourtRunId[] | undefined {
@@ -201,15 +233,34 @@ export function createCourtResultService(db: AppDatabase, options: CourtResultSe
     if (!session) {
       throw new Error(`ScoringSession ${scoringSessionId} does not exist in the active ConfigVersion`)
     }
-    const inputSchema = selectDefaultMethodInputSchema(snapshot, session.competitionId)
-    const persistedSchema = await db.inputSchemas.get(inputSchema.inputSchemaId)
-    if (
-      !persistedSchema ||
-      persistedSchema.version !== inputSchema.version ||
-      persistedSchema.competitionId !== inputSchema.competitionId
-    ) {
-      throw new Error(`Active InputSchema ${inputSchema.inputSchemaId} is not materialized consistently`)
+    const policies = snapshot.resultEntryPolicies.filter((item) => item.competitionId === session.competitionId)
+    if (policies.length !== 1) {
+      throw new Error(`ResultEntryPolicy is missing or ambiguous for competition ${session.competitionId}`)
     }
+    const policy = policies[0]!
+    const allowedMethods = policy.allowedMethodKeys.map((methodKey) => {
+      const method = policy.methods.find((item) => item.methodKey === methodKey)
+      if (!method) throw new Error(`Result entry method ${methodKey} is not defined`)
+      return method
+    })
+
+    const schemasByMethodKey: Record<string, InputSchema> = {}
+    for (const method of allowedMethods) {
+      const schema = snapshot.inputSchemas.find((item) => item.inputSchemaId === method.inputSchemaId)
+      if (!schema) throw new Error(`Active InputSchema ${method.inputSchemaId} is missing`)
+      const persistedSchema = await db.inputSchemas.get(schema.inputSchemaId)
+      if (
+        !persistedSchema ||
+        persistedSchema.version !== schema.version ||
+        persistedSchema.competitionId !== schema.competitionId
+      ) {
+        throw new Error(`Active InputSchema ${schema.inputSchemaId} is not materialized consistently`)
+      }
+      schemasByMethodKey[method.methodKey] = clone(schema)
+    }
+
+    const defaultMethod = defaultResultEntryMethod(policy)
+    const inputSchema = schemasByMethodKey[defaultMethod.methodKey]!
 
     const courtRunById = new Map(snapshot.courtRuns.map((run) => [run.courtRunId, run]))
     const courtRuns = session.courtRunIds.map((id) => {
@@ -236,7 +287,10 @@ export function createCourtResultService(db: AppDatabase, options: CourtResultSe
     return {
       tournamentId: snapshot.tournament.tournamentId,
       session: clone(session),
-      inputSchema: clone(inputSchema),
+      inputSchema,
+      policy: clone(policy),
+      allowedMethods: clone(allowedMethods),
+      schemasByMethodKey,
       courtRuns,
       entries,
       configVersion,
@@ -330,6 +384,20 @@ export function createCourtResultService(db: AppDatabase, options: CourtResultSe
     },
 
     loadSession: sessionDefinition,
+    loadTask: sessionDefinition,
+
+    async previewResult(input: PreviewCourtResultInput): Promise<CourtResultPreview> {
+      const definition = await sessionDefinition(input.scoringSessionId)
+      const selected = selectedContext(definition, input.courtRunIds)
+      const { method, schema } = resolveMethod(definition.policy, definition.schemasByMethodKey, input.methodKey)
+      const entries = canonicalValues(schema, selected.entries, input.values)
+      const projection = projectResultEntry({
+        method,
+        schema,
+        entries: entries as Record<CompetitionEntryId, Record<string, RawValue>>,
+      })
+      return { methodKey: method.methodKey, schema, projection }
+    },
 
     async saveResult(
       input: SaveCourtResultInput,
@@ -337,7 +405,8 @@ export function createCourtResultService(db: AppDatabase, options: CourtResultSe
       if (!input.operator.trim()) throw new Error('Operator is required')
       const definition = await sessionDefinition(input.scoringSessionId)
       const selected = selectedContext(definition, input.courtRunIds)
-      const entries = canonicalValues(definition.inputSchema, selected.entries, input.values)
+      const { method, schema } = resolveMethod(definition.policy, definition.schemasByMethodKey, input.methodKey)
+      const entries = canonicalValues(schema, selected.entries, input.values)
       const resultId = resultIdForScoringSession(definition.tournamentId, definition.session.scoringSessionId)
       const revisionId = createId<RevisionId>()
       const createdAt = now()
@@ -351,8 +420,8 @@ export function createCourtResultService(db: AppDatabase, options: CourtResultSe
         createdByDeviceId: options.deviceId,
       }
       const rawData: CourtRawResultData = {
-        inputSchemaId: definition.inputSchema.inputSchemaId,
-        inputSchemaVersion: definition.inputSchema.version,
+        inputSchemaId: schema.inputSchemaId,
+        inputSchemaVersion: schema.version,
         courtRunIds: selected.courtRuns.map((run) => run.courtRunId),
         entries,
       }
@@ -363,7 +432,7 @@ export function createCourtResultService(db: AppDatabase, options: CourtResultSe
         parentRevisionIds: [],
         source: 'COURT',
         operator: input.operator.trim(),
-        inputMode: input.inputMode,
+        inputMode: method.inputMode,
         rawData,
         configVersion: definition.configVersion,
         createdAt,
@@ -388,12 +457,18 @@ export function createCourtResultService(db: AppDatabase, options: CourtResultSe
       if (definition.session.competitionId !== prior.result.competitionId) {
         throw new Error('Active ScoringSession is incompatible with Result competition')
       }
+      const originalMethodKey = methodKeyForSchemaId(definition.policy, parent.rawData.inputSchemaId as string)
+      const { method, schema } = resolveMethod(
+        definition.policy,
+        definition.schemasByMethodKey,
+        input.methodKey ?? originalMethodKey,
+      )
       const selectedRunIds = rawDataCourtRuns(parent.rawData) ?? definition.session.courtRunIds
       const selected = selectedContext(definition, selectedRunIds)
-      const entries = canonicalValues(definition.inputSchema, selected.entries, input.values)
+      const entries = canonicalValues(schema, selected.entries, input.values)
       const rawData: CourtRawResultData = {
-        inputSchemaId: definition.inputSchema.inputSchemaId,
-        inputSchemaVersion: definition.inputSchema.version,
+        inputSchemaId: schema.inputSchemaId,
+        inputSchemaVersion: schema.version,
         courtRunIds: selected.courtRuns.map((run) => run.courtRunId),
         entries,
       }
@@ -404,7 +479,7 @@ export function createCourtResultService(db: AppDatabase, options: CourtResultSe
         parentRevisionIds: [parent.revisionId],
         source: 'COURT',
         operator: input.operator.trim(),
-        inputMode: input.inputMode,
+        inputMode: method.inputMode,
         rawData,
         configVersion: definition.configVersion,
         createdAt: now(),
