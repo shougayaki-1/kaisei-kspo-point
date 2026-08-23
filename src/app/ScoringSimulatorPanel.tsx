@@ -4,6 +4,7 @@ import { canonicalizeDecimalInput } from '../domain/exact-decimal'
 import type { ScoringProfile, ScoringScenarioResult } from '../domain/scoring'
 import { calculateScoringScenario } from '../domain/scoring-engine'
 import type { Competition, CompetitionEntry, Team } from '../domain/tournament'
+import type { ResultEntryPolicy } from '../config/result-entry-policy'
 import {
   runScoringTestCase,
   type ScoringTestCase,
@@ -15,6 +16,7 @@ export interface ScoringSimulatorPanelProps {
   entries: CompetitionEntry[]
   teams: Team[]
   profile: ScoringProfile
+  resultEntryPolicy: ResultEntryPolicy
   testCases: ScoringTestCase[]
   onSaveTestCase(next: ScoringTestCase): void
   onDeleteTestCase(testCaseId: string): void
@@ -58,6 +60,7 @@ export function ScoringSimulatorPanel({
   entries,
   teams,
   profile,
+  resultEntryPolicy,
   testCases,
   onSaveTestCase,
   onDeleteTestCase,
@@ -149,7 +152,7 @@ export function ScoringSimulatorPanel({
     onSaveTestCase({
       testCaseId: createId<string>(),
       competitionId: competition.competitionId,
-      methodKey: 'score',
+      methodKey: resultEntryPolicy.defaultMethodKey,
       name: testName.trim(),
       rounds: savedRounds,
       expected,

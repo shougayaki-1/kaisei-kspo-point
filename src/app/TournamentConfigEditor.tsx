@@ -268,7 +268,10 @@ export function TournamentConfigEditor({
         const profile = simulatorSnapshot.scoringProfiles.find(
           (item) => item.competitionId === competition.competitionId,
         )
-        if (!profile) return null
+        const resultEntryPolicy = simulatorSnapshot.resultEntryPolicies.find(
+          (item) => item.competitionId === competition.competitionId,
+        )
+        if (!profile || !resultEntryPolicy) return null
         const entries = simulatorSnapshot.competitionEntries.filter(
           (entry) => entry.competitionId === competition.competitionId,
         )
@@ -283,6 +286,7 @@ export function TournamentConfigEditor({
               entries={entries}
               teams={simulatorSnapshot.teams}
               profile={profile}
+              resultEntryPolicy={resultEntryPolicy}
               testCases={testCases}
               onSaveTestCase={(testCase) => {
                 if (pendingReview) {

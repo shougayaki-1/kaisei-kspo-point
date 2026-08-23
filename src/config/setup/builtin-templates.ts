@@ -93,7 +93,7 @@ export const GENERIC_SETUP_TEMPLATES: TournamentSetupTemplateFile[] = [
     competitions: [scoreCompetition('time', 'タイム競技', {
       competitionKind: 'TIME', defaultMethodKey: 'time', allowedMethodKeys: ['time'],
       methods: [{ methodKey: 'time', label: 'タイム', kind: 'TIME', inputMode: 'TIME_MANUAL', fields: [{ key: 'time', label: 'タイム', type: 'TIME', required: true }], projection: { type: 'SINGLE_FIELD', fieldKey: 'time', direction: 'LOWER_IS_BETTER' } }],
-      scoringTests: [{ testKey: 'representative', name: '代表ケース', methodInputs: { time: [{ teamKey: 'team-red', fields: { time: '00:10' } }, { teamKey: 'team-blue', fields: { time: '00:12' } }] }, expectedRanks: { 'team-red': 1, 'team-blue': 2 }, expectedAwardPoints: { 'team-red': 30, 'team-blue': 20 } }],
+      scoringTests: [{ testKey: 'representative', name: '代表ケース', methodInputs: { time: [{ teamKey: 'team-red', fields: { time: 10000 } }, { teamKey: 'team-blue', fields: { time: 12000 } }] }, expectedRanks: { 'team-red': 1, 'team-blue': 2 }, expectedAwardPoints: { 'team-red': 30, 'team-blue': 20 } }],
     })],
   },
   {

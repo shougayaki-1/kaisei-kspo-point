@@ -111,3 +111,30 @@ Changed files:
 - `git diff --check` — PASS (no output).
 - `npm run typecheck` — PASS.
 - `npm run test:run` — PASS (80 files, 371 tests).
+
+## Fix Round 2
+
+### RED evidence
+
+- `npm run test:run -- src/config/setup/builtin-templates.test.ts src/app/ScoringSimulatorPanel.test.tsx src/config/tournament-config.test.ts` — 3 files / 31 tests; 2 expected failures. The new all-template compiler test failed with `Representative input for time.time must be numeric` for `"00:10"`, and the non-score simulator test observed saved `methodKey: "score"` instead of policy default `"rank"`.
+- The first full-suite run after the focused GREEN run exposed 2 integration fixture failures in `src/app/TournamentConfigRegressionIntegration.test.tsx`: its persisted v2 test snapshot had no ResultEntryPolicy, so the simulator correctly did not render rather than guessing a method.
+
+### Changes
+
+- Replaced generic TIME representative input strings with canonical millisecond integers `10000` and `12000`; no text-time parser or compatibility conversion was added.
+- Added an all-selectable built-in template behavior test that parses and compiles every standard/generic template and verifies its representative scoring-case count.
+- `ScoringSimulatorPanel` now requires the active competition's ResultEntryPolicy and saves its exact `defaultMethodKey`. `TournamentConfigEditor` supplies that policy and does not render a simulator where the v2 policy is absent; Task 11 method-selection UI remains out of scope.
+- Adapted exact-decimal and integration fixtures to supply explicit score policies; no `@ts-nocheck` or legacy fallback was added.
+
+Changed files:
+
+- `src/config/setup/builtin-templates.ts`, `src/config/setup/builtin-templates.test.ts`
+- `src/app/ScoringSimulatorPanel.tsx`, `src/app/ScoringSimulatorPanel.test.tsx`, `src/app/ScoringSimulatorExact.test.tsx`
+- `src/app/TournamentConfigEditor.tsx`, `src/app/TournamentConfigRegressionIntegration.test.tsx`
+
+### GREEN verification
+
+- `npm run test:run -- src/config/setup/builtin-templates.test.ts src/config/setup/setup-compiler.test.ts src/app/ScoringSimulatorPanel.test.tsx src/app/ScoringSimulatorExact.test.tsx src/app/TournamentConfigRegressionIntegration.test.tsx src/config/tournament-config.test.ts` — PASS (6 files, 44 tests).
+- `npm run typecheck` — PASS.
+- `npm run test:run` — PASS (80 files, 373 tests).
+- `git diff --check` — PASS (no output); `rg -n "@ts-nocheck" src || true` — no output.

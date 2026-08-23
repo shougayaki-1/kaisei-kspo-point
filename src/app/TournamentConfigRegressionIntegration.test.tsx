@@ -73,7 +73,12 @@ function configuredSnapshot(): TournamentConfigSnapshot {
         { entryId: entryTwo, roundRanks: [2], roundAwardScores: [20], aggregateScore: 20 },
       ],
     }],
-    resultEntryPolicies: [],
+    resultEntryPolicies: [{
+      competitionId,
+      defaultMethodKey: 'score',
+      allowedMethodKeys: ['score'],
+      methods: [{ methodKey: 'score', label: '得点', kind: 'SCORE', inputMode: 'NUMBER', inputSchemaId: 'schema-1', projection: { type: 'SINGLE_FIELD', fieldKey: 'score', direction: 'HIGHER_IS_BETTER' } }],
+    }],
   }
 }
 
