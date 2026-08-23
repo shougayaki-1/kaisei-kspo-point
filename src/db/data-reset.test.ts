@@ -9,8 +9,9 @@ const recordByTable: Record<string, Record<string, unknown>> = {
   competitions: { competitionId: 'competition-1', tournamentId: 't-1' },
   competitionEntries: { entryId: 'entry-1', competitionId: 'competition-1', teamId: 'team-1' },
   scheduleSlots: { slotId: 'slot-1', competitionId: 'competition-1' },
-  courtRuns: { courtRunId: 'court-1', slotId: 'slot-1' },
-  scoringSessions: { scoringSessionId: 'session-1', competitionId: 'competition-1', slotId: 'slot-1' },
+  courtStations: { courtStationId: 'court-station-1', tournamentId: 't-1', label: 'A', displayOrder: 1 },
+  courtRuns: { courtRunId: 'court-1', slotId: 'slot-1', courtStationId: 'court-station-1' },
+  scoringSessions: { scoringSessionId: 'session-1', competitionId: 'competition-1', slotId: 'slot-1', leadCourtStationId: 'court-station-1' },
   inputSchemas: { inputSchemaId: 'input-1', competitionId: 'competition-1', version: 1 },
   scoringProfiles: { scoringProfileId: 'profile-1', competitionId: 'competition-1', version: 1 },
   scoringTestCases: {
@@ -20,6 +21,12 @@ const recordByTable: Record<string, Record<string, unknown>> = {
     rounds: [],
     expected: [],
     lastApprovedChange: { operator: 'operator', approvedAt: '2026-08-20T00:00:00.000Z' },
+  },
+  resultEntryPolicies: {
+    competitionId: 'competition-1',
+    defaultMethodKey: 'score',
+    allowedMethodKeys: ['score'],
+    methods: [],
   },
   configVersions: {
     id: 1,

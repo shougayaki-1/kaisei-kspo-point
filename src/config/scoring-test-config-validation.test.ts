@@ -25,6 +25,7 @@ function snapshot(): TournamentConfigSnapshot {
       defaultInputScope: 'WHOLE_SLOT',
     }],
     competitionEntries: [{ entryId, competitionId, teamId, label: '1組' }],
+    courtStations: [],
     scheduleSlots: [],
     courtRuns: [],
     scoringSessions: [],
@@ -54,6 +55,7 @@ function snapshot(): TournamentConfigSnapshot {
         aggregateScore: 30,
       }],
     }],
+    resultEntryPolicies: [],
   }
 }
 

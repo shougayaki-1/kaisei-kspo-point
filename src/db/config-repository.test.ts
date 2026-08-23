@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
   CompetitionEntryId,
   CompetitionId,
+  CourtStationId,
   CourtRunId,
   ScheduleSlotId,
   ScoringProfileId,
@@ -23,6 +24,7 @@ function snapshotFor(prefix: string, name = `${prefix}大会`): TournamentConfig
   const slotId = `${prefix}-slot-1` as ScheduleSlotId
   const courtRunId = `${prefix}-run-1` as CourtRunId
   const scoringSessionId = `${prefix}-session-1` as ScoringSessionId
+  const courtStationId = `${prefix}-court-station-1` as CourtStationId
 
   return {
     tournament: {
@@ -46,15 +48,17 @@ function snapshotFor(prefix: string, name = `${prefix}大会`): TournamentConfig
         slotId,
         competitionId,
         label: '第1展開',
+        displayOrder: 1,
         plannedStart: '09:00',
         plannedEnd: '09:10',
       },
     ],
+    courtStations: [{ courtStationId, tournamentId, label: 'Aコート', displayOrder: 1 }],
     courtRuns: [
       {
         courtRunId,
         slotId,
-        courtLabel: 'A',
+        courtStationId,
         participantEntryIds: [entryId],
       },
     ],
@@ -64,6 +68,8 @@ function snapshotFor(prefix: string, name = `${prefix}大会`): TournamentConfig
         competitionId,
         slotId,
         label: '第1展開 全体',
+        displayOrder: 1,
+        leadCourtStationId: courtStationId,
         courtRunIds: [courtRunId],
         inputScope: 'WHOLE_SLOT',
       },
@@ -103,6 +109,19 @@ function snapshotFor(prefix: string, name = `${prefix}大会`): TournamentConfig
         roundRanks: [1],
         roundAwardScores: [30],
         aggregateScore: 30,
+      }],
+    }],
+    resultEntryPolicies: [{
+      competitionId,
+      defaultMethodKey: 'score',
+      allowedMethodKeys: ['score'],
+      methods: [{
+        methodKey: 'score',
+        label: '得点',
+        kind: 'SCORE',
+        inputMode: 'NUMBER',
+        inputSchemaId: `${prefix}-schema-1`,
+        projection: { type: 'SINGLE_FIELD', fieldKey: 'count', direction: 'HIGHER_IS_BETTER' },
       }],
     }],
   }
@@ -204,6 +223,8 @@ describe('ConfigRepository', () => {
     expect(await db.teams.where('tournamentId').equals(second.tournament.tournamentId).toArray()).toEqual(current?.teams)
     expect(await db.competitions.where('tournamentId').equals(second.tournament.tournamentId).toArray()).toEqual(current?.competitions)
     expect(await db.inputSchemas.where('competitionId').equals(second.competitions[0].competitionId).toArray()).toEqual(current?.inputSchemas)
+    expect(await db.courtStations.where('tournamentId').equals(second.tournament.tournamentId).toArray()).toEqual(current?.courtStations)
+    expect(await db.resultEntryPolicies.where('competitionId').equals(second.competitions[0].competitionId).toArray()).toEqual(current?.resultEntryPolicies)
   })
 
   it('does not remove normalized data or versions belonging to another tournament', async () => {

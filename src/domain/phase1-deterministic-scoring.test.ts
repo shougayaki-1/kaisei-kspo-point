@@ -177,6 +177,7 @@ describe('Phase 1 deterministic scoring RED', () => {
         defaultInputScope: 'WHOLE_SLOT',
       }],
       competitionEntries: entries(),
+      courtStations: [],
       scheduleSlots: [],
       courtRuns: [],
       scoringSessions: [],
@@ -209,6 +210,7 @@ describe('Phase 1 deterministic scoring RED', () => {
           { entryId: entryTwo, roundRanks: [1], roundAwardScores: ['0.3'], aggregateScore: '0.3' },
         ],
       }],
+      resultEntryPolicies: [],
     } as unknown as TournamentConfigSnapshot
 
     await repository.apply(snapshot, {

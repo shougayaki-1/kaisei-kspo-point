@@ -76,12 +76,14 @@ function editDraft(tournamentId: TournamentId, baseConfigVersionId: string, vers
       teams: [],
       competitions: [],
       competitionEntries: [],
+      courtStations: [],
       scheduleSlots: [],
       courtRuns: [],
       scoringSessions: [],
       inputSchemas: [],
       scoringProfiles: [],
       scoringTestCases: [],
+      resultEntryPolicies: [],
     },
   }
 }

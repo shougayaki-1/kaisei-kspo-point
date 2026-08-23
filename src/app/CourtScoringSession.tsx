@@ -175,7 +175,7 @@ export function CourtScoringSession({ services }: { services: CourtScoringSessio
         <>
           <p>Config v{definition.configVersion}</p>
           <ul aria-label="ScoringSession CourtRuns">
-            {definition.courtRuns.map((run) => <li key={run.courtRunId}>{run.courtLabel}</li>)}
+            {definition.courtRuns.map((run) => <li key={run.courtRunId}>{run.courtStationId}</li>)}
           </ul>
           <label>
             担当者

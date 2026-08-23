@@ -261,9 +261,10 @@ describe('compileTournamentSetup', () => {
     const entryIdsByLabel = new Map(
       snapshot.competitionEntries.map((entry) => [entry.label, entry.entryId]),
     )
-    const runsByCourtLabel = new Map(
-      snapshot.courtRuns.map((run) => [run.courtLabel, run]),
-    )
+    const runsByCourtLabel = new Map(snapshot.courtRuns.map((run) => [
+      snapshot.courtStations.find((station) => station.courtStationId === run.courtStationId)!.label,
+      run,
+    ]))
 
     expect(snapshot.scheduleSlots[0]?.plannedStart).toBe('09:30')
     expect(runsByCourtLabel.get('A')?.participantEntryIds).toEqual([

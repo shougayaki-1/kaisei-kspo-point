@@ -22,6 +22,7 @@ const ids = {
   entryA: 'entry-a' as CompetitionEntryId, entryB: 'entry-b' as CompetitionEntryId,
   slot1: 'slot-1' as ScheduleSlotId, slot2: 'slot-2' as ScheduleSlotId,
   run1: 'run-1' as CourtRunId, run2: 'run-2' as CourtRunId,
+  court1: 'court-1' as never, court2: 'court-2' as never,
   session1: 'session-1' as ScoringSessionId, session2: 'session-2' as ScoringSessionId,
   profile: 'profile-1' as ScoringProfileId,
 }
@@ -30,9 +31,10 @@ function config(rankPoints: Record<number, number | string> = { 1: 10, 2: 5 }): 
   teams: [{ teamId: ids.teamA, tournamentId: ids.tournament, name: 'Configured Red' }, { teamId: ids.teamB, tournamentId: ids.tournament, name: 'Configured Blue' }],
   competitions: [{ competitionId: ids.competition, tournamentId: ids.tournament, name: 'Configured Event', defaultInputScope: 'PER_COURT' }],
   competitionEntries: [{ entryId: ids.entryA, competitionId: ids.competition, teamId: ids.teamA, label: 'Red entry' }, { entryId: ids.entryB, competitionId: ids.competition, teamId: ids.teamB, label: 'Blue entry' }],
-  scheduleSlots: [{ slotId: ids.slot1, competitionId: ids.competition, label: 'Round 1' }, { slotId: ids.slot2, competitionId: ids.competition, label: 'Round 2' }],
-  courtRuns: [{ courtRunId: ids.run1, slotId: ids.slot1, courtLabel: 'Court alpha', participantEntryIds: [ids.entryA, ids.entryB] }, { courtRunId: ids.run2, slotId: ids.slot2, courtLabel: 'Court beta', participantEntryIds: [ids.entryA, ids.entryB] }],
-  scoringSessions: [{ scoringSessionId: ids.session1, competitionId: ids.competition, slotId: ids.slot1, label: 'Round 1 session', courtRunIds: [ids.run1], inputScope: 'PER_COURT' }, { scoringSessionId: ids.session2, competitionId: ids.competition, slotId: ids.slot2, label: 'Round 2 session', courtRunIds: [ids.run2], inputScope: 'PER_COURT' }],
+  courtStations: [{ courtStationId: ids.court1, tournamentId: ids.tournament, label: 'Court alpha', displayOrder: 1 }, { courtStationId: ids.court2, tournamentId: ids.tournament, label: 'Court beta', displayOrder: 2 }],
+  scheduleSlots: [{ slotId: ids.slot1, competitionId: ids.competition, label: 'Round 1', displayOrder: 1 }, { slotId: ids.slot2, competitionId: ids.competition, label: 'Round 2', displayOrder: 2 }],
+  courtRuns: [{ courtRunId: ids.run1, slotId: ids.slot1, courtStationId: ids.court1, participantEntryIds: [ids.entryA, ids.entryB] }, { courtRunId: ids.run2, slotId: ids.slot2, courtStationId: ids.court2, participantEntryIds: [ids.entryA, ids.entryB] }],
+  scoringSessions: [{ scoringSessionId: ids.session1, competitionId: ids.competition, slotId: ids.slot1, label: 'Round 1 session', displayOrder: 1, leadCourtStationId: ids.court1, courtRunIds: [ids.run1], inputScope: 'PER_COURT' }, { scoringSessionId: ids.session2, competitionId: ids.competition, slotId: ids.slot2, label: 'Round 2 session', displayOrder: 2, leadCourtStationId: ids.court2, courtRunIds: [ids.run2], inputScope: 'PER_COURT' }],
   inputSchemas: [{ inputSchemaId: 'schema-number', competitionId: ids.competition, version: 1, fields: [{ key: 'score', label: 'Raw score', type: 'NUMBER', required: true }] }],
   scoringProfiles: [{ scoringProfileId: ids.profile, competitionId: ids.competition, version: 1, rankingRule: { direction: 'HIGHER_IS_BETTER' }, tieRule: 'AVERAGE_OCCUPIED_PLACES', awardRule: { type: 'RANK_POINTS', rankPoints }, aggregationRule: 'SUM' }], scoringTestCases: [{
     testCaseId: 'test-1',
@@ -44,6 +46,7 @@ function config(rankPoints: Record<number, number | string> = { 1: 10, 2: 5 }): 
       { entryId: ids.entryB, roundRanks: [2], roundAwardScores: [rankPoints[2] ?? 0], aggregateScore: rankPoints[2] ?? 0 },
     ],
   }],
+  resultEntryPolicies: [],
 } }
 async function seedConfig(database: AppDatabase, rankPoints?: Record<number, number | string>) { const repository = new ConfigRepository(database); await repository.apply(config(rankPoints), { operator: 'Host', createdAt: '2026-08-19T10:00:00+09:00', changeClass: 'SCORING' }); return repository.getActiveVersion(ids.tournament) }
 function raw(a: string, b: string) { return { inputSchemaId: 'schema-number', inputSchemaVersion: 1, entries: { [ids.entryA]: { score: a }, [ids.entryB]: { score: b } } } }

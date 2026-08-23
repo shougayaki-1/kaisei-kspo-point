@@ -19,7 +19,7 @@ function services() {
     loadSession: vi.fn().mockResolvedValue({
       session: { scoringSessionId: sessionId, competitionId: 'competition-1', slotId: 'slot-1', label: '第1展開 全体', courtRunIds: [runA, runB], inputScope: 'WHOLE_SLOT' },
       inputSchema: { inputSchemaId: 'schema-1', competitionId: 'competition-1', version: 1, fields: [{ key: 'count', label: '個数', type: 'NUMBER', required: true }, { key: 'verified', label: '確認', type: 'BOOLEAN', required: true }] },
-      courtRuns: [{ courtRunId: runA, slotId: 'slot-1', courtLabel: '東', participantEntryIds: [entryA] }, { courtRunId: runB, slotId: 'slot-1', courtLabel: '西', participantEntryIds: [entryB] }],
+      courtRuns: [{ courtRunId: runA, slotId: 'slot-1', courtStationId: 'east-court', participantEntryIds: [entryA] }, { courtRunId: runB, slotId: 'slot-1', courtStationId: 'west-court', participantEntryIds: [entryB] }],
       entries: [{ entryId: entryA, competitionId: 'competition-1', teamId: 'team-a', label: '赤A' }, { entryId: entryB, competitionId: 'competition-1', teamId: 'team-b', label: '青B' }],
       configVersion: 1,
     }),
@@ -34,7 +34,7 @@ describe('CourtScoringSession production UI', () => {
   it('loads one logical session and renders InputSchema fields for configured entries/courts dynamically', async () => {
     const api = services(); render(<CourtScoringSession services={api as unknown as CourtScoringSessionServices} />)
     const selector = await screen.findByRole('combobox', { name: 'ScoringSession' }); expect(selector).toHaveValue(sessionId); await waitFor(() => expect(api.loadSession).toHaveBeenCalledWith(sessionId))
-    expect(screen.getByLabelText('赤A 個数')).toBeInTheDocument(); expect(screen.getByLabelText('青B 個数')).toBeInTheDocument(); expect(screen.getByLabelText('赤A 確認')).toBeInTheDocument(); expect(screen.getByText('東')).toBeInTheDocument(); expect(screen.getByText('西')).toBeInTheDocument(); expect(screen.getAllByRole('combobox', { name: 'ScoringSession' })).toHaveLength(1)
+    expect(screen.getByLabelText('赤A 個数')).toBeInTheDocument(); expect(screen.getByLabelText('青B 個数')).toBeInTheDocument(); expect(screen.getByLabelText('赤A 確認')).toBeInTheDocument(); expect(screen.getByText('east-court')).toBeInTheDocument(); expect(screen.getByText('west-court')).toBeInTheDocument(); expect(screen.getAllByRole('combobox', { name: 'ScoringSession' })).toHaveLength(1)
   })
   it('submits raw production input to the application service without calculating points in React', async () => {
     const api = services(); render(<CourtScoringSession services={api as unknown as CourtScoringSessionServices} />); await screen.findByLabelText('赤A 個数')

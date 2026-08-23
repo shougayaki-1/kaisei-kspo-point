@@ -41,6 +41,7 @@ function configuredSnapshot(): TournamentConfigSnapshot {
       { entryId: entryOne, competitionId, teamId: 'team-1' as TeamId, label: '1組①' },
       { entryId: entryTwo, competitionId, teamId: 'team-2' as TeamId, label: '2組①' },
     ],
+    courtStations: [],
     scheduleSlots: [],
     courtRuns: [],
     scoringSessions: [],
@@ -71,6 +72,7 @@ function configuredSnapshot(): TournamentConfigSnapshot {
         { entryId: entryTwo, roundRanks: [2], roundAwardScores: [20], aggregateScore: 20 },
       ],
     }],
+    resultEntryPolicies: [],
   }
 }
 

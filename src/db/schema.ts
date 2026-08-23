@@ -6,17 +6,19 @@ import type {
   Competition,
   CompetitionEntry,
   CourtRun,
+  CourtStation,
   ScheduleSlot,
   ScoringSession,
   Team,
   Tournament,
 } from '../domain/tournament'
 import type { InputSchema } from '../config/input-schema'
+import type { ResultEntryPolicy } from '../config/result-entry-policy'
 import type { ScoringTestCase } from '../config/scoring-test-case'
 import type { TournamentConfigSnapshot } from '../config/tournament-config'
 import type { AckBatch, TransferBatch } from '../transfer/types'
 
-export const DATABASE_SCHEMA_VERSION = 5
+export const DATABASE_SCHEMA_VERSION = 6
 
 export interface AppMetaRecord {
   key: string
@@ -101,12 +103,14 @@ export type DatabaseRecordTypes = {
   teams: Team
   competitions: Competition
   competitionEntries: CompetitionEntry
+  courtStations: CourtStation
   scheduleSlots: ScheduleSlot
   courtRuns: CourtRun
   scoringSessions: ScoringSession
   inputSchemas: InputSchema
   scoringProfiles: ScoringProfile
   scoringTestCases: ScoringTestCase
+  resultEntryPolicies: ResultEntryPolicy
   configVersions: ConfigVersionRecord
   results: Result
   resultRevisions: ResultRevision
@@ -160,4 +164,10 @@ export const schemaV4 = {
 export const schemaV5 = {
   ...schemaV4,
   conflictResolutions: 'resolutionId,resultId,effectiveRevisionId',
+} as const
+
+export const schemaV6 = {
+  ...schemaV5,
+  courtStations: 'courtStationId,tournamentId,displayOrder',
+  resultEntryPolicies: 'competitionId',
 } as const

@@ -3,6 +3,7 @@ import type {
   CompetitionEntryId,
   CompetitionId,
   CourtRunId,
+  CourtStationId,
   ScheduleSlotId,
   ScoringProfileId,
   ScoringSessionId,
@@ -135,6 +136,9 @@ function compileCompetitionEntries(
 
 function compileSchedule(
   competitionId: CompetitionId,
+  tournamentId: TournamentId,
+  tournamentCourtStations: TournamentConfigSnapshot['courtStations'],
+  courtStationIdByLabel: Map<string, CourtStationId>,
   draft: SetupCompetitionDraft,
   teams: SetupTeamDraft[],
   entryIds: CompetitionEntryId[],
@@ -154,11 +158,24 @@ function compileSchedule(
       slotId,
       competitionId,
       label: slotLabel(round.roundNumber),
+      displayOrder: round.roundNumber,
       ...(round.startTime ? { plannedStart: round.startTime } : {}),
     })
 
     for (const cell of round.cells) {
       const courtRunId = options.createId<CourtRunId>()
+      const label = courtLabel(cell.courtNumber - 1)
+      let courtStationId = courtStationIdByLabel.get(label)
+      if (!courtStationId) {
+        courtStationId = options.createId<CourtStationId>()
+        courtStationIdByLabel.set(label, courtStationId)
+        tournamentCourtStations.push({
+          courtStationId,
+          tournamentId,
+          label,
+          displayOrder: cell.courtNumber,
+        })
+      }
       const participantEntryIds = cell.entryKeys
         .map((entryKey) => entryIdsByKey.get(entryKey))
         .filter((entryId): entryId is CompetitionEntryId => Boolean(entryId))
@@ -166,18 +183,21 @@ function compileSchedule(
       courtRuns.push({
         courtRunId,
         slotId,
-        courtLabel: courtLabel(cell.courtNumber - 1),
+        courtStationId,
         participantEntryIds,
       })
       runIds.push(courtRunId)
     }
 
     if (draft.inputGrouping === 'WHOLE_ROUND') {
+      const leadCourtStationId = courtRuns.find((run) => run.courtRunId === runIds[0])!.courtStationId
       scoringSessions.push({
         scoringSessionId: options.createId<ScoringSessionId>(),
         competitionId,
         slotId,
         label: `${slotLabel(round.roundNumber)} 全体`,
+        displayOrder: 1,
+        leadCourtStationId,
         courtRunIds: runIds,
         inputScope: 'WHOLE_SLOT',
       })
@@ -186,11 +206,14 @@ function compileSchedule(
 
     if (draft.inputGrouping === 'PER_COURT') {
       for (const [courtIndex, courtRunId] of runIds.entries()) {
+        const leadCourtStationId = courtRuns.find((run) => run.courtRunId === courtRunId)!.courtStationId
         scoringSessions.push({
           scoringSessionId: options.createId<ScoringSessionId>(),
           competitionId,
           slotId,
           label: `${slotLabel(round.roundNumber)} ${courtLabel(courtIndex)}`,
+          displayOrder: courtIndex + 1,
+          leadCourtStationId,
           courtRunIds: [courtRunId],
           inputScope: 'PER_COURT',
         })
@@ -206,12 +229,15 @@ function compileSchedule(
         .filter((courtRunId): courtRunId is CourtRunId => Boolean(courtRunId))
 
       if (groupedRunIds.length === 0) continue
+      const leadCourtStationId = courtRuns.find((run) => run.courtRunId === groupedRunIds[0])!.courtStationId
 
       scoringSessions.push({
         scoringSessionId: options.createId<ScoringSessionId>(),
         competitionId,
         slotId,
         label: group.label,
+        displayOrder: scoringSessions.length + 1,
+        leadCourtStationId,
         courtRunIds: groupedRunIds,
         inputScope: 'CUSTOM_GROUP',
       })
@@ -332,10 +358,13 @@ export function compileTournamentSetup(
     scheduleSlots: [],
     courtRuns: [],
     scoringSessions: [],
+    courtStations: [],
     inputSchemas: [],
     scoringProfiles: [],
     scoringTestCases: [],
+    resultEntryPolicies: [],
   }
+  const courtStationIdByLabel = new Map<string, CourtStationId>()
 
   for (const competitionDraft of draft.competitions) {
     const competitionId = resolvedOptions.createId<CompetitionId>()
@@ -356,6 +385,9 @@ export function compileTournamentSetup(
     )
     const schedule = compileSchedule(
       competitionId,
+      tournamentId,
+      snapshot.courtStations,
+      courtStationIdByLabel,
       competitionDraft,
       draft.teams,
       entries.orderedEntryIds,

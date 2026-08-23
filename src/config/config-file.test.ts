@@ -18,9 +18,10 @@ function snapshot(): TournamentConfigSnapshot {
     teams: [{ teamId: 'team-1' as never, tournamentId: 'tournament-1' as never, name: 'Team 1' }],
     competitions: [{ competitionId: 'competition-1' as never, tournamentId: 'tournament-1' as never, name: 'Configured Event', defaultInputScope: 'WHOLE_SLOT' }],
     competitionEntries: [{ entryId: 'entry-1' as never, competitionId: 'competition-1' as never, teamId: 'team-1' as never, label: 'Team 1' }],
-    scheduleSlots: [{ slotId: 'slot-1' as never, competitionId: 'competition-1' as never, label: 'Round 1' }],
-    courtRuns: [{ courtRunId: 'run-1' as never, slotId: 'slot-1' as never, courtLabel: 'A', participantEntryIds: ['entry-1' as never] }],
-    scoringSessions: [{ scoringSessionId: 'session-1' as never, competitionId: 'competition-1' as never, slotId: 'slot-1' as never, label: 'Round 1', courtRunIds: ['run-1' as never], inputScope: 'WHOLE_SLOT' }],
+    courtStations: [{ courtStationId: 'court-1' as never, tournamentId: 'tournament-1' as never, label: 'A', displayOrder: 1 }],
+    scheduleSlots: [{ slotId: 'slot-1' as never, competitionId: 'competition-1' as never, label: 'Round 1', displayOrder: 1 }],
+    courtRuns: [{ courtRunId: 'run-1' as never, slotId: 'slot-1' as never, courtStationId: 'court-1' as never, participantEntryIds: ['entry-1' as never] }],
+    scoringSessions: [{ scoringSessionId: 'session-1' as never, competitionId: 'competition-1' as never, slotId: 'slot-1' as never, label: 'Round 1', displayOrder: 1, leadCourtStationId: 'court-1' as never, courtRunIds: ['run-1' as never], inputScope: 'WHOLE_SLOT' }],
     inputSchemas: [{ inputSchemaId: 'schema-1', competitionId: 'competition-1' as never, version: 1, fields: [{ key: 'count', label: 'Count', type: 'NUMBER', required: true, min: 0, max: 100 }] }],
     scoringProfiles: [{ scoringProfileId: 'profile-1' as never, competitionId: 'competition-1' as never, version: 1, rankingRule: { direction: 'HIGHER_IS_BETTER' }, tieRule: 'AVERAGE_OCCUPIED_PLACES', awardRule: { type: 'RANK_POINTS', rankPoints: { 1: 30, 2: 20, 3: 10, 4: 0 } }, aggregationRule: 'SUM' }],
     scoringTestCases: [{
@@ -39,6 +40,7 @@ function snapshot(): TournamentConfigSnapshot {
         aggregateScore: 30,
       }],
     }],
+    resultEntryPolicies: [],
   }
 }
 

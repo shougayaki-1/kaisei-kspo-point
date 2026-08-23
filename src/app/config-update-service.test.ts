@@ -41,6 +41,7 @@ function snapshotFor(prefix: string, name = `${prefix}大会`): TournamentConfig
   const slotId = `${prefix}-slot-1` as ScheduleSlotId
   const courtRunId = `${prefix}-run-1` as CourtRunId
   const scoringSessionId = `${prefix}-session-1` as ScoringSessionId
+  const courtStationId = `${prefix}-court-station-1` as never
 
   return {
     tournament: {
@@ -57,11 +58,12 @@ function snapshotFor(prefix: string, name = `${prefix}大会`): TournamentConfig
       defaultInputScope: 'WHOLE_SLOT',
     }],
     competitionEntries: [{ entryId, competitionId, teamId, label: '1組' }],
-    scheduleSlots: [{ slotId, competitionId, label: '第1展開' }],
+    courtStations: [{ courtStationId, tournamentId, label: 'A', displayOrder: 1 }],
+    scheduleSlots: [{ slotId, competitionId, label: '第1展開', displayOrder: 1 }],
     courtRuns: [{
       courtRunId,
       slotId,
-      courtLabel: 'A',
+      courtStationId,
       participantEntryIds: [entryId],
     }],
     scoringSessions: [{
@@ -69,6 +71,8 @@ function snapshotFor(prefix: string, name = `${prefix}大会`): TournamentConfig
       competitionId,
       slotId,
       label: '第1展開 全体',
+      displayOrder: 1,
+      leadCourtStationId: courtStationId,
       courtRunIds: [courtRunId],
       inputScope: 'WHOLE_SLOT',
     }],
@@ -98,6 +102,7 @@ function snapshotFor(prefix: string, name = `${prefix}大会`): TournamentConfig
       }],
       expected: [{ entryId, roundRanks: [1], roundAwardScores: [30], aggregateScore: 30 }],
     }],
+    resultEntryPolicies: [],
   }
 }
 

@@ -61,6 +61,7 @@ describe('tournament draft helpers', () => {
       label: '第1展開 全体',
       courtRunIds: [run.courtRunId],
       inputScope: 'WHOLE_SLOT',
+      leadCourtStationId: run.courtStationId,
     })
     const session = draft.scoringSessions[0]
     expect(session.scoringSessionId).toMatch(uuidPattern)

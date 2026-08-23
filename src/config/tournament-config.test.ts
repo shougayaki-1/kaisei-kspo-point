@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type {
   CompetitionEntryId,
   CompetitionId,
+  CourtStationId,
   CourtRunId,
   ScheduleSlotId,
   ScoringProfileId,
@@ -11,6 +12,7 @@ import type {
 } from '../domain/ids'
 import type { TournamentConfigSnapshot } from './tournament-config'
 import { validateTournamentConfig } from './tournament-config'
+import type { ResultEntryPolicy } from './result-entry-policy'
 
 function validSnapshot(): TournamentConfigSnapshot {
   const tournamentId = 'tournament-1' as TournamentId
@@ -20,6 +22,7 @@ function validSnapshot(): TournamentConfigSnapshot {
   const slotId = 'slot-1' as ScheduleSlotId
   const courtRunId = 'run-1' as CourtRunId
   const scoringSessionId = 'session-1' as ScoringSessionId
+  const courtStationId = 'court-station-1' as CourtStationId
 
   return {
     tournament: {
@@ -43,15 +46,17 @@ function validSnapshot(): TournamentConfigSnapshot {
         slotId,
         competitionId,
         label: '第1展開',
+        displayOrder: 1,
         plannedStart: '09:00',
         plannedEnd: '09:10',
       },
     ],
+    courtStations: [{ courtStationId, tournamentId, label: 'Aコート', displayOrder: 1 }],
     courtRuns: [
       {
         courtRunId,
         slotId,
-        courtLabel: 'A',
+        courtStationId,
         participantEntryIds: [entryId],
       },
     ],
@@ -61,6 +66,8 @@ function validSnapshot(): TournamentConfigSnapshot {
         competitionId,
         slotId,
         label: '第1展開 全体',
+        displayOrder: 1,
+        leadCourtStationId: courtStationId,
         courtRunIds: [courtRunId],
         inputScope: 'WHOLE_SLOT',
       },
@@ -87,7 +94,55 @@ function validSnapshot(): TournamentConfigSnapshot {
       },
     ],
     scoringTestCases: [],
+    resultEntryPolicies: [],
   }
+}
+
+function validPolicy(snapshot: TournamentConfigSnapshot): ResultEntryPolicy {
+  const competitionId = snapshot.competitions[0]!.competitionId
+  return {
+    competitionId,
+    defaultMethodKey: 'detail',
+    allowedMethodKeys: ['detail', 'score', 'outcome'],
+    methods: [
+      {
+        methodKey: 'detail',
+        label: '綱を取った本数',
+        kind: 'DETAIL',
+        inputMode: 'NUMBER',
+        inputSchemaId: 'schema-detail',
+        projection: { type: 'SUM_FIELDS', fieldKeys: ['first', 'second'], direction: 'HIGHER_IS_BETTER' },
+      },
+      {
+        methodKey: 'score',
+        label: '競技内ポイント',
+        kind: 'SCORE',
+        inputMode: 'NUMBER',
+        inputSchemaId: 'schema-score',
+        projection: { type: 'SINGLE_FIELD', fieldKey: 'score', direction: 'HIGHER_IS_BETTER' },
+      },
+      {
+        methodKey: 'outcome',
+        label: '勝敗',
+        kind: 'OUTCOME',
+        inputMode: 'WIN_LOSS',
+        inputSchemaId: 'schema-outcome',
+        projection: { type: 'DIRECT_OUTCOME', fieldKey: 'outcome' },
+      },
+    ],
+  }
+}
+
+function snapshotWithPolicy(): TournamentConfigSnapshot {
+  const snapshot = validSnapshot()
+  const competitionId = snapshot.competitions[0]!.competitionId
+  snapshot.inputSchemas = [
+    { inputSchemaId: 'schema-detail', competitionId, version: 1, fields: [] },
+    { inputSchemaId: 'schema-score', competitionId, version: 1, fields: [] },
+    { inputSchemaId: 'schema-outcome', competitionId, version: 1, fields: [] },
+  ]
+  snapshot.resultEntryPolicies = [validPolicy(snapshot)]
+  return snapshot
 }
 
 function errorCodes(snapshot: TournamentConfigSnapshot): string[] {
@@ -99,6 +154,58 @@ function errorCodes(snapshot: TournamentConfigSnapshot): string[] {
 describe('validateTournamentConfig', () => {
   it('accepts a valid minimal tournament configuration', () => {
     expect(validateTournamentConfig(validSnapshot())).toEqual([])
+  })
+
+  it('accepts a policy with all allowed result-entry methods', () => {
+    expect(validateTournamentConfig(snapshotWithPolicy()))
+      .not.toContainEqual(expect.objectContaining({ severity: 'ERROR' }))
+  })
+
+  it('rejects a result-entry policy whose default method is not allowed', () => {
+    const snapshot = snapshotWithPolicy()
+    snapshot.resultEntryPolicies[0]!.defaultMethodKey = 'rank'
+    expect(errorCodes(snapshot)).toContain('DEFAULT_RESULT_ENTRY_METHOD_NOT_ALLOWED')
+  })
+
+  it('rejects duplicate result-entry method keys', () => {
+    const snapshot = snapshotWithPolicy()
+    snapshot.resultEntryPolicies[0]!.methods.push({ ...snapshot.resultEntryPolicies[0]!.methods[0]! })
+    expect(errorCodes(snapshot)).toContain('DUPLICATE_RESULT_ENTRY_METHOD_KEY')
+  })
+
+  it('rejects an allowed result-entry method with no definition', () => {
+    const snapshot = snapshotWithPolicy()
+    snapshot.resultEntryPolicies[0]!.allowedMethodKeys.push('rank')
+    expect(errorCodes(snapshot)).toContain('UNKNOWN_ALLOWED_RESULT_ENTRY_METHOD')
+  })
+
+  it('rejects a policy method schema from another competition', () => {
+    const snapshot = snapshotWithPolicy()
+    snapshot.inputSchemas[0]!.competitionId = 'another-competition' as CompetitionId
+    expect(errorCodes(snapshot)).toContain('RESULT_ENTRY_METHOD_SCHEMA_COMPETITION_MISMATCH')
+  })
+
+  it('rejects duplicate court-station display order', () => {
+    const snapshot = validSnapshot()
+    snapshot.courtStations.push({
+      courtStationId: 'court-station-2' as CourtStationId,
+      tournamentId: snapshot.tournament.tournamentId,
+      label: 'Bコート',
+      displayOrder: 1,
+    })
+    expect(errorCodes(snapshot)).toContain('DUPLICATE_COURT_STATION_DISPLAY_ORDER')
+  })
+
+  it('rejects a CourtRun without a CourtStation', () => {
+    const snapshot = validSnapshot()
+    snapshot.courtRuns[0]!.courtStationId = 'missing-court' as CourtStationId
+    expect(errorCodes(snapshot)).toContain('UNKNOWN_COURT_STATION')
+  })
+
+  it('rejects a ScoringSession without a valid representative CourtStation', () => {
+    const snapshot = validSnapshot()
+    snapshot.scoringSessions[0]!.leadCourtStationId = 'missing-court' as CourtStationId
+    expect(errorCodes(snapshot)).toContain('UNKNOWN_SESSION_LEAD_COURT_STATION')
   })
 
   it('rejects duplicate stable IDs', () => {

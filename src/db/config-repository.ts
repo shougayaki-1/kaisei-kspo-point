@@ -526,12 +526,14 @@ export class ConfigRepository {
       this.db.teams,
       this.db.competitions,
       this.db.competitionEntries,
+      this.db.courtStations,
       this.db.scheduleSlots,
       this.db.courtRuns,
       this.db.scoringSessions,
       this.db.inputSchemas,
       this.db.scoringProfiles,
       this.db.scoringTestCases,
+      this.db.resultEntryPolicies,
     ]
   }
 
@@ -553,6 +555,7 @@ export class ConfigRepository {
 
     await this.db.tournaments.delete(tournamentId)
     await this.db.teams.where('tournamentId').equals(tournamentId).delete()
+    await this.db.courtStations.where('tournamentId').equals(tournamentId).delete()
 
     if (existingCompetitionIds.length > 0) {
       await this.db.competitionEntries
@@ -579,6 +582,10 @@ export class ConfigRepository {
         .where('competitionId')
         .anyOf(existingCompetitionIds)
         .delete()
+      await this.db.resultEntryPolicies
+        .where('competitionId')
+        .anyOf(existingCompetitionIds)
+        .delete()
     }
     if (existingSlotIds.length > 0) {
       await this.db.courtRuns.where('slotId').anyOf(existingSlotIds).delete()
@@ -592,6 +599,9 @@ export class ConfigRepository {
     }
     if (appliedSnapshot.competitionEntries.length > 0) {
       await this.db.competitionEntries.bulkPut(appliedSnapshot.competitionEntries)
+    }
+    if (appliedSnapshot.courtStations.length > 0) {
+      await this.db.courtStations.bulkPut(appliedSnapshot.courtStations)
     }
     if (appliedSnapshot.scheduleSlots.length > 0) {
       await this.db.scheduleSlots.bulkPut(appliedSnapshot.scheduleSlots)
@@ -610,6 +620,9 @@ export class ConfigRepository {
     }
     if (appliedSnapshot.scoringTestCases.length > 0) {
       await this.db.scoringTestCases.bulkPut(appliedSnapshot.scoringTestCases)
+    }
+    if (appliedSnapshot.resultEntryPolicies.length > 0) {
+      await this.db.resultEntryPolicies.bulkPut(appliedSnapshot.resultEntryPolicies)
     }
   }
 
@@ -633,6 +646,7 @@ export class ConfigRepository {
             .anyOf(competitionIds)
             .toArray()
         : []
+    const courtStations = await this.db.courtStations.where('tournamentId').equals(tournamentId).toArray()
     const scheduleSlots =
       competitionIds.length > 0
         ? await this.db.scheduleSlots.where('competitionId').anyOf(competitionIds).toArray()
@@ -653,6 +667,10 @@ export class ConfigRepository {
       competitionIds.length > 0
         ? await this.db.scoringTestCases.where('competitionId').anyOf(competitionIds).toArray()
         : []
+    const resultEntryPolicies =
+      competitionIds.length > 0
+        ? await this.db.resultEntryPolicies.where('competitionId').anyOf(competitionIds).toArray()
+        : []
 
     const slotIds = scheduleSlots.map((item) => item.slotId)
     const courtRuns =
@@ -665,12 +683,14 @@ export class ConfigRepository {
       teams,
       competitions,
       competitionEntries,
+      courtStations,
       scheduleSlots,
       courtRuns,
       scoringSessions,
       inputSchemas,
       scoringProfiles,
       scoringTestCases,
+      resultEntryPolicies,
     })
   }
 }

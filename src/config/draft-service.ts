@@ -3,6 +3,7 @@ import {
   type CompetitionEntryId,
   type CompetitionId,
   type CourtRunId,
+  type CourtStationId,
   type ScheduleSlotId,
   type ScoringProfileId,
   type ScoringSessionId,
@@ -30,12 +31,14 @@ export function createEmptyTournamentDraft(
     teams: [],
     competitions: [],
     competitionEntries: [],
+    courtStations: [],
     scheduleSlots: [],
     courtRuns: [],
     scoringSessions: [],
     inputSchemas: [],
     scoringProfiles: [],
     scoringTestCases: [],
+    resultEntryPolicies: [],
   }
 }
 
@@ -145,6 +148,7 @@ export function addScheduleSlot(
     slotId: createId<ScheduleSlotId>(),
     competitionId,
     label,
+    displayOrder: next.scheduleSlots.filter((slot) => slot.competitionId === competitionId).length + 1,
   })
   return next
 }
@@ -156,10 +160,17 @@ export function addCourtRun(
   participantEntryIds: CompetitionEntryId[] = [],
 ): TournamentConfigSnapshot {
   const next = clone(snapshot)
+  const courtStationId = createId<CourtStationId>()
+  next.courtStations.push({
+    courtStationId,
+    tournamentId: next.tournament.tournamentId,
+    label: courtLabel,
+    displayOrder: next.courtStations.length + 1,
+  })
   next.courtRuns.push({
     courtRunId: createId<CourtRunId>(),
     slotId,
-    courtLabel,
+    courtStationId,
     participantEntryIds: [...participantEntryIds],
   })
   return next
@@ -171,6 +182,7 @@ export interface AddScoringSessionInput {
   label?: string
   courtRunIds?: CourtRunId[]
   inputScope?: InputScope
+  leadCourtStationId: CourtStationId
 }
 
 export function addScoringSession(
@@ -183,6 +195,8 @@ export function addScoringSession(
     competitionId: input.competitionId,
     slotId: input.slotId,
     label: input.label ?? '新しい入力セッション',
+    displayOrder: next.scoringSessions.filter((session) => session.slotId === input.slotId).length + 1,
+    leadCourtStationId: input.leadCourtStationId,
     courtRunIds: [...(input.courtRunIds ?? [])],
     inputScope: input.inputScope ?? 'WHOLE_SLOT',
   })

@@ -39,8 +39,8 @@ function configRepositoryWithActiveVersion(): Pick<ConfigRepository, 'loadCurren
       changeClass: 'SCORING',
       snapshot: {
         tournament: { tournamentId: 'tournament-1' as never, name: '大会', currentConfigVersion: 1 },
-        teams: [], competitions: [], competitionEntries: [], scheduleSlots: [], courtRuns: [],
-        scoringSessions: [], inputSchemas: [], scoringProfiles: [], scoringTestCases: [],
+        teams: [], competitions: [], competitionEntries: [], courtStations: [], scheduleSlots: [], courtRuns: [],
+        scoringSessions: [], inputSchemas: [], scoringProfiles: [], scoringTestCases: [], resultEntryPolicies: [],
       },
     })),
   }

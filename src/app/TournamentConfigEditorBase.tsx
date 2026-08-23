@@ -856,15 +856,20 @@ export function TournamentConfigEditor({
                         </div>
                         {runs.map((run) => {
                           const runNumber = ++runSerial
+                          const courtStation = draft.courtStations.find(
+                            (station) => station.courtStationId === run.courtStationId,
+                          )!
                           return (
                             <div className="config-card nested" key={run.courtRunId}>
                               <label>
                                 コート名 {runNumber}
                                 <input
-                                  value={run.courtLabel}
+                                  value={courtStation.label}
                                   onChange={(event) => mutateDraft((next) => {
-                                    const target = next.courtRuns.find((item) => item.courtRunId === run.courtRunId)
-                                    if (target) target.courtLabel = event.target.value
+                                    const target = next.courtStations.find(
+                                      (station) => station.courtStationId === run.courtStationId,
+                                    )
+                                    if (target) target.label = event.target.value
                                   })}
                                 />
                               </label>
@@ -910,6 +915,7 @@ export function TournamentConfigEditor({
                                   label: `${slot.label} 入力`,
                                   courtRunIds: runs.map((run) => run.courtRunId),
                                   inputScope: competition.defaultInputScope,
+                                  leadCourtStationId: runs[0]!.courtStationId,
                                 })
                               : current)}
                           >

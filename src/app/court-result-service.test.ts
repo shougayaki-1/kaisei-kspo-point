@@ -30,15 +30,17 @@ const ids = {
   teamA: 'team-a' as TeamId, teamB: 'team-b' as TeamId,
   entryA: 'entry-a' as CompetitionEntryId, entryB: 'entry-b' as CompetitionEntryId,
   runA: 'run-a' as CourtRunId, runB: 'run-b' as CourtRunId,
+  courtA: 'court-a' as never, courtB: 'court-b' as never,
 }
 function snapshot(): TournamentConfigSnapshot { return {
   tournament: { tournamentId: ids.tournament, name: '大会', eventDate: '2026-09-01', currentConfigVersion: 0 },
   teams: [{ teamId: ids.teamA, tournamentId: ids.tournament, name: '赤' }, { teamId: ids.teamB, tournamentId: ids.tournament, name: '青' }],
   competitions: [{ competitionId: ids.competition, tournamentId: ids.tournament, name: '計数競技', defaultInputScope: 'WHOLE_SLOT' }],
   competitionEntries: [{ entryId: ids.entryA, competitionId: ids.competition, teamId: ids.teamA, label: '赤A' }, { entryId: ids.entryB, competitionId: ids.competition, teamId: ids.teamB, label: '青B' }],
-  scheduleSlots: [{ slotId: ids.slot, competitionId: ids.competition, label: '第1展開' }],
-  courtRuns: [{ courtRunId: ids.runA, slotId: ids.slot, courtLabel: '東', participantEntryIds: [ids.entryA] }, { courtRunId: ids.runB, slotId: ids.slot, courtLabel: '西', participantEntryIds: [ids.entryB] }],
-  scoringSessions: [{ scoringSessionId: ids.session, competitionId: ids.competition, slotId: ids.slot, label: '第1展開 全体', courtRunIds: [ids.runA, ids.runB], inputScope: 'WHOLE_SLOT' }],
+  courtStations: [{ courtStationId: ids.courtA, tournamentId: ids.tournament, label: '東', displayOrder: 1 }, { courtStationId: ids.courtB, tournamentId: ids.tournament, label: '西', displayOrder: 2 }],
+  scheduleSlots: [{ slotId: ids.slot, competitionId: ids.competition, label: '第1展開', displayOrder: 1 }],
+  courtRuns: [{ courtRunId: ids.runA, slotId: ids.slot, courtStationId: ids.courtA, participantEntryIds: [ids.entryA] }, { courtRunId: ids.runB, slotId: ids.slot, courtStationId: ids.courtB, participantEntryIds: [ids.entryB] }],
+  scoringSessions: [{ scoringSessionId: ids.session, competitionId: ids.competition, slotId: ids.slot, label: '第1展開 全体', displayOrder: 1, leadCourtStationId: ids.courtA, courtRunIds: [ids.runA, ids.runB], inputScope: 'WHOLE_SLOT' }],
   inputSchemas: [{ inputSchemaId: 'schema-1', competitionId: ids.competition, version: 1, fields: [
     { key: 'count', label: '個数', type: 'NUMBER', required: true, min: '0', max: '100' },
     { key: 'verified', label: '確認', type: 'BOOLEAN', required: true },
@@ -54,6 +56,7 @@ function snapshot(): TournamentConfigSnapshot { return {
       { entryId: ids.entryB, roundRanks: [2], roundAwardScores: [5], aggregateScore: 5 },
     ],
   }],
+  resultEntryPolicies: [],
 } }
 async function seed(db: AppDatabase) { return new ConfigRepository(db).apply(snapshot(), { operator: '本部', createdAt: '2026-08-19T09:00:00+09:00', changeClass: 'INPUT_SCHEMA' }) }
 interface ExpectedCourtResultService {

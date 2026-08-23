@@ -18,14 +18,16 @@ import type {
 const snapshot = {
   tournament: { tournamentId: 'tournament-1', name: '開成運動交流祭', currentConfigVersion: 0 },
   teams: [{ teamId: 'team-1', tournamentId: 'tournament-1', name: '赤組' }],
-  competitions: [{ competitionId: 'competition-1', tournamentId: 'tournament-1', name: '玉入れ' }],
+  competitions: [{ competitionId: 'competition-1', tournamentId: 'tournament-1', name: '玉入れ', defaultInputScope: 'WHOLE_SLOT' }],
   competitionEntries: [],
-  scheduleSlots: [{ slotId: 'slot-1', competitionId: 'competition-1', label: '第1回' }],
-  courtRuns: [{ courtRunId: 'run-1', slotId: 'slot-1', courtLabel: 'A', participantEntryIds: [] }],
-  scoringSessions: [{ scoringSessionId: 'session-1', competitionId: 'competition-1', slotId: 'slot-1', label: '第1回 全体', courtRunIds: ['run-1'], inputScope: 'WHOLE_SLOT' }],
+  courtStations: [{ courtStationId: 'court-1', tournamentId: 'tournament-1', label: 'A', displayOrder: 1 }],
+  scheduleSlots: [{ slotId: 'slot-1', competitionId: 'competition-1', label: '第1回', displayOrder: 1 }],
+  courtRuns: [{ courtRunId: 'run-1', slotId: 'slot-1', courtStationId: 'court-1', participantEntryIds: [] }],
+  scoringSessions: [{ scoringSessionId: 'session-1', competitionId: 'competition-1', slotId: 'slot-1', label: '第1回 全体', displayOrder: 1, leadCourtStationId: 'court-1', courtRunIds: ['run-1'], inputScope: 'WHOLE_SLOT' }],
   inputSchemas: [],
   scoringProfiles: [],
   scoringTestCases: [],
+  resultEntryPolicies: [],
 } as unknown as TournamentConfigSnapshot
 
 function createDeferredPromise<T>() {

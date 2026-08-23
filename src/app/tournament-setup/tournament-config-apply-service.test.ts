@@ -23,6 +23,7 @@ function snapshot(rankPoints: Record<number, number> = { 1: 30 }): TournamentCon
     teams: [],
     competitions: [],
     competitionEntries: [],
+    courtStations: [],
     scheduleSlots: [],
     courtRuns: [],
     scoringSessions: [],
@@ -37,6 +38,7 @@ function snapshot(rankPoints: Record<number, number> = { 1: 30 }): TournamentCon
       aggregationRule: 'SUM',
     }],
     scoringTestCases: [],
+    resultEntryPolicies: [],
   } as unknown as TournamentConfigSnapshot
 }
 

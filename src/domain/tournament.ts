@@ -2,6 +2,7 @@ import type {
   CompetitionEntryId,
   CompetitionId,
   CourtRunId,
+  CourtStationId,
   ScheduleSlotId,
   ScoringSessionId,
   TeamId,
@@ -40,10 +41,19 @@ export interface CompetitionEntry {
   label: string
 }
 
+export interface CourtStation {
+  courtStationId: CourtStationId
+  tournamentId: TournamentId
+  label: string
+  shortLabel?: string
+  displayOrder: number
+}
+
 export interface ScheduleSlot {
   slotId: ScheduleSlotId
   competitionId: CompetitionId
   label: string
+  displayOrder: number
   plannedStart?: string
   plannedEnd?: string
 }
@@ -51,7 +61,7 @@ export interface ScheduleSlot {
 export interface CourtRun {
   courtRunId: CourtRunId
   slotId: ScheduleSlotId
-  courtLabel: string
+  courtStationId: CourtStationId
   participantEntryIds: CompetitionEntryId[]
 }
 
@@ -60,6 +70,8 @@ export interface ScoringSession {
   competitionId: CompetitionId
   slotId: ScheduleSlotId
   label: string
+  displayOrder: number
+  leadCourtStationId: CourtStationId
   courtRunIds: CourtRunId[]
   inputScope: InputScope
 }
