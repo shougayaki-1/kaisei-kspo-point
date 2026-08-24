@@ -213,10 +213,10 @@ export function App({
     const assignment = await courtAssignmentServices.load()
     let snapshot: TournamentConfigSnapshot | undefined
     try {
-      const tournament = assignment
-        ? await resolvedConfigRepository.loadCurrent(assignment.tournamentId)
+      const tournamentId = assignment?.tournamentId ?? activeTournamentId
+      snapshot = tournamentId
+        ? await resolvedConfigRepository.loadCurrent(tournamentId)
         : undefined
-      snapshot = tournament
     } catch {
       snapshot = undefined
     }
@@ -226,7 +226,7 @@ export function App({
     setCourtSnapshot(snapshot)
     setCourtAssignment(validAssignment)
     setCourtTasks(tasks)
-  }, [courtAssignmentServices, courtTaskServices, resolvedConfigRepository])
+  }, [activeTournamentId, courtAssignmentServices, courtTaskServices, resolvedConfigRepository])
 
   useEffect(() => {
     if (mode !== 'COURT') return
@@ -357,10 +357,23 @@ export function App({
             <TournamentSettingsHome
               snapshot={hostSnapshot}
               onOpenStage={handleOpenSettingsStage}
-              advancedManagement={<>
-                <ConfigFilePanel services={configFileServices} operatorName={operatorName} deviceId={deviceId} onActivated={handleConfigFileActivated} />
-                <ConfigUpdatePanel mode="HOST" services={configUpdateServices} operatorName={operatorName} deviceId={deviceId} onActivated={handleConfigUpdateActivated} />
-              </>}
+              distributionManagement={
+                <ConfigUpdatePanel
+                  mode="HOST"
+                  services={configUpdateServices}
+                  operatorName={operatorName}
+                  deviceId={deviceId}
+                  onActivated={handleConfigUpdateActivated}
+                />
+              }
+              advancedManagement={
+                <ConfigFilePanel
+                  services={configFileServices}
+                  operatorName={operatorName}
+                  deviceId={deviceId}
+                  onActivated={handleConfigFileActivated}
+                />
+              }
             />
           ) : (
             <TournamentSetupWizard

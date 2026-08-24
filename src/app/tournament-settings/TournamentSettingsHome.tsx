@@ -16,6 +16,7 @@ import { OperationsPreview } from './OperationsPreview'
 export interface TournamentSettingsHomeProps {
   snapshot: TournamentConfigSnapshot
   onOpenStage: (step: SetupStep) => void
+  distributionManagement: ReactNode
   advancedManagement: ReactNode
 }
 
@@ -29,7 +30,12 @@ interface SettingsCard {
   actionLabel: string
 }
 
-export function TournamentSettingsHome({ snapshot, onOpenStage, advancedManagement }: TournamentSettingsHomeProps) {
+export function TournamentSettingsHome({
+  snapshot,
+  onOpenStage,
+  distributionManagement,
+  advancedManagement,
+}: TournamentSettingsHomeProps) {
   const [view, setView] = useState<SettingsView>('HOME')
 
   const issues = useMemo(() => validateTournamentConfig(snapshot), [snapshot])
@@ -38,9 +44,22 @@ export function TournamentSettingsHome({ snapshot, onOpenStage, advancedManageme
 
   if (view === 'DISTRIBUTION') {
     return (
-      <Stack spacing={2}>
+      <Stack spacing={3}>
         <Button variant="text" onClick={() => setView('HOME')}>← 大会設定に戻る</Button>
-        <CourtAssignmentQrPanel snapshot={snapshot} />
+        <div>
+          <Typography component="h2" variant="h5">コート端末への配布</Typography>
+          <Typography color="text.secondary">
+            最初に大会設定を共有し、そのあと各端末の担当コートを割り当てます。
+          </Typography>
+        </div>
+        <Box component="section" sx={{ display: 'grid', gap: 1.5 }}>
+          <Typography component="h3" variant="h6">1. 最初に大会設定を共有</Typography>
+          {distributionManagement}
+        </Box>
+        <Box component="section" sx={{ display: 'grid', gap: 1.5 }}>
+          <Typography component="h3" variant="h6">2. 担当コートを割り当て</Typography>
+          <CourtAssignmentQrPanel snapshot={snapshot} />
+        </Box>
       </Stack>
     )
   }
@@ -79,7 +98,7 @@ export function TournamentSettingsHome({ snapshot, onOpenStage, advancedManageme
     {
       key: 'distribution',
       title: 'コート端末への配布',
-      summary: `コート${snapshot.courtStations.length}か所へQRを発行できます`,
+      summary: `大会設定を共有して、コート${snapshot.courtStations.length}か所を割り当てます`,
       action: () => setView('DISTRIBUTION'),
       actionLabel: 'QRを表示',
     },

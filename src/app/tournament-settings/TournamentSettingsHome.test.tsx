@@ -43,6 +43,7 @@ describe('TournamentSettingsHome', () => {
       <TournamentSettingsHome
         snapshot={snapshot()}
         onOpenStage={onOpenStage}
+        distributionManagement={<div>大会設定共有コンテンツ</div>}
         advancedManagement={<div>詳細管理コンテンツ</div>}
       />,
     )
@@ -59,6 +60,7 @@ describe('TournamentSettingsHome', () => {
       <TournamentSettingsHome
         snapshot={snapshot()}
         onOpenStage={() => {}}
+        distributionManagement={<div>大会設定共有コンテンツ</div>}
         advancedManagement={<div>詳細管理コンテンツ</div>}
       />,
     )
@@ -68,17 +70,22 @@ describe('TournamentSettingsHome', () => {
     expect(screen.getByText('詳細管理コンテンツ')).toBeInTheDocument()
   })
 
-  it('shows Court distribution QR only after opening the distribution card', () => {
+  it('shows configuration sharing before Court assignment QR on the distribution screen', () => {
     render(
       <TournamentSettingsHome
         snapshot={snapshot()}
         onOpenStage={() => {}}
+        distributionManagement={<div>大会設定共有コンテンツ</div>}
         advancedManagement={<div>詳細管理コンテンツ</div>}
       />,
     )
 
+    expect(screen.queryByText('大会設定共有コンテンツ')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('コート配布用QR')).not.toBeInTheDocument()
     fireEvent.click(screen.getByText('QRを表示'))
+
+    expect(screen.getByText('大会設定共有コンテンツ')).toBeInTheDocument()
     expect(screen.getByLabelText('コート配布用QR')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '1. 最初に大会設定を共有' })).toBeInTheDocument()
   })
 })

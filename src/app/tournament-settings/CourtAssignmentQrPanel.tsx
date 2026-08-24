@@ -7,6 +7,7 @@ import Typography from '@mui/material/Typography'
 import type { TournamentConfigSnapshot } from '../../config/tournament-config'
 import type { CompetitionId, CourtStationId } from '../../domain/ids'
 import { encodeCourtAssignmentQr } from '../../transfer/court-assignment'
+import { QrFrameDisplay } from '../qr/QrFrameDisplay'
 
 export interface CourtAssignmentQrPanelProps {
   snapshot: TournamentConfigSnapshot
@@ -49,8 +50,9 @@ export function CourtAssignmentQrPanel({ snapshot }: CourtAssignmentQrPanelProps
 
   return (
     <Stack spacing={2} aria-label="コート配布用QR">
-      <Typography variant="subtitle1">コート配布用QR</Typography>
+      <Typography variant="subtitle1">担当コートを割り当てるQR</Typography>
       <Typography color="text.secondary" variant="body2">
+        大会設定を受信した端末で、このQRを読み取ると担当コートを設定できます。
         コートのみのQRは毎回そのコートで使い回せます。競技を選ぶと、その競技専用のQRも作成できます。
         カメラが使えない場合はコートと競技を手動で選んでも同じように割り当てられます。
       </Typography>
@@ -70,24 +72,37 @@ export function CourtAssignmentQrPanel({ snapshot }: CourtAssignmentQrPanelProps
       </TextField>
 
       <Stack spacing={2}>
-        {courts.map((court) => (
-          <Box key={court.courtStationId} sx={{ border: 1, borderColor: 'divider', borderRadius: 1, p: 2 }}>
-            <Typography variant="subtitle2">
-              {snapshot.tournament.name} / {court.label}
-              {competitionFilter
-                ? ` / ${snapshot.competitions.find((item) => item.competitionId === competitionFilter)?.name ?? ''}`
-                : ''}
-            </Typography>
-            <Typography
-              component="pre"
-              variant="body2"
-              sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontFamily: 'monospace' }}
-              aria-label={`${court.label}のQR文字列`}
-            >
-              {encoded[court.courtStationId] ?? '生成中…'}
-            </Typography>
-          </Box>
-        ))}
+        {courts.map((court) => {
+          const value = encoded[court.courtStationId]
+          return (
+            <Box key={court.courtStationId} sx={{ border: 1, borderColor: 'divider', borderRadius: 1, p: 2 }}>
+              <Stack spacing={1.5} sx={{ alignItems: 'flex-start' }}>
+                <Typography variant="subtitle2">
+                  {snapshot.tournament.name} / {court.label}
+                  {competitionFilter
+                    ? ` / ${snapshot.competitions.find((item) => item.competitionId === competitionFilter)?.name ?? ''}`
+                    : ''}
+                </Typography>
+                {value ? (
+                  <QrFrameDisplay value={value} label={`${court.label}のQRコード`} size={280} />
+                ) : (
+                  <Typography color="text.secondary" variant="body2">生成中…</Typography>
+                )}
+                <details>
+                  <summary>QRが読み取れない場合</summary>
+                  <Typography
+                    component="pre"
+                    variant="body2"
+                    sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontFamily: 'monospace' }}
+                    aria-label={`${court.label}のQR文字列`}
+                  >
+                    {value ?? '生成中…'}
+                  </Typography>
+                </details>
+              </Stack>
+            </Box>
+          )
+        })}
       </Stack>
     </Stack>
   )
