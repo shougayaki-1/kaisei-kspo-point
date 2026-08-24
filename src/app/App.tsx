@@ -44,6 +44,7 @@ import { TournamentSettingsHome } from './tournament-settings/TournamentSettings
 import { ConfigFilePanel } from './ConfigFilePanel'
 import { createConfigFilePanelServices } from './config-file-panel-service'
 import { CourtConfigImportPanel } from './CourtConfigImportPanel'
+import { resolveCourtState } from './court-state-resolver'
 import { HostConfigDistributionPanel } from './HostConfigDistributionPanel'
 import { createConfigDistributionServices, type ConfigDistributionServices } from './config-distribution-service'
 import { createCourtAssignmentService, type CourtAssignment } from './court-assignment-service'
@@ -210,21 +211,14 @@ export function App({
 
   const refreshCourtState = useMemo(() => async () => {
     const requestId = ++courtRefreshRequestIdRef.current
-    const assignment = await courtAssignmentServices.load()
-    let snapshot: TournamentConfigSnapshot | undefined
-    try {
-      const tournamentId = assignment?.tournamentId ?? activeTournamentId
-      snapshot = tournamentId
-        ? await resolvedConfigRepository.loadCurrent(tournamentId)
-        : undefined
-    } catch {
-      snapshot = undefined
-    }
-    const validAssignment = assignment && snapshot ? assignment : null
-    const tasks = validAssignment ? await courtTaskServices.listAssignedTasks(validAssignment) : []
+    const { snapshot, assignment, tasks } = await resolveCourtState(activeTournamentId, {
+      loadAssignment: () => courtAssignmentServices.load(),
+      loadSnapshot: (tournamentId) => resolvedConfigRepository.loadCurrent(tournamentId),
+      listTasks: (validAssignment) => courtTaskServices.listAssignedTasks(validAssignment),
+    })
     if (requestId !== courtRefreshRequestIdRef.current) return
     setCourtSnapshot(snapshot)
-    setCourtAssignment(validAssignment)
+    setCourtAssignment(assignment)
     setCourtTasks(tasks)
   }, [activeTournamentId, courtAssignmentServices, courtTaskServices, resolvedConfigRepository])
 
