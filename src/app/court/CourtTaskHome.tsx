@@ -17,6 +17,7 @@ export interface CourtTaskHomeProps {
   tasks: CourtTaskCard[]
   onOpenTask: (scoringSessionId: ScoringSessionId) => void
   onChangeAssignment: () => void
+  onUpdateConfig?: () => void
 }
 
 const GROUP_LABELS: Record<Exclude<CourtTaskState, 'NEXT'>, string> = {
@@ -54,6 +55,7 @@ export function CourtTaskHome({
   tasks,
   onOpenTask,
   onChangeAssignment,
+  onUpdateConfig,
 }: CourtTaskHomeProps) {
   const next = tasks.find((task) => task.state === 'NEXT')
   const grouped = GROUP_ORDER.map((state) => ({
@@ -71,7 +73,10 @@ export function CourtTaskHome({
             {competitionLabel ? ` / ${competitionLabel}` : ''}
           </Typography>
         </div>
-        <Button variant="text" onClick={onChangeAssignment}>担当を変更</Button>
+        <Stack direction="row" spacing={1}>
+          {onUpdateConfig ? <Button variant="text" onClick={onUpdateConfig}>大会設定を更新</Button> : null}
+          <Button variant="text" onClick={onChangeAssignment}>担当を変更</Button>
+        </Stack>
       </Box>
 
       {next ? (

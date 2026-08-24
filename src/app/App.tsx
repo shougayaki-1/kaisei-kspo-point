@@ -187,6 +187,7 @@ export function App({
   const [courtSnapshot, setCourtSnapshot] = useState<TournamentConfigSnapshot | undefined>()
   const [courtTasks, setCourtTasks] = useState<CourtTaskCard[]>([])
   const [courtEntryTask, setCourtEntryTask] = useState<{ scoringSessionId: ScoringSessionId; taskLabel: string; correctionOfResultId?: ResultId } | null>(null)
+  const [courtConfigUpdateOpen, setCourtConfigUpdateOpen] = useState(false)
   const courtRefreshRequestIdRef = useRef(0)
 
   const tournamentConfigApplyFlow = useMemo(() => ({
@@ -282,6 +283,7 @@ export function App({
     setActiveTournamentId(result.tournamentId as TournamentId)
     setKnownConfigVersion(result.version)
     setKnownConfigVersionId(result.configVersionId)
+    setCourtConfigUpdateOpen(false)
     void refreshCourtState()
   }
   const returnToModeSelection = () => { setMode(null); setHostTab('CONFIG') }
@@ -385,12 +387,13 @@ export function App({
         <div><h1>コートモード</h1><p>競技結果を端末内に記録します。</p></div>
         <button type="button" onClick={returnToModeSelection}>モード選択へ戻る</button>
       </div>
-      {!courtSnapshot ? (
+      {!courtSnapshot || courtConfigUpdateOpen ? (
         <CourtConfigImportPanel
           services={configDistributionServices}
           operatorName={operatorName}
           deviceId={deviceId}
           onActivated={handleCourtConfigActivated}
+          onCancel={courtSnapshot ? () => setCourtConfigUpdateOpen(false) : undefined}
         />
       ) : courtAssignment ? (
         courtEntryTask ? (
@@ -411,6 +414,7 @@ export function App({
             tasks={courtTasks}
             onOpenTask={handleOpenTask}
             onChangeAssignment={() => { void handleChangeAssignment() }}
+            onUpdateConfig={() => setCourtConfigUpdateOpen(true)}
           />
         )
       ) : (

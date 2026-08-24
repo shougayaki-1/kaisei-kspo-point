@@ -101,4 +101,33 @@ describe('CourtTaskHome', () => {
     screen.getByText('担当を変更').click()
     expect(onChangeAssignment).toHaveBeenCalled()
   })
+
+  it('offers an explicit way to update the tournament configuration when provided', () => {
+    const onUpdateConfig = vi.fn()
+    render(
+      <CourtTaskHome
+        tournamentName="開成運動会"
+        courtLabel="Aコート"
+        tasks={[task({})]}
+        onOpenTask={vi.fn()}
+        onChangeAssignment={vi.fn()}
+        onUpdateConfig={onUpdateConfig}
+      />,
+    )
+    screen.getByText('大会設定を更新').click()
+    expect(onUpdateConfig).toHaveBeenCalled()
+  })
+
+  it('does not show an update-config action when none is provided', () => {
+    render(
+      <CourtTaskHome
+        tournamentName="開成運動会"
+        courtLabel="Aコート"
+        tasks={[task({})]}
+        onOpenTask={vi.fn()}
+        onChangeAssignment={vi.fn()}
+      />,
+    )
+    expect(screen.queryByText('大会設定を更新')).not.toBeInTheDocument()
+  })
 })

@@ -177,4 +177,41 @@ describe('CourtConfigImportPanel', () => {
       { allowTournamentSwitch: true },
     ))
   })
+
+  it('offers a way back out when opened to update an already-active configuration', () => {
+    const services: Pick<ConfigDistributionServices, 'importJson' | 'activate'> = {
+      importJson: vi.fn(async (): Promise<ImportedTournamentConfigFile> => { throw new Error('not used') }),
+      activate: vi.fn(async (): Promise<never> => { throw new Error('not used') }),
+    }
+    const onCancel = vi.fn()
+    render(
+      <CourtConfigImportPanel
+        services={services}
+        operatorName="コート担当"
+        deviceId="device-1"
+        onActivated={vi.fn()}
+        onCancel={onCancel}
+      />,
+    )
+
+    fireEvent.click(screen.getByText('戻る'))
+    expect(onCancel).toHaveBeenCalled()
+  })
+
+  it('does not show a way back when there is no existing configuration to return to', () => {
+    const services: Pick<ConfigDistributionServices, 'importJson' | 'activate'> = {
+      importJson: vi.fn(async (): Promise<ImportedTournamentConfigFile> => { throw new Error('not used') }),
+      activate: vi.fn(async (): Promise<never> => { throw new Error('not used') }),
+    }
+    render(
+      <CourtConfigImportPanel
+        services={services}
+        operatorName="コート担当"
+        deviceId="device-1"
+        onActivated={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByText('戻る')).not.toBeInTheDocument()
+  })
 })

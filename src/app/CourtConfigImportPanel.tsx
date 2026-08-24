@@ -13,6 +13,7 @@ export interface CourtConfigImportPanelProps {
   deviceId: string
   now?: () => string
   onActivated: (result: { tournamentId: string; configVersionId: string; version: number }) => void
+  onCancel?: () => void
 }
 
 function friendlyImportError(cause: unknown): string {
@@ -29,6 +30,7 @@ export function CourtConfigImportPanel({
   deviceId,
   now = () => new Date().toISOString(),
   onActivated,
+  onCancel,
 }: CourtConfigImportPanelProps) {
   const [staged, setStaged] = useState<ImportedTournamentConfigFile | null>(null)
   const [switchConfirmed, setSwitchConfirmed] = useState(false)
@@ -85,6 +87,10 @@ export function CourtConfigImportPanel({
           本部から受け取った大会設定 JSON を選択してください。
         </Typography>
       </div>
+
+      {onCancel ? (
+        <Button variant="text" sx={{ alignSelf: 'flex-start' }} onClick={onCancel}>戻る</Button>
+      ) : null}
 
       {error ? <Alert severity="error">{error}</Alert> : null}
       {activated ? (

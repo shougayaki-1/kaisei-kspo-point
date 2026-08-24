@@ -345,4 +345,112 @@ describe('tournament operations UX offline rehearsal', () => {
     const tasksAfterAck = await createCourtTaskService(courtA).listAssignedTasks(assignmentA)
     expect(tasksAfterAck.find((item) => item.scoringSessionId === session!.scoringSessionId)?.state).toBe('COMPLETED')
   })
+
+  it('lets a Court device with an already-active config load a same-tournament ConfigVersion update without losing its assignment', async () => {
+    const hostDb = db()
+    const courtDb = db()
+
+    const snapshot = compileTournamentSetup(standardDraft())
+    const hostConfigRepository = new ConfigRepository(hostDb)
+    await hostConfigRepository.apply(snapshot, { operator: '本部担当', createdAt: '2026-08-24T03:00:00+09:00', changeClass: 'INPUT_SCHEMA' })
+
+    const hostDistribution = createConfigDistributionServices(hostDb)
+    const exportedV1 = await hostDistribution.exportActiveFile()
+
+    const courtDistribution = createConfigDistributionServices(courtDb)
+    const stagedV1 = await courtDistribution.importJson(exportedV1.json)
+    await courtDistribution.activate(stagedV1.configVersionId, { operator: 'コート担当', activatedAt: '2026-08-24T03:01:00+09:00' })
+
+    const courtRepository = new ConfigRepository(courtDb)
+    const courtSnapshotV1 = (await courtRepository.loadCurrent(snapshot.tournament.tournamentId))!
+    const [courtStation] = courtSnapshotV1.courtStations
+    const courtAssignmentService = createCourtAssignmentService(courtDb)
+    const assignment = await courtAssignmentService.validateAndSave({
+      tournamentId: snapshot.tournament.tournamentId, courtStationId: courtStation!.courtStationId, source: 'MANUAL',
+    })
+
+    // Host issues a same-tournament ConfigVersion update (v2).
+    await hostConfigRepository.apply(snapshot, { operator: '本部担当', createdAt: '2026-08-24T03:05:00+09:00', changeClass: 'INPUT_SCHEMA' })
+    const exportedV2 = await hostDistribution.exportActiveFile()
+    expect(exportedV2.summary.version).toBe(2)
+
+    // Staging the update alone must not change what is active on the Court device.
+    const stagedV2 = await courtDistribution.importJson(exportedV2.json)
+    expect(stagedV2.tournamentSwitchRequired).toBe(false)
+    const stillActiveV1 = (await courtRepository.loadCurrent(snapshot.tournament.tournamentId))!
+    expect(stillActiveV1.tournament.currentConfigVersion).toBe(1)
+
+    // Explicit activation moves the Court device to v2.
+    await courtDistribution.activate(stagedV2.configVersionId, { operator: 'コート担当', activatedAt: '2026-08-24T03:06:00+09:00' })
+    const courtSnapshotV2 = (await courtRepository.loadCurrent(snapshot.tournament.tournamentId))!
+    expect(courtSnapshotV2.tournament.currentConfigVersion).toBe(2)
+
+    // The existing, still-compatible Court assignment keeps working without forced reassignment.
+    const reloadedAssignment = await courtAssignmentService.load()
+    expect(reloadedAssignment).toEqual(assignment)
+    const tasks = await createCourtTaskService(courtDb).listAssignedTasks(reloadedAssignment!)
+    expect(tasks.length).toBeGreaterThan(0)
+  })
+
+  it('does not let a Court device fall back to a tournament it explicitly switched away from', async () => {
+    const hostA = db()
+    const hostB = db()
+    const courtDb = db()
+
+    const snapshotA = compileTournamentSetup(standardDraft())
+    await new ConfigRepository(hostA).apply(snapshotA, { operator: '本部担当A', createdAt: '2026-08-24T04:00:00+09:00', changeClass: 'INPUT_SCHEMA' })
+    const exportedA = await createConfigDistributionServices(hostA).exportActiveFile()
+
+    const courtDistribution = createConfigDistributionServices(courtDb)
+    const stagedA = await courtDistribution.importJson(exportedA.json)
+    await courtDistribution.activate(stagedA.configVersionId, { operator: 'コート担当', activatedAt: '2026-08-24T04:01:00+09:00' })
+
+    const courtRepository = new ConfigRepository(courtDb)
+    const courtSnapshotA = (await courtRepository.loadCurrent(snapshotA.tournament.tournamentId))!
+    const courtAssignmentService = createCourtAssignmentService(courtDb)
+    const assignmentA = await courtAssignmentService.validateAndSave({
+      tournamentId: snapshotA.tournament.tournamentId, courtStationId: courtSnapshotA.courtStations[0]!.courtStationId, source: 'MANUAL',
+    })
+
+    // A different tournament's JSON arrives; the Court operator explicitly confirms the switch.
+    const draftB = standardDraft()
+    draftB.draftId = 'rehearsal-draft-tournament-b'
+    draftB.tournament = { name: '第2回開成運動交流祭', eventDate: '2026-09-08' }
+    const snapshotB = compileTournamentSetup(draftB)
+    await new ConfigRepository(hostB).apply(snapshotB, { operator: '本部担当B', createdAt: '2026-08-24T04:05:00+09:00', changeClass: 'INPUT_SCHEMA' })
+    const exportedB = await createConfigDistributionServices(hostB).exportActiveFile()
+
+    const stagedB = await courtDistribution.importJson(exportedB.json)
+    expect(stagedB.tournamentSwitchRequired).toBe(true)
+    await courtDistribution.activate(
+      stagedB.configVersionId,
+      { operator: 'コート担当', activatedAt: '2026-08-24T04:06:00+09:00' },
+      { allowTournamentSwitch: true },
+    )
+
+    // Tournament B is active; tournament A's normalized rows are gone.
+    const activeSummary = await courtDistribution.loadActiveSummary()
+    expect(activeSummary?.tournamentId).toBe(snapshotB.tournament.tournamentId)
+    await expect(courtRepository.loadCurrent(snapshotA.tournament.tournamentId)).resolves.toBeUndefined()
+
+    // The stale tournament-A assignment must not resolve state back to tournament A.
+    const staleAssignment = await courtAssignmentService.load()
+    expect(staleAssignment).toEqual(assignmentA)
+    const { resolveCourtState } = await import('../app/court-state-resolver')
+    const resolved = await resolveCourtState(snapshotB.tournament.tournamentId, {
+      loadAssignment: () => courtAssignmentService.load(),
+      loadSnapshot: (tournamentId) => courtRepository.loadCurrent(tournamentId),
+      listTasks: (validAssignment) => createCourtTaskService(courtDb).listAssignedTasks(validAssignment),
+    })
+    expect(resolved.snapshot?.tournament.tournamentId).toBe(snapshotB.tournament.tournamentId)
+    expect(resolved.assignment).toBeNull()
+
+    // A fresh Court assignment for tournament B can be saved.
+    const assignmentB = await courtAssignmentService.validateAndSave({
+      tournamentId: snapshotB.tournament.tournamentId,
+      courtStationId: (await courtRepository.loadCurrent(snapshotB.tournament.tournamentId))!.courtStations[0]!.courtStationId,
+      source: 'MANUAL',
+    })
+    expect(assignmentB.tournamentId).toBe(snapshotB.tournament.tournamentId)
+  })
 })
