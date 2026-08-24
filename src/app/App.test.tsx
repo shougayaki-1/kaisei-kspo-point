@@ -218,9 +218,9 @@ describe('App', () => {
   it('synchronizes App config diagnostics after Court Config Update activation', async () => {
     render(<App configUpdateServices={configUpdateServices()} />)
     fireEvent.click(screen.getByRole('button', { name: 'コートモード' }))
-    fireEvent.change(screen.getByLabelText('Config Update QR文字列'), { target: { value: 'frame' } })
-    fireEvent.click(screen.getByRole('button', { name: '読み取る' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'このConfigVersionを有効化' }))
+    fireEvent.change(screen.getByLabelText('大会設定QR文字列'), { target: { value: 'frame' } })
+    fireEvent.click(screen.getByRole('button', { name: '文字列から読み取る' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'この大会設定を使用' }))
 
     expect(await screen.findByText('Config v2')).toBeInTheDocument()
     expect(await screen.findByRole('alert')).toHaveTextContent(/release SHA|埋め込まれた/i)
