@@ -38,14 +38,17 @@ function snapshot(): TournamentConfigSnapshot {
 }
 
 describe('CourtAssignmentQrPanel', () => {
-  it('shows a Court-only QR for every configured Court and never leaks the ConfigVersion ID', async () => {
-    render(<CourtAssignmentQrPanel snapshot={snapshot()} />)
+  it('shows a scannable Court-only QR for every configured Court and never leaks the ConfigVersion ID', async () => {
+    const { container } = render(<CourtAssignmentQrPanel snapshot={snapshot()} />)
 
     const encoded = await waitFor(() => {
       const value = screen.getByLabelText('AコートのQR文字列').textContent
       if (!value || value === '生成中…') throw new Error('not ready')
       return value
     })
+
+    expect(screen.getByRole('img', { name: 'AコートのQRコード' })).toBeInTheDocument()
+    expect(container.querySelector('svg')).toBeInTheDocument()
 
     const payload = await decodeCourtAssignmentQr(encoded)
     expect(payload).toEqual({
@@ -70,6 +73,7 @@ describe('CourtAssignmentQrPanel', () => {
     })
     const payload = await decodeCourtAssignmentQr(encoded)
     expect(payload.competitionId).toBe('competition-1')
+    expect(screen.getByRole('img', { name: 'AコートのQRコード' })).toBeInTheDocument()
   })
 
   it('shows manual-selection instructions alongside QR instructions', () => {
