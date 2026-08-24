@@ -8,7 +8,7 @@ import { validateTournamentConfig } from '../config/tournament-config'
 import { createCourtAssignmentService } from '../app/court-assignment-service'
 import { createCourtResultService } from '../app/court-result-service'
 import { createCourtTaskService } from '../app/court-task-service'
-import { createConfigUpdateService } from '../app/config-update-service'
+import { createConfigDistributionServices } from '../app/config-distribution-service'
 import { createHostScoringService } from '../app/host-scoring-service'
 import { processCompletedHostBatch } from '../app/host-transfer-import-service'
 import { ConfigRepository } from '../db/config-repository'
@@ -72,14 +72,15 @@ describe('tournament operations UX offline rehearsal', () => {
     })
     expect(applied.version).toBe(1)
 
-    const hostConfigUpdateService = createConfigUpdateService(hostDb)
-    const courtConfigUpdateService = createConfigUpdateService(courtDb)
-    const active = await hostConfigRepository.getActiveVersion(snapshot.tournament.tournamentId)
-    const exported = await hostConfigUpdateService.exportVersion(active!.configVersionId!, 900)
-    let ingest
-    for (const frame of exported.frames) ingest = await courtConfigUpdateService.ingestFrame(frame, '2026-08-24T00:11:00+09:00')
-    expect(ingest?.progress.complete).toBe(true)
-    const activation = await courtConfigUpdateService.activate(ingest!.importedConfigVersionId!, {
+    const hostDistribution = createConfigDistributionServices(hostDb)
+    const exported = await hostDistribution.exportActiveFile()
+    expect(exported.fileName).toBe('kaisei-kspo-2026-config-v1.json')
+
+    const courtDistribution = createConfigDistributionServices(courtDb)
+    const staged = await courtDistribution.importJson(exported.json)
+    expect(await new ConfigRepository(courtDb).getHostTournament()).toBeUndefined()
+
+    const activation = await courtDistribution.activate(staged.configVersionId, {
       operator: 'コート担当', activatedAt: '2026-08-24T00:12:00+09:00',
     })
     expect(activation.version).toBe(1)
@@ -170,16 +171,20 @@ describe('tournament operations UX offline rehearsal', () => {
     const snapshot = compileTournamentSetup(standardDraft())
     const hostConfigRepository = new ConfigRepository(hostDb)
     await hostConfigRepository.apply(snapshot, { operator: '本部担当', createdAt: '2026-08-24T01:00:00+09:00', changeClass: 'INPUT_SCHEMA' })
-    const active = await hostConfigRepository.getActiveVersion(snapshot.tournament.tournamentId)
-    const hostConfigUpdateService = createConfigUpdateService(hostDb)
-    const exported = await hostConfigUpdateService.exportVersion(active!.configVersionId!, 900)
+    const hostDistribution = createConfigDistributionServices(hostDb)
+    const exported = await hostDistribution.exportActiveFile()
 
     for (const courtDb of [courtA, courtB]) {
-      const service = createConfigUpdateService(courtDb)
-      let ingest
-      for (const frame of exported.frames) ingest = await service.ingestFrame(frame, '2026-08-24T01:01:00+09:00')
-      await service.activate(ingest!.importedConfigVersionId!, { operator: 'コート担当', activatedAt: '2026-08-24T01:02:00+09:00' })
+      const distribution = createConfigDistributionServices(courtDb)
+      const staged = await distribution.importJson(exported.json)
+      await distribution.activate(staged.configVersionId, { operator: 'コート担当', activatedAt: '2026-08-24T01:02:00+09:00' })
     }
+
+    const activeAId = (await new ConfigRepository(courtA).getActiveVersion(snapshot.tournament.tournamentId))?.configVersionId
+    const activeBId = (await new ConfigRepository(courtB).getActiveVersion(snapshot.tournament.tournamentId))?.configVersionId
+    const hostActiveId = (await hostConfigRepository.getActiveVersion(snapshot.tournament.tournamentId))?.configVersionId
+    expect(activeAId).toBe(hostActiveId)
+    expect(activeBId).toBe(hostActiveId)
 
     const courtSnapshotA = (await new ConfigRepository(courtA).loadCurrent(snapshot.tournament.tournamentId))!
     const session = [...courtSnapshotA.scoringSessions].sort((left, right) => left.displayOrder - right.displayOrder)[0]!
@@ -196,6 +201,11 @@ describe('tournament operations UX offline rehearsal', () => {
     const assignmentB = await createCourtAssignmentService(courtB).validateAndSave({
       tournamentId: decodedPayload.tournamentId, courtStationId: decodedPayload.courtStationId, source: 'QR',
     })
+    // Court assignment is device-local and must never leak back into the shared distributed JSON.
+    expect(JSON.parse(exported.json)).not.toHaveProperty('configVersion.courtAssignment')
+    expect(exported.json).not.toContain('courtAssignment')
+    void assignmentA
+    void assignmentB
 
     const serviceA = createCourtResultService(courtA, { deviceId: 'device-a' as DeviceId })
     const serviceB = createCourtResultService(courtB, { deviceId: 'device-b' as DeviceId })
@@ -242,5 +252,97 @@ describe('tournament operations UX offline rehearsal', () => {
     })
     const postScore = await createHostScoringService(hostDb).loadAuthoritativeState()
     expect(postScore.events[0]!.participants.some((participant) => participant.aggregateScore !== 0)).toBe(true)
+  })
+
+  it('distributes one JSON file to two Court devices with distinct assignments, then runs the unchanged result QR / Host import / ACK lifecycle', async () => {
+    const hostDb = db()
+    const courtA = db()
+    const courtB = db()
+
+    const snapshot = compileTournamentSetup(standardDraft())
+    const hostConfigRepository = new ConfigRepository(hostDb)
+    await hostConfigRepository.apply(snapshot, { operator: '本部担当', createdAt: '2026-08-24T02:00:00+09:00', changeClass: 'INPUT_SCHEMA' })
+
+    // Host: export the active ConfigVersion as one JSON file.
+    const hostDistribution = createConfigDistributionServices(hostDb)
+    const exported = await hostDistribution.exportActiveFile()
+    expect(exported.fileName).toBe('kaisei-kspo-2026-config-v1.json')
+
+    // Court A: import the exact same JSON, stage it, then explicitly activate it.
+    const distributionA = createConfigDistributionServices(courtA)
+    const stagedA = await distributionA.importJson(exported.json)
+    expect(stagedA.tournamentSwitchRequired).toBe(false)
+    await distributionA.activate(stagedA.configVersionId, { operator: 'コート担当A', activatedAt: '2026-08-24T02:01:00+09:00' })
+
+    // Court B: import the exact same JSON file, stage it, then explicitly activate it.
+    const distributionB = createConfigDistributionServices(courtB)
+    const stagedB = await distributionB.importJson(exported.json)
+    expect(stagedB.tournamentSwitchRequired).toBe(false)
+    await distributionB.activate(stagedB.configVersionId, { operator: 'コート担当B', activatedAt: '2026-08-24T02:02:00+09:00' })
+
+    const courtSnapshotA = (await new ConfigRepository(courtA).loadCurrent(snapshot.tournament.tournamentId))!
+    const [courtStationA, courtStationB] = courtSnapshotA.courtStations
+    expect(courtStationB).toBeDefined()
+
+    // Court A and Court B assign different courts from the same imported config.
+    const assignmentA = await createCourtAssignmentService(courtA).validateAndSave({
+      tournamentId: snapshot.tournament.tournamentId, courtStationId: courtStationA!.courtStationId, source: 'MANUAL',
+    })
+    const assignmentB = await createCourtAssignmentService(courtB).validateAndSave({
+      tournamentId: snapshot.tournament.tournamentId, courtStationId: courtStationB!.courtStationId, source: 'MANUAL',
+    })
+    expect(assignmentA.courtStationId).not.toBe(assignmentB.courtStationId)
+
+    // The distributed JSON never carries either Court's assignment.
+    expect(exported.json).not.toContain('courtAssignment')
+    expect(exported.json).not.toContain(assignmentA.courtStationId + '"assigned')
+
+    // Court: enter a result and generate a RESULT_BATCH QR (unchanged QR mechanism).
+    const [session] = courtSnapshotA.scoringSessions.filter((candidate) => candidate.leadCourtStationId === courtStationA!.courtStationId)
+    const deviceId = 'court-a-device' as DeviceId
+    const courtResultService = createCourtResultService(courtA, { deviceId })
+    const task = await courtResultService.loadTask(session!.scoringSessionId)
+    const [entryRed, entryBlue] = task.entries
+    const saved = await courtResultService.saveResult({
+      scoringSessionId: session!.scoringSessionId,
+      operator: '担当者A',
+      values: { [entryRed!.entryId]: { first: '4', second: '6' }, [entryBlue!.entryId]: { first: '2', second: '3' } },
+    })
+
+    const batch = createTransferBatch({
+      tournamentId: snapshot.tournament.tournamentId,
+      sourceDeviceId: deviceId,
+      results: [saved.result],
+      revisions: [saved.revision],
+      createdAt: '2026-08-24T02:10:00+09:00',
+      batchId: 'e2e-json-batch-1',
+    })
+    const courtTransferRepository = new TransferRepository(courtA)
+    const frames = await transferBatchFrames(batch)
+    await courtTransferRepository.saveOutgoingBatch(batch, frames)
+
+    // Host: receive the existing QR mechanism and import it.
+    const hostTransferRepository = new TransferRepository(hostDb)
+    for (const frame of frames) await hostTransferRepository.saveReceivedPart(frame, '2026-08-24T02:11:00+09:00')
+    const ack = await processCompletedHostBatch(hostDb, {
+      batchId: batch.batchId as BatchId, hostDeviceId: 'host-device' as DeviceId, now: '2026-08-24T02:12:00+09:00',
+    })
+    expect(ack.results.map((result) => result.status)).toEqual(['ACCEPTED'])
+
+    // Host: authoritative scoring reflects the imported result.
+    const state = await createHostScoringService(hostDb).loadAuthoritativeState()
+    expect(state.events.some((event) => event.participants.some((participant) => participant.aggregateScore !== 0))).toBe(true)
+
+    // Host: generate an ACK; Court: apply it (unchanged ACK mechanism).
+    const encodedAck = await encodeAck(ack)
+    const decodedAck = await decodeAck(encodedAck)
+    await applyAck(decodedAck, {
+      repository: courtTransferRepository,
+      expectedTournamentId: snapshot.tournament.tournamentId,
+      expectedBatchId: batch.batchId as BatchId,
+    })
+
+    const tasksAfterAck = await createCourtTaskService(courtA).listAssignedTasks(assignmentA)
+    expect(tasksAfterAck.find((item) => item.scoringSessionId === session!.scoringSessionId)?.state).toBe('COMPLETED')
   })
 })
