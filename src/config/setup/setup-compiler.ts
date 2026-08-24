@@ -207,6 +207,47 @@ function compileScoringProfile(
   }
 }
 
+function scoringTestTeamKeyMap(
+  draft: TournamentSetupDraft,
+  competition: SetupCompetitionDraft,
+  test: SetupCompetitionDraft['scoringTests'][number],
+): Map<string, string> {
+  const templateTeamKeys: string[] = []
+  const addTemplateTeamKey = (teamKey: string) => {
+    if (!templateTeamKeys.includes(teamKey)) templateTeamKeys.push(teamKey)
+  }
+
+  for (const methodKey of competition.allowedMethodKeys) {
+    for (const input of test.methodInputs[methodKey] ?? []) addTemplateTeamKey(input.teamKey)
+  }
+  for (const teamKey of Object.keys(test.expectedRanks)) addTemplateTeamKey(teamKey)
+  for (const teamKey of Object.keys(test.expectedAwardPoints)) addTemplateTeamKey(teamKey)
+
+  const mapping = new Map<string, string>()
+  const usedDraftTeamKeys = new Set<string>()
+
+  for (const templateTeamKey of templateTeamKeys) {
+    if (draft.teams.some((team) => team.teamKey === templateTeamKey)) {
+      mapping.set(templateTeamKey, templateTeamKey)
+      usedDraftTeamKeys.add(templateTeamKey)
+    }
+  }
+
+  for (const templateTeamKey of templateTeamKeys) {
+    if (mapping.has(templateTeamKey)) continue
+    const draftTeam = draft.teams.find((team) => !usedDraftTeamKeys.has(team.teamKey))
+    if (!draftTeam) {
+      throw new Error(
+        `Representative scoring test ${test.testKey} requires ${templateTeamKeys.length} teams but the draft has ${draft.teams.length}.`,
+      )
+    }
+    mapping.set(templateTeamKey, draftTeam.teamKey)
+    usedDraftTeamKeys.add(draftTeam.teamKey)
+  }
+
+  return mapping
+}
+
 function compileScoringTestCases(
   draft: TournamentSetupDraft,
   competition: SetupCompetitionDraft,
@@ -218,48 +259,53 @@ function compileScoringTestCases(
 ): ScoringTestCase[] {
   const methods = new Map(policy.methods.map((method) => [method.methodKey, method]))
   const schemasById = new Map(schemas.map((schema) => [schema.inputSchemaId, schema]))
-  return competition.scoringTests.flatMap((test) => competition.allowedMethodKeys.map((methodKey) => {
-    const method = methods.get(methodKey)
-    const schema = method ? schemasById.get(method.inputSchemaId) : undefined
-    const inputs = test.methodInputs[methodKey]
-    if (!method || !schema || !inputs) throw new Error(`Representative input is missing for result method: ${methodKey}`)
-    const inputByTeam = new Map(inputs.map((input) => [input.teamKey, input]))
-    const rawValues = inputs.map((input) => {
-      const entryId = entryIds.get(`${input.teamKey}:group-1`)
-      if (!entryId) throw new Error(`Representative input references unknown team: ${input.teamKey}`)
-      return { entryId, fields: structuredClone(input.fields) }
-    })
-    const projected = projectResultEntry({
-      method: method as ResultEntryMethodDefinition,
-      schema,
-      entries: Object.fromEntries(rawValues.map((value) => [value.entryId, value.fields])),
-    })
-    const rounds = [{
-      roundId: `${test.testKey}:${methodKey}`,
-      label: test.name,
-      rawValues,
-    }]
-    const expected = Object.keys(test.expectedRanks).sort().map((teamKey) => {
-      const entryId = entryIds.get(`${teamKey}:group-1`)
-      if (!entryId || !inputByTeam.has(teamKey)) throw new Error(`Representative expectation references unknown team: ${teamKey}`)
-      const rank = test.expectedRanks[teamKey]!
-      const actualRank = projected.entries.find((value) => value.entryId === entryId)?.rank
-      if (actualRank !== rank) {
-        throw new Error(`Representative input for ${methodKey} does not produce the expected rank for ${teamKey}`)
+  return competition.scoringTests.flatMap((test) => {
+    const teamKeyMap = scoringTestTeamKeyMap(draft, competition, test)
+    return competition.allowedMethodKeys.map((methodKey) => {
+      const method = methods.get(methodKey)
+      const schema = method ? schemasById.get(method.inputSchemaId) : undefined
+      const inputs = test.methodInputs[methodKey]
+      if (!method || !schema || !inputs) throw new Error(`Representative input is missing for result method: ${methodKey}`)
+      const inputByTeam = new Map(inputs.map((input) => [input.teamKey, input]))
+      const rawValues = inputs.map((input) => {
+        const draftTeamKey = teamKeyMap.get(input.teamKey)
+        const entryId = draftTeamKey ? entryIds.get(`${draftTeamKey}:group-1`) : undefined
+        if (!entryId) throw new Error(`Representative input references unknown team: ${input.teamKey}`)
+        return { entryId, fields: structuredClone(input.fields) }
+      })
+      const projected = projectResultEntry({
+        method: method as ResultEntryMethodDefinition,
+        schema,
+        entries: Object.fromEntries(rawValues.map((value) => [value.entryId, value.fields])),
+      })
+      const rounds = [{
+        roundId: `${test.testKey}:${methodKey}`,
+        label: test.name,
+        rawValues,
+      }]
+      const expected = Object.keys(test.expectedRanks).sort().map((teamKey) => {
+        const draftTeamKey = teamKeyMap.get(teamKey)
+        const entryId = draftTeamKey ? entryIds.get(`${draftTeamKey}:group-1`) : undefined
+        if (!entryId || !inputByTeam.has(teamKey)) throw new Error(`Representative expectation references unknown team: ${teamKey}`)
+        const rank = test.expectedRanks[teamKey]!
+        const actualRank = projected.entries.find((value) => value.entryId === entryId)?.rank
+        if (actualRank !== rank) {
+          throw new Error(`Representative input for ${methodKey} does not produce the expected rank for ${teamKey}`)
+        }
+        const points = test.expectedAwardPoints[teamKey]
+        if (points === undefined) throw new Error(`Representative award points are missing for team: ${teamKey}`)
+        return { entryId, roundRanks: [rank], roundAwardScores: [canonicalizeExactValue(points)], aggregateScore: canonicalizeExactValue(points) }
+      })
+      return {
+        testCaseId: id<string>(options, 'scoringTestCase', draft.draftId, `${competition.competitionKey}:${test.testKey}:${methodKey}`),
+        competitionId,
+        methodKey,
+        name: `${test.name} (${method.label})`,
+        rounds,
+        expected,
       }
-      const points = test.expectedAwardPoints[teamKey]
-      if (points === undefined) throw new Error(`Representative award points are missing for team: ${teamKey}`)
-      return { entryId, roundRanks: [rank], roundAwardScores: [canonicalizeExactValue(points)], aggregateScore: canonicalizeExactValue(points) }
     })
-    return {
-      testCaseId: id<string>(options, 'scoringTestCase', draft.draftId, `${competition.competitionKey}:${test.testKey}:${methodKey}`),
-      competitionId,
-      methodKey,
-      name: `${test.name} (${method.label})`,
-      rounds,
-      expected,
-    }
-  }))
+  })
 }
 
 export function compileTournamentSetup(
