@@ -6,7 +6,7 @@ import { EXCHANGE_FESTIVAL_TEMPLATE } from '../config/setup/builtin-templates'
 import type { SetupDraftRepository, TournamentSetupDraft } from '../config/setup/setup-types'
 import { App, loadHostBootstrapState } from './App'
 import type { ConfigVersionRecord } from '../db/schema'
-import type { ConfigUpdatePanelServices } from './ConfigUpdatePanel'
+import type { ConfigDistributionServices, ImportedTournamentConfigFile } from './config-distribution-service'
 
 function readyToApplySetupDraftRepository(): SetupDraftRepository {
   const draft: TournamentSetupDraft = {
@@ -71,20 +71,33 @@ function configRepositoryWithActiveVersion(): Pick<ConfigRepository, 'loadCurren
   }
 }
 
-function configUpdateServices(): ConfigUpdatePanelServices {
-  let activeConfigVersionId: string | null = null
+function configDistributionServices(): ConfigDistributionServices {
   return {
-    loadStatus: vi.fn(async () => ({
-      tournamentId: activeConfigVersionId ? 'tournament-1' as never : null,
-      activeConfigVersionId,
-      versions: activeConfigVersionId ? [{ configVersionId: activeConfigVersionId, version: 2 }] : [],
-    })),
-    exportVersion: vi.fn(async () => ({ configVersionId: 'config-v2', frames: ['frame'] })),
-    ingestFrame: vi.fn(async () => ({ progress: { complete: true }, importedConfigVersionId: 'config-v2', tournamentId: 'tournament-1' as never })),
-    activate: vi.fn(async () => {
-      activeConfigVersionId = 'config-v2'
-      return { configVersionId: 'config-v2', version: 2, tournamentId: 'tournament-1' as never }
+    loadActiveSummary: vi.fn(async () => null),
+    exportActiveFile: vi.fn(async () => {
+      throw new Error('not needed for this fixture')
     }),
+    importJson: vi.fn(async (): Promise<ImportedTournamentConfigFile> => ({
+      configVersionId: 'config-v2',
+      summary: {
+        tournamentId: 'tournament-1',
+        tournamentName: '開成運動交流祭',
+        configVersionId: 'config-v2',
+        version: 2,
+        competitionCount: 1,
+        courtCount: 1,
+      },
+      currentTournament: null,
+      tournamentSwitchRequired: false,
+    })),
+    activate: vi.fn(async () => ({
+      version: 2,
+      snapshot: {
+        tournament: { tournamentId: 'tournament-1' as never, name: '開成運動交流祭', currentConfigVersion: 2 },
+        teams: [], competitions: [], competitionEntries: [], courtStations: [], scheduleSlots: [], courtRuns: [],
+        scoringSessions: [], inputSchemas: [], scoringProfiles: [], scoringTestCases: [], resultEntryPolicies: [],
+      },
+    })),
   }
 }
 
@@ -174,11 +187,13 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: '大会設定' })).not.toBeInTheDocument()
   })
 
-  it('guides Court mode to wait for a configuration before assignment is possible', async () => {
+  it('guides Court mode to receive a JSON tournament config before assignment is possible', async () => {
     render(<App configRepository={configRepository()} />)
     fireEvent.click(screen.getByRole('button', { name: 'コートモード' }))
 
-    expect(await screen.findByText(/設定が届いていません/)).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '大会設定を受け取る' })).toBeInTheDocument()
+    expect(screen.getByLabelText('大会設定 JSON を選択')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'カメラで大会設定QRを読み取る' })).not.toBeInTheDocument()
     expect(screen.queryByText('担当を変更')).not.toBeInTheDocument()
   })
 
@@ -239,12 +254,15 @@ describe('App', () => {
     expect(screen.getByLabelText('コート配布用QR')).toBeInTheDocument()
   })
 
-  it('synchronizes App config diagnostics after Court Config Update activation', async () => {
-    render(<App configUpdateServices={configUpdateServices()} />)
+  it('synchronizes App config diagnostics after Court JSON configuration activation', async () => {
+    render(<App configRepository={configRepository()} configDistributionServices={configDistributionServices()} />)
     fireEvent.click(screen.getByRole('button', { name: 'コートモード' }))
-    fireEvent.change(screen.getByLabelText('大会設定QR文字列'), { target: { value: 'frame' } })
-    fireEvent.click(screen.getByRole('button', { name: '文字列から読み取る' }))
+
+    const input = screen.getByLabelText('大会設定 JSON を選択')
+    fireEvent.change(input, { target: { files: [new File(['{}'], 'kaisei-kspo-2026-config-v2.json', { type: 'application/json' })] } })
+
     fireEvent.click(await screen.findByRole('button', { name: 'この大会設定を使用' }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
 
     expect(await screen.findByText('Config v2')).toBeInTheDocument()
     expect(await screen.findByRole('alert')).toHaveTextContent(/release SHA|埋め込まれた/i)

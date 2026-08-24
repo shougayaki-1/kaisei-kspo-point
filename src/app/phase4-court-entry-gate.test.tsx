@@ -14,7 +14,7 @@ describe('Phase 4 Court production entry gate', () => {
   it('exposes a production Court assignment/task entry surface instead of QR transfer alone', async () => {
     render(<App configRepository={configRepository()} />)
     fireEvent.click(screen.getByRole('button', { name: 'コートモード' }))
-    expect(await screen.findByText(/設定が届いていません/)).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '大会設定を受け取る' })).toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: 'ScoringSession' })).not.toBeInTheDocument()
   })
 })

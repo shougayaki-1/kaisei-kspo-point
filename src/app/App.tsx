@@ -43,9 +43,7 @@ import { createTournamentConfigApplyService } from './tournament-setup/tournamen
 import { TournamentSettingsHome } from './tournament-settings/TournamentSettingsHome'
 import { ConfigFilePanel } from './ConfigFilePanel'
 import { createConfigFilePanelServices } from './config-file-panel-service'
-import { ConfigUpdatePanel } from './ConfigUpdatePanel'
-import { createConfigUpdateService, type ConfigUpdateActivationResult } from './config-update-service'
-import type { ConfigUpdatePanelServices } from './ConfigUpdatePanel'
+import { CourtConfigImportPanel } from './CourtConfigImportPanel'
 import { HostConfigDistributionPanel } from './HostConfigDistributionPanel'
 import { createConfigDistributionServices, type ConfigDistributionServices } from './config-distribution-service'
 import { createCourtAssignmentService, type CourtAssignment } from './court-assignment-service'
@@ -85,7 +83,6 @@ export interface AppProps {
   pwaRuntime?: PwaRuntime
   resetPersistentData?: () => Promise<void> | void
   hostBackupServices?: HostBackupPanelServices
-  configUpdateServices?: ConfigUpdatePanelServices
   configDistributionServices?: ConfigDistributionServices
   setupDraftRepository?: SetupDraftRepository
 }
@@ -127,7 +124,6 @@ export function App({
   pwaRuntime,
   resetPersistentData,
   hostBackupServices,
-  configUpdateServices: injectedConfigUpdateServices,
   configDistributionServices: injectedConfigDistributionServices,
   setupDraftRepository: injectedSetupDraftRepository,
 }: AppProps = {}) {
@@ -151,8 +147,6 @@ export function App({
   const browserConfigRepository = useMemo(() => new ConfigRepository(appDatabase), [appDatabase])
   const resolvedConfigRepository = configRepository ?? browserConfigRepository
   const configFileServices = useMemo(() => createConfigFilePanelServices(appDatabase), [appDatabase])
-  const browserConfigUpdateServices = useMemo(() => createConfigUpdateService(appDatabase), [appDatabase])
-  const configUpdateServices = injectedConfigUpdateServices ?? browserConfigUpdateServices
   const browserConfigDistributionServices = useMemo(() => createConfigDistributionServices(appDatabase), [appDatabase])
   const configDistributionServices = injectedConfigDistributionServices ?? browserConfigDistributionServices
   const courtResultServices = useMemo(() => createCourtResultService(appDatabase, { deviceId }), [appDatabase, deviceId])
@@ -290,11 +284,6 @@ export function App({
     setKnownConfigVersion(result.version)
     setKnownConfigVersionId(result.configVersionId)
   }
-  const handleConfigUpdateActivated = (result: ConfigUpdateActivationResult) => {
-    setActiveTournamentId(result.tournamentId)
-    setKnownConfigVersion(result.version)
-    setKnownConfigVersionId(result.configVersionId)
-  }
   const handleCourtConfigActivated = (result: { tournamentId: string; configVersionId: string; version: number }) => {
     setActiveTournamentId(result.tournamentId as TournamentId)
     setKnownConfigVersion(result.version)
@@ -402,7 +391,14 @@ export function App({
         <div><h1>コートモード</h1><p>競技結果を端末内に記録します。</p></div>
         <button type="button" onClick={returnToModeSelection}>モード選択へ戻る</button>
       </div>
-      {courtAssignment && courtSnapshot ? (
+      {!courtSnapshot ? (
+        <CourtConfigImportPanel
+          services={configDistributionServices}
+          operatorName={operatorName}
+          deviceId={deviceId}
+          onActivated={handleCourtConfigActivated}
+        />
+      ) : courtAssignment ? (
         courtEntryTask ? (
           <ResultEntryScreen
             services={courtResultServices}
@@ -431,7 +427,6 @@ export function App({
           onSubmit={handleAssignmentSubmit}
         />
       )}
-      <ConfigUpdatePanel mode="COURT" services={configUpdateServices} operatorName={operatorName} deviceId={deviceId} onActivated={handleConfigUpdateActivated} />
       <TransferDemo mode="COURT" deviceId={deviceId} />
       <CourtTransferHistory services={courtTransferHistoryServices} />
     </>
