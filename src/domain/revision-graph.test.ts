@@ -178,4 +178,15 @@ describe('inspectRevisionGraph', () => {
       expect((error as RevisionGraphError).revisionIds).toEqual(['b', 'c'])
     }
   })
+
+  it('treats two independently created root revisions as an unresolved conflict with no common ancestor', () => {
+    const a = revision('a')
+    const b = revision('b')
+
+    const result = inspectRevisionGraph([a, b])
+
+    expect(result.status).toBe('CONFLICT')
+    expect(ids(result.heads).sort()).toEqual(['a', 'b'])
+    expect(result.latestCommonConfirmedAncestor).toBeNull()
+  })
 })

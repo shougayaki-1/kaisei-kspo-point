@@ -6,12 +6,14 @@ import type {
   Competition,
   CompetitionEntry,
   CourtRun,
+  CourtStation,
   ScheduleSlot,
   ScoringSession,
   Team,
   Tournament,
 } from '../domain/tournament'
 import type { InputSchema } from '../config/input-schema'
+import type { ResultEntryPolicy } from '../config/result-entry-policy'
 import type { ScoringTestCase } from '../config/scoring-test-case'
 import {
   DATABASE_SCHEMA_VERSION,
@@ -20,6 +22,7 @@ import {
   schemaV3,
   schemaV4,
   schemaV5,
+  schemaV6,
   type AcknowledgementRecord,
   type AppMetaRecord,
   type AuditEventRecord,
@@ -37,12 +40,14 @@ export class AppDatabase extends Dexie {
   teams!: Table<Team, string>
   competitions!: Table<Competition, string>
   competitionEntries!: Table<CompetitionEntry, string>
+  courtStations!: Table<CourtStation, string>
   scheduleSlots!: Table<ScheduleSlot, string>
   courtRuns!: Table<CourtRun, string>
   scoringSessions!: Table<ScoringSession, string>
   inputSchemas!: Table<InputSchema, string>
   scoringProfiles!: Table<ScoringProfile, string>
   scoringTestCases!: Table<ScoringTestCase, string>
+  resultEntryPolicies!: Table<ResultEntryPolicy, string>
   configVersions!: Table<ConfigVersionRecord, number>
   results!: Table<Result, string>
   resultRevisions!: Table<ResultRevision, string>
@@ -61,7 +66,8 @@ export class AppDatabase extends Dexie {
     this.version(2).stores(schemaV2)
     this.version(3).stores(schemaV3)
     this.version(4).stores(schemaV4)
-    this.version(DATABASE_SCHEMA_VERSION).stores(schemaV5)
+    this.version(5).stores(schemaV5)
+    this.version(DATABASE_SCHEMA_VERSION).stores(schemaV6)
   }
 }
 

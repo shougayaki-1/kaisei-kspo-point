@@ -56,6 +56,12 @@ describe('ScoringSimulatorPanel exact decimal boundary RED', () => {
         entries={entries}
         teams={teams}
         profile={profile}
+        resultEntryPolicy={{
+          competitionId,
+          defaultMethodKey: 'score',
+          allowedMethodKeys: ['score'],
+          methods: [{ methodKey: 'score', label: 'Score', kind: 'SCORE', inputMode: 'NUMBER', inputSchemaId: 'schema-score', projection: { type: 'SINGLE_FIELD', fieldKey: 'score', direction: 'HIGHER_IS_BETTER' } }],
+        }}
         testCases={[]}
         onSaveTestCase={onSaveTestCase}
         onDeleteTestCase={vi.fn()}

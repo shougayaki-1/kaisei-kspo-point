@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import type { BatchId, DeviceId } from '../domain/ids'
 import { createDatabase, type AppDatabase } from '../db/database'
+import { ResultRepository } from '../db/result-repository'
 import { TransferRepository } from '../db/transfer-repository'
 import { createTransferBatch, encodeBatchFragments } from '../transfer/codec'
 import { processCompletedHostBatch } from './host-transfer-import-service'
+import { createHostScoringService } from './host-scoring-service'
 import { backupTestIds, backupTestResult, backupTestRevision, seedBackupConfig } from '../backup/test-helpers'
 
 const opened: AppDatabase[] = []
@@ -121,5 +123,52 @@ describe('production Host transfer import', () => {
     expect(retryAck.results.map((result) => result.status)).toEqual(['ALREADY_RECEIVED'])
     expect(await repository.listImportedBatchIds(backupTestIds.tournament)).toEqual([batch.batchId])
     expect(await database.resultRevisions.where('resultId').equals('backup-result').count()).toBe(1)
+  })
+
+  it('accepts two independent device roots for the same logical Result as one unresolved conflict, never a double score', async () => {
+    const database = db()
+    await seedBackupConfig(database)
+    const repository = new TransferRepository(database)
+
+    const revisionA = backupTestRevision('device-a-root', 1, [], '3', '1')
+    const batchA = createTransferBatch({
+      tournamentId: backupTestIds.tournament,
+      sourceDeviceId: 'court-a' as DeviceId,
+      results: [backupTestResult(revisionA.revisionId)],
+      revisions: [revisionA],
+      createdAt: '2026-08-20T02:40:00.000Z',
+      batchId: 'batch-device-a',
+    })
+    for (const encoded of await encodeBatchFragments(batchA, 90)) {
+      await repository.saveReceivedPart(encoded, '2026-08-20T02:41:00.000Z')
+    }
+    const ackA = await processCompletedHostBatch(database, { batchId: batchA.batchId, hostDeviceId: 'host-production' as DeviceId, now: '2026-08-20T02:42:00.000Z' })
+    expect(ackA.results.map((result) => result.status)).toEqual(['ACCEPTED'])
+
+    const revisionB = backupTestRevision('device-b-root', 1, [], '2', '2')
+    const batchB = createTransferBatch({
+      tournamentId: backupTestIds.tournament,
+      sourceDeviceId: 'court-b' as DeviceId,
+      results: [backupTestResult(revisionB.revisionId)],
+      revisions: [revisionB],
+      createdAt: '2026-08-20T02:43:00.000Z',
+      batchId: 'batch-device-b',
+    })
+    for (const encoded of await encodeBatchFragments(batchB, 90)) {
+      await repository.saveReceivedPart(encoded, '2026-08-20T02:44:00.000Z')
+    }
+    const ackB = await processCompletedHostBatch(database, { batchId: batchB.batchId, hostDeviceId: 'host-production' as DeviceId, now: '2026-08-20T02:45:00.000Z' })
+    expect(ackB.results.map((result) => result.status)).toEqual(['ACCEPTED'])
+
+    expect(await database.results.count()).toBe(1)
+    expect(await database.resultRevisions.where('resultId').equals('backup-result').count()).toBe(2)
+
+    const resultRepository = new ResultRepository(database)
+    const projection = await resultRepository.getProjection('backup-result' as never)
+    expect(projection?.conflictState.status).toBe('UNRESOLVED')
+    expect(projection?.effectiveRevision).toBeNull()
+
+    const state = await createHostScoringService(database).loadAuthoritativeState()
+    expect(state.events[0]!.participants.every((participant) => participant.aggregateScore === 0)).toBe(true)
   })
 })

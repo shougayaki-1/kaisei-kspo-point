@@ -1,4 +1,6 @@
 {
+  "fixtureFormatVersion": 2,
+  "methodKey": "time",
   "scoringProfile": {
     "scoringProfileId": "profile-1",
     "competitionId": "competition-1",

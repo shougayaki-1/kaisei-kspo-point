@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
   CompetitionEntryId,
   CompetitionId,
+  CourtStationId,
   CourtRunId,
   ScheduleSlotId,
   ScoringProfileId,
@@ -10,8 +11,9 @@ import type {
   TournamentId,
 } from '../domain/ids'
 import type { TournamentConfigSnapshot } from '../config/tournament-config'
+import type { Result } from '../domain/result'
 import { createDatabase, type AppDatabase } from './database'
-import { ConfigRepository } from './config-repository'
+import { ConfigIdentityImpactError, ConfigRepository } from './config-repository'
 
 const openDatabases: AppDatabase[] = []
 
@@ -23,6 +25,7 @@ function snapshotFor(prefix: string, name = `${prefix}大会`): TournamentConfig
   const slotId = `${prefix}-slot-1` as ScheduleSlotId
   const courtRunId = `${prefix}-run-1` as CourtRunId
   const scoringSessionId = `${prefix}-session-1` as ScoringSessionId
+  const courtStationId = `${prefix}-court-station-1` as CourtStationId
 
   return {
     tournament: {
@@ -46,15 +49,17 @@ function snapshotFor(prefix: string, name = `${prefix}大会`): TournamentConfig
         slotId,
         competitionId,
         label: '第1展開',
+        displayOrder: 1,
         plannedStart: '09:00',
         plannedEnd: '09:10',
       },
     ],
+    courtStations: [{ courtStationId, tournamentId, label: 'Aコート', displayOrder: 1 }],
     courtRuns: [
       {
         courtRunId,
         slotId,
-        courtLabel: 'A',
+        courtStationId,
         participantEntryIds: [entryId],
       },
     ],
@@ -64,6 +69,8 @@ function snapshotFor(prefix: string, name = `${prefix}大会`): TournamentConfig
         competitionId,
         slotId,
         label: '第1展開 全体',
+        displayOrder: 1,
+        leadCourtStationId: courtStationId,
         courtRunIds: [courtRunId],
         inputScope: 'WHOLE_SLOT',
       },
@@ -92,6 +99,7 @@ function snapshotFor(prefix: string, name = `${prefix}大会`): TournamentConfig
     scoringTestCases: [{
       testCaseId: `${prefix}-test-1`,
       competitionId,
+      methodKey: 'score',
       name: '通常順位',
       rounds: [{
         roundId: `${prefix}-round-1`,
@@ -103,6 +111,19 @@ function snapshotFor(prefix: string, name = `${prefix}大会`): TournamentConfig
         roundRanks: [1],
         roundAwardScores: [30],
         aggregateScore: 30,
+      }],
+    }],
+    resultEntryPolicies: [{
+      competitionId,
+      defaultMethodKey: 'score',
+      allowedMethodKeys: ['score'],
+      methods: [{
+        methodKey: 'score',
+        label: '得点',
+        kind: 'SCORE',
+        inputMode: 'NUMBER',
+        inputSchemaId: `${prefix}-schema-1`,
+        projection: { type: 'SINGLE_FIELD', fieldKey: 'count', direction: 'HIGHER_IS_BETTER' },
       }],
     }],
   }
@@ -204,6 +225,8 @@ describe('ConfigRepository', () => {
     expect(await db.teams.where('tournamentId').equals(second.tournament.tournamentId).toArray()).toEqual(current?.teams)
     expect(await db.competitions.where('tournamentId').equals(second.tournament.tournamentId).toArray()).toEqual(current?.competitions)
     expect(await db.inputSchemas.where('competitionId').equals(second.competitions[0].competitionId).toArray()).toEqual(current?.inputSchemas)
+    expect(await db.courtStations.where('tournamentId').equals(second.tournament.tournamentId).toArray()).toEqual(current?.courtStations)
+    expect(await db.resultEntryPolicies.where('competitionId').equals(second.competitions[0].competitionId).toArray()).toEqual(current?.resultEntryPolicies)
   })
 
   it('does not remove normalized data or versions belonging to another tournament', async () => {
@@ -253,5 +276,56 @@ describe('ConfigRepository', () => {
     expect((await repository.loadCurrent(first.tournament.tournamentId))?.tournament.name).toBe('rollback大会')
     expect((await db.teams.get(first.teams[0].teamId))?.name).toBe('1組')
     expect((await repository.listVersions(first.tournament.tournamentId)).map((item) => item.version)).toEqual([1])
+  })
+
+  it('blocks a v2 apply that changes the topology of a result-bearing task', async () => {
+    const db = makeDb()
+    const repository = new ConfigRepository(db)
+    const first = snapshotFor('identity')
+    await repository.apply(first, metadata())
+
+    const result: Result = {
+      resultId: 'identity-result-1' as never,
+      tournamentId: first.tournament.tournamentId,
+      competitionId: first.competitions[0].competitionId,
+      scoringSessionId: first.scoringSessions[0].scoringSessionId,
+      currentRevisionId: null,
+      createdAt: '2026-08-19T12:05:00+09:00',
+      createdByDeviceId: 'device-1' as never,
+    }
+    await db.results.add(result)
+
+    const second = snapshotFor('identity', '第2版')
+    second.scoringSessions[0].leadCourtStationId = `${second.courtStations[0].courtStationId}-other` as never
+    second.courtStations.push({
+      courtStationId: `${second.courtStations[0].courtStationId}-other` as never,
+      tournamentId: second.tournament.tournamentId,
+      label: 'Bコート',
+      displayOrder: 2,
+    })
+
+    await expect(
+      repository.apply(second, metadata('2026-08-19T12:30:00+09:00')),
+    ).rejects.toThrow(ConfigIdentityImpactError)
+    expect((await repository.listVersions(first.tournament.tournamentId)).map((item) => item.version)).toEqual([1])
+  })
+
+  it('allows a v2 apply that changes result-bearing task topology once its Results are gone', async () => {
+    const db = makeDb()
+    const repository = new ConfigRepository(db)
+    const first = snapshotFor('reset')
+    await repository.apply(first, metadata())
+
+    const second = snapshotFor('reset', '第2版')
+    second.scoringSessions[0].leadCourtStationId = `${second.courtStations[0].courtStationId}-other` as never
+    second.courtStations.push({
+      courtStationId: `${second.courtStations[0].courtStationId}-other` as never,
+      tournamentId: second.tournament.tournamentId,
+      label: 'Bコート',
+      displayOrder: 2,
+    })
+
+    const applied = await repository.apply(second, metadata('2026-08-19T12:30:00+09:00'))
+    expect(applied.version).toBe(2)
   })
 })

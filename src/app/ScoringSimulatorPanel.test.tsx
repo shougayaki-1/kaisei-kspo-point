@@ -10,6 +10,7 @@ import type {
 import type { ScoringProfile } from '../domain/scoring'
 import type { Competition, CompetitionEntry, Team } from '../domain/tournament'
 import type { ScoringTestCase } from '../config/scoring-test-case'
+import type { ResultEntryPolicy } from '../config/result-entry-policy'
 import { ScoringSimulatorPanel } from './ScoringSimulatorPanel'
 
 const tournamentId = 'tournament-1' as TournamentId
@@ -55,6 +56,7 @@ function existingTest(): ScoringTestCase {
   return {
     testCaseId: 'test-1',
     competitionId,
+    methodKey: 'score',
     name: '通常順位',
     rounds: [{
       roundId: 'round-1',
@@ -71,9 +73,28 @@ function existingTest(): ScoringTestCase {
   }
 }
 
+function policy(defaultMethodKey = 'score'): ResultEntryPolicy {
+  return {
+    competitionId,
+    defaultMethodKey,
+    allowedMethodKeys: [defaultMethodKey],
+    methods: [{
+      methodKey: defaultMethodKey,
+      label: defaultMethodKey,
+      kind: defaultMethodKey === 'rank' ? 'RANK' : 'SCORE',
+      inputMode: defaultMethodKey === 'rank' ? 'RANK_MANUAL' : 'NUMBER',
+      inputSchemaId: `schema-${defaultMethodKey}`,
+      projection: defaultMethodKey === 'rank'
+        ? { type: 'DIRECT_RANK', fieldKey: 'rank' }
+        : { type: 'SINGLE_FIELD', fieldKey: 'score', direction: 'HIGHER_IS_BETTER' },
+    }],
+  }
+}
+
 function renderPanel(options?: {
   scoringProfile?: ScoringProfile
   testCases?: ScoringTestCase[]
+  resultEntryPolicy?: ResultEntryPolicy
   onSaveTestCase?: (testCase: ScoringTestCase) => void
   onDeleteTestCase?: (testCaseId: string) => void
 }) {
@@ -86,6 +107,7 @@ function renderPanel(options?: {
       teams={teams}
       profile={options?.scoringProfile ?? profile()}
       testCases={options?.testCases ?? []}
+      resultEntryPolicy={options?.resultEntryPolicy ?? policy()}
       onSaveTestCase={onSaveTestCase}
       onDeleteTestCase={onDeleteTestCase}
     />,
@@ -150,6 +172,16 @@ describe('ScoringSimulatorPanel', () => {
         { entryId: entries[1].entryId, roundRanks: [2], roundAwardScores: [20], aggregateScore: 20 },
       ],
     })
+  })
+
+  it('saves a non-score policy default as the test method key', () => {
+    const onSaveTestCase = vi.fn()
+    renderPanel({ onSaveTestCase, resultEntryPolicy: policy('rank') })
+    enterRoundOne('1', '2')
+    fireEvent.change(screen.getByLabelText('テスト名'), { target: { value: '順位入力' } })
+    fireEvent.click(screen.getByRole('button', { name: '現在の結果をテストとして保存' }))
+
+    expect(onSaveTestCase).toHaveBeenCalledWith(expect.objectContaining({ methodKey: 'rank' }))
   })
 
   it('reruns saved tests against the current profile and shows semantic diffs', () => {

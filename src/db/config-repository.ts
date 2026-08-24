@@ -1,4 +1,4 @@
-import { createId, type TournamentId } from '../domain/ids'
+import { createId, type ScoringSessionId, type TournamentId } from '../domain/ids'
 import {
   canonicalizeDecimalInput,
   canonicalizeExactValue,
@@ -12,6 +12,7 @@ import {
   scoringTestResultFingerprint,
   type ScoringTestRunResult,
 } from '../config/scoring-test-case'
+import { selectUniqueHighestVersion } from '../config/scoring-profile'
 import {
   areConfigVersionsEquivalent,
   materializeConfigVersionId,
@@ -19,6 +20,7 @@ import {
 } from '../config/config-version'
 import type { TournamentConfigSnapshot } from '../config/tournament-config'
 import { validateTournamentConfig } from '../config/tournament-config'
+import { analyzeConfigIdentityImpact, type ConfigIdentityImpactIssue } from '../config/config-identity-impact'
 import type { AppDatabase } from './database'
 import type { AuditEventRecord, ConfigChangeClass, ConfigVersionRecord } from './schema'
 import type { Tournament } from '../domain/tournament'
@@ -53,6 +55,16 @@ export class ScoringRegressionError extends Error {
     const detail = results.map((result) => result.message).filter(Boolean).join('; ')
     super(detail ? `scoring regression approval required: ${detail}` : 'scoring regression approval required')
     this.name = 'ScoringRegressionError'
+  }
+}
+
+export class ConfigIdentityImpactError extends Error {
+  constructor(public readonly issues: ConfigIdentityImpactIssue[]) {
+    const detail = issues
+      .map((issue) => `${issue.competitionLabel} / ${issue.taskLabel}`)
+      .join('; ')
+    super(`結果が保存済みのタスクの構成は変更できません: ${detail}`)
+    this.name = 'ConfigIdentityImpactError'
   }
 }
 
@@ -232,10 +244,10 @@ export class ConfigRepository {
     const normalized = normalizeSnapshot(snapshot)
 
     return normalized.scoringTestCases.map((testCase) => {
-      const profile = normalized.scoringProfiles.find(
-        (item) => item.competitionId === testCase.competitionId,
+      const profileSelection = selectUniqueHighestVersion(
+        normalized.scoringProfiles.filter((item) => item.competitionId === testCase.competitionId),
       )
-      if (!profile) {
+      if (profileSelection.status === 'MISSING') {
         return {
           testCaseId: testCase.testCaseId,
           status: 'INVALID' as const,
@@ -244,11 +256,42 @@ export class ConfigRepository {
           message: `ScoringProfile が競技 ${testCase.competitionId} に設定されていません。`,
         }
       }
+      if (profileSelection.status === 'AMBIGUOUS') {
+        return {
+          testCaseId: testCase.testCaseId,
+          status: 'INVALID' as const,
+          actual: [],
+          diffs: [],
+          message: `ScoringProfile for ${testCase.competitionId} highest version is ambiguous.`,
+        }
+      }
+      const profile = profileSelection.value
 
       const entries = normalized.competitionEntries.filter(
         (entry) => entry.competitionId === testCase.competitionId,
       )
-      return runScoringTestCase(testCase, profile, entries)
+      const usesMethodProjection = testCase.rounds.some((round) => round.rawValues !== undefined) &&
+        !profile.scoringRule
+      if (!usesMethodProjection) {
+        return runScoringTestCase(testCase, profile, entries)
+      }
+      const policy = normalized.resultEntryPolicies.find(
+        (item) => item.competitionId === testCase.competitionId,
+      )
+      const method = policy?.methods.find((item) => item.methodKey === testCase.methodKey)
+      const schema = method
+        ? normalized.inputSchemas.find((item) => item.inputSchemaId === method.inputSchemaId)
+        : undefined
+      if (!method || !schema) {
+        return {
+          testCaseId: testCase.testCaseId,
+          status: 'INVALID' as const,
+          actual: [],
+          diffs: [],
+          message: `入力方式 ${testCase.methodKey} の定義またはInputSchemaがありません。`,
+        }
+      }
+      return runScoringTestCase(testCase, profile, entries, { method, schema })
     })
   }
 
@@ -375,6 +418,19 @@ export class ConfigRepository {
     const active = await this.getActiveVersion(tournamentId)
 
     if (active) {
+      const resultCounts = new Map<ScoringSessionId, number>()
+      for (const session of active.snapshot.scoringSessions) {
+        const count = await this.db.results
+          .where('scoringSessionId')
+          .equals(session.scoringSessionId)
+          .count()
+        if (count > 0) resultCounts.set(session.scoringSessionId, count)
+      }
+      if (resultCounts.size > 0) {
+        const impact = analyzeConfigIdentityImpact(active.snapshot, normalizedInput, resultCounts)
+        if (impact.blocked) throw new ConfigIdentityImpactError(impact.issues)
+      }
+
       const activeTestCases = new Map(active.snapshot.scoringTestCases.map((testCase) => [testCase.testCaseId, testCase]))
       const removedTestCases = active.snapshot.scoringTestCases.filter(
         (testCase) => !normalizedInput.scoringTestCases.some((candidate) => candidate.testCaseId === testCase.testCaseId),
@@ -439,10 +495,13 @@ export class ConfigRepository {
       if (index < 0) {
         throw new ScoringRegressionError(regressionResults)
       }
-      const profile = normalizedInput.scoringProfiles.find(
-        (candidate) => candidate.competitionId === appliedSnapshot.scoringTestCases[index]!.competitionId,
+      const profileSelection = selectUniqueHighestVersion(
+        normalizedInput.scoringProfiles.filter(
+          (candidate) => candidate.competitionId === appliedSnapshot.scoringTestCases[index]!.competitionId,
+        ),
       )
-      if (!profile) throw new ScoringRegressionError(regressionResults)
+      if (profileSelection.status !== 'SELECTED') throw new ScoringRegressionError(regressionResults)
+      const profile = profileSelection.value
       appliedSnapshot.scoringTestCases[index] = approveScoringTestChange(
         appliedSnapshot.scoringTestCases[index],
         result,
@@ -526,12 +585,14 @@ export class ConfigRepository {
       this.db.teams,
       this.db.competitions,
       this.db.competitionEntries,
+      this.db.courtStations,
       this.db.scheduleSlots,
       this.db.courtRuns,
       this.db.scoringSessions,
       this.db.inputSchemas,
       this.db.scoringProfiles,
       this.db.scoringTestCases,
+      this.db.resultEntryPolicies,
     ]
   }
 
@@ -553,6 +614,7 @@ export class ConfigRepository {
 
     await this.db.tournaments.delete(tournamentId)
     await this.db.teams.where('tournamentId').equals(tournamentId).delete()
+    await this.db.courtStations.where('tournamentId').equals(tournamentId).delete()
 
     if (existingCompetitionIds.length > 0) {
       await this.db.competitionEntries
@@ -579,6 +641,10 @@ export class ConfigRepository {
         .where('competitionId')
         .anyOf(existingCompetitionIds)
         .delete()
+      await this.db.resultEntryPolicies
+        .where('competitionId')
+        .anyOf(existingCompetitionIds)
+        .delete()
     }
     if (existingSlotIds.length > 0) {
       await this.db.courtRuns.where('slotId').anyOf(existingSlotIds).delete()
@@ -592,6 +658,9 @@ export class ConfigRepository {
     }
     if (appliedSnapshot.competitionEntries.length > 0) {
       await this.db.competitionEntries.bulkPut(appliedSnapshot.competitionEntries)
+    }
+    if (appliedSnapshot.courtStations.length > 0) {
+      await this.db.courtStations.bulkPut(appliedSnapshot.courtStations)
     }
     if (appliedSnapshot.scheduleSlots.length > 0) {
       await this.db.scheduleSlots.bulkPut(appliedSnapshot.scheduleSlots)
@@ -610,6 +679,9 @@ export class ConfigRepository {
     }
     if (appliedSnapshot.scoringTestCases.length > 0) {
       await this.db.scoringTestCases.bulkPut(appliedSnapshot.scoringTestCases)
+    }
+    if (appliedSnapshot.resultEntryPolicies.length > 0) {
+      await this.db.resultEntryPolicies.bulkPut(appliedSnapshot.resultEntryPolicies)
     }
   }
 
@@ -633,6 +705,7 @@ export class ConfigRepository {
             .anyOf(competitionIds)
             .toArray()
         : []
+    const courtStations = await this.db.courtStations.where('tournamentId').equals(tournamentId).toArray()
     const scheduleSlots =
       competitionIds.length > 0
         ? await this.db.scheduleSlots.where('competitionId').anyOf(competitionIds).toArray()
@@ -653,6 +726,10 @@ export class ConfigRepository {
       competitionIds.length > 0
         ? await this.db.scoringTestCases.where('competitionId').anyOf(competitionIds).toArray()
         : []
+    const resultEntryPolicies =
+      competitionIds.length > 0
+        ? await this.db.resultEntryPolicies.where('competitionId').anyOf(competitionIds).toArray()
+        : []
 
     const slotIds = scheduleSlots.map((item) => item.slotId)
     const courtRuns =
@@ -665,12 +742,14 @@ export class ConfigRepository {
       teams,
       competitions,
       competitionEntries,
+      courtStations,
       scheduleSlots,
       courtRuns,
       scoringSessions,
       inputSchemas,
       scoringProfiles,
       scoringTestCases,
+      resultEntryPolicies,
     })
   }
 }

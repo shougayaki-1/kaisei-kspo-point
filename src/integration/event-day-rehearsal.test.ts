@@ -177,7 +177,7 @@ describe('event-day automated rehearsal', () => {
       appVersion: '0.1.0',
       releaseSha: '0123456789abcdef0123456789abcdef01234567',
       activeConfigVersionId: 'config-approved',
-      databaseSchemaVersion: 5,
+      databaseSchemaVersion: 6,
       backupFormatVersion: 1,
     })
 

@@ -8,7 +8,13 @@ import type { CalculationTraceStep, MatchOutcome, RawParticipantValue, ScoringPr
 import type { RawValue } from '../domain/result'
 import { calculateScoringScenario } from '../domain/scoring-engine'
 import type { CompetitionEntry } from '../domain/tournament'
+import {
+  projectResultEntry,
+  type CanonicalCompetitionEntryResult,
+} from '../domain/result-entry-projection'
 import { stableConfigStringify } from './config-version'
+import type { InputSchema } from './input-schema'
+import type { ResultEntryMethodDefinition } from './result-entry-policy'
 import { unsupportedScoringProfileMessage } from './scoring-profile'
 
 export interface ScoringTestRound {
@@ -30,6 +36,7 @@ export interface ScoringTestExpectedParticipant {
 export interface ScoringTestCase {
   testCaseId: string
   competitionId: CompetitionId
+  methodKey: string
   name: string
   rounds: ScoringTestRound[]
   expected: ScoringTestExpectedParticipant[]
@@ -73,6 +80,11 @@ export interface ScoringTestApprovalMetadata {
   approvedAt: string
   sourceConfigVersionId?: string
   approvalFingerprint?: string
+}
+
+export interface ScoringTestMethodContext {
+  method: ResultEntryMethodDefinition
+  schema: InputSchema
 }
 
 function canonicalParticipant(
@@ -142,12 +154,21 @@ export function runScoringTestCase(
   testCase: ScoringTestCase,
   profile: ScoringProfile,
   entries: CompetitionEntry[],
+  methodContext?: ScoringTestMethodContext,
 ): ScoringTestRunResult {
   if (profile.competitionId !== testCase.competitionId) {
     return invalid(testCase, `ScoringProfile の競技がテスト ${testCase.testCaseId} と一致しません。`)
   }
   const unsupported = unsupportedScoringProfileMessage(profile)
   if (unsupported) return invalid(testCase, unsupported)
+  if (methodContext) {
+    if (methodContext.method.methodKey !== testCase.methodKey) {
+      return invalid(testCase, `得点テスト ${testCase.testCaseId} の入力方式 ${testCase.methodKey} は ${methodContext.method.label} と一致しません。`)
+    }
+    if (methodContext.schema.competitionId !== testCase.competitionId) {
+      return invalid(testCase, `入力方式 ${methodContext.method.label} のInputSchema競技が得点テストと一致しません。`)
+    }
+  }
 
   const entryMap = new Map(entries.map((entry) => [entry.entryId, entry]))
   for (const round of testCase.rounds) {
@@ -170,7 +191,23 @@ export function runScoringTestCase(
       {
         rounds: testCase.rounds.map((round) => ({
           roundId: round.roundId,
-          ...(round.rawValues
+          ...(round.rawValues && methodContext && !profile.scoringRule
+            ? {
+                projected: projectResultEntry({
+                  method: methodContext.method,
+                  schema: methodContext.schema,
+                  entries: Object.fromEntries(round.rawValues.map((value) => [
+                    value.entryId,
+                    structuredClone(value.fields),
+                  ])),
+                }).entries.map((value): {
+                  participantId: CompetitionEntryId
+                  rank: number
+                  comparisonValue?: ExactValue
+                  outcome?: MatchOutcome
+                } => canonicalProjectedValue(value)),
+              }
+            : round.rawValues
             ? {
                 rawValues: round.rawValues.map((value): RawParticipantValue<CompetitionEntryId> => ({
                   participantId: value.entryId,
@@ -188,7 +225,11 @@ export function runScoringTestCase(
       profile,
     )
   } catch (error) {
-    return invalid(testCase, error instanceof Error ? error.message : '得点計算に失敗しました。')
+    const message = error instanceof Error ? error.message : '得点計算に失敗しました。'
+    return invalid(
+      testCase,
+      methodContext ? `入力方式 ${methodContext.method.label} (${testCase.methodKey}): ${message}` : message,
+    )
   }
 
   const resultByEntry = new Map(
@@ -299,6 +340,22 @@ export function runScoringTestCase(
         },
       ]),
     ),
+  }
+}
+
+function canonicalProjectedValue(
+  value: CanonicalCompetitionEntryResult,
+): {
+  participantId: CompetitionEntryId
+  rank: number
+  comparisonValue?: ExactValue
+  outcome?: MatchOutcome
+} {
+  return {
+    participantId: value.entryId,
+    rank: value.rank,
+    ...(value.comparisonValue !== undefined ? { comparisonValue: canonicalizeExactValue(value.comparisonValue) } : {}),
+    ...(value.outcome ? { outcome: value.outcome } : {}),
   }
 }
 

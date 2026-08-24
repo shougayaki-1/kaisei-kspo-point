@@ -1,5 +1,21 @@
 import type { AggregationRule, ScoringProfile } from '../domain/scoring'
 
+export type HighestVersionSelection<T> =
+  | { status: 'MISSING' }
+  | { status: 'AMBIGUOUS'; version: number }
+  | { status: 'SELECTED'; value: T }
+
+export function selectUniqueHighestVersion<T extends { version: number }>(
+  values: T[],
+): HighestVersionSelection<T> {
+  if (values.length === 0) return { status: 'MISSING' }
+  const version = Math.max(...values.map((value) => value.version))
+  const highest = values.filter((value) => value.version === version)
+  return highest.length === 1
+    ? { status: 'SELECTED', value: highest[0]! }
+    : { status: 'AMBIGUOUS', version }
+}
+
 export const productionSupportedAggregationRules = [
   'SUM',
   'AVERAGE',

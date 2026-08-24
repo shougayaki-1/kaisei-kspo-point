@@ -29,12 +29,14 @@ function record(): ConfigVersionRecord {
       teams: [],
       competitions: [],
       competitionEntries: [],
+      courtStations: [],
       scheduleSlots: [],
       courtRuns: [],
       scoringSessions: [],
       inputSchemas: [],
       scoringProfiles: [],
       scoringTestCases: [],
+      resultEntryPolicies: [],
     },
   }
 }

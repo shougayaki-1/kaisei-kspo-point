@@ -15,6 +15,9 @@ import type {
 import type { InputMode, Result, ResultRevision } from '../domain/result'
 import type { ResultProjection } from '../domain/result-projection'
 import type { TournamentConfigSnapshot } from '../config/tournament-config'
+import { EXCHANGE_FESTIVAL_TEMPLATE } from '../config/setup/builtin-templates'
+import { compileTournamentSetup } from '../config/setup/setup-compiler'
+import type { TournamentSetupDraft } from '../config/setup/setup-types'
 import { ConfigRepository } from '../db/config-repository'
 import { createDatabase, type AppDatabase } from '../db/database'
 import { createCourtResultService } from './court-result-service'
@@ -30,23 +33,31 @@ const ids = {
   teamA: 'team-a' as TeamId, teamB: 'team-b' as TeamId,
   entryA: 'entry-a' as CompetitionEntryId, entryB: 'entry-b' as CompetitionEntryId,
   runA: 'run-a' as CourtRunId, runB: 'run-b' as CourtRunId,
+  courtA: 'court-a' as never, courtB: 'court-b' as never,
 }
 function snapshot(): TournamentConfigSnapshot { return {
   tournament: { tournamentId: ids.tournament, name: '大会', eventDate: '2026-09-01', currentConfigVersion: 0 },
   teams: [{ teamId: ids.teamA, tournamentId: ids.tournament, name: '赤' }, { teamId: ids.teamB, tournamentId: ids.tournament, name: '青' }],
   competitions: [{ competitionId: ids.competition, tournamentId: ids.tournament, name: '計数競技', defaultInputScope: 'WHOLE_SLOT' }],
   competitionEntries: [{ entryId: ids.entryA, competitionId: ids.competition, teamId: ids.teamA, label: '赤A' }, { entryId: ids.entryB, competitionId: ids.competition, teamId: ids.teamB, label: '青B' }],
-  scheduleSlots: [{ slotId: ids.slot, competitionId: ids.competition, label: '第1展開' }],
-  courtRuns: [{ courtRunId: ids.runA, slotId: ids.slot, courtLabel: '東', participantEntryIds: [ids.entryA] }, { courtRunId: ids.runB, slotId: ids.slot, courtLabel: '西', participantEntryIds: [ids.entryB] }],
-  scoringSessions: [{ scoringSessionId: ids.session, competitionId: ids.competition, slotId: ids.slot, label: '第1展開 全体', courtRunIds: [ids.runA, ids.runB], inputScope: 'WHOLE_SLOT' }],
-  inputSchemas: [{ inputSchemaId: 'schema-1', competitionId: ids.competition, version: 1, fields: [
-    { key: 'count', label: '個数', type: 'NUMBER', required: true, min: '0', max: '100' },
-    { key: 'verified', label: '確認', type: 'BOOLEAN', required: true },
-  ] }],
+  courtStations: [{ courtStationId: ids.courtA, tournamentId: ids.tournament, label: '東', displayOrder: 1 }, { courtStationId: ids.courtB, tournamentId: ids.tournament, label: '西', displayOrder: 2 }],
+  scheduleSlots: [{ slotId: ids.slot, competitionId: ids.competition, label: '第1展開', displayOrder: 1 }],
+  courtRuns: [{ courtRunId: ids.runA, slotId: ids.slot, courtStationId: ids.courtA, participantEntryIds: [ids.entryA] }, { courtRunId: ids.runB, slotId: ids.slot, courtStationId: ids.courtB, participantEntryIds: [ids.entryB] }],
+  scoringSessions: [{ scoringSessionId: ids.session, competitionId: ids.competition, slotId: ids.slot, label: '第1展開 全体', displayOrder: 1, leadCourtStationId: ids.courtA, courtRunIds: [ids.runA, ids.runB], inputScope: 'WHOLE_SLOT' }],
+  inputSchemas: [
+    { inputSchemaId: 'schema-1', competitionId: ids.competition, version: 1, fields: [
+      { key: 'count', label: '個数', type: 'NUMBER', required: true, min: '0', max: '100' },
+      { key: 'verified', label: '確認', type: 'BOOLEAN', required: true },
+    ] },
+    { inputSchemaId: 'schema-outcome', competitionId: ids.competition, version: 1, fields: [
+      { key: 'winner', label: '勝敗', type: 'WIN_LOSS', required: true },
+    ] },
+  ],
   scoringProfiles: [{ scoringProfileId: 'profile-1' as ScoringProfileId, competitionId: ids.competition, version: 1, rankingRule: { direction: 'HIGHER_IS_BETTER' }, tieRule: 'AVERAGE_OCCUPIED_PLACES', awardRule: { type: 'RANK_POINTS', rankPoints: { 1: 10, 2: 5 } }, aggregationRule: 'SUM' }],
   scoringTestCases: [{
     testCaseId: 'test-1',
     competitionId: ids.competition,
+    methodKey: 'score',
     name: '通常順位',
     rounds: [{ roundId: 'test-round-1', label: '第1展開', values: [{ entryId: ids.entryA, value: 2 }, { entryId: ids.entryB, value: 1 }] }],
     expected: [
@@ -54,7 +65,25 @@ function snapshot(): TournamentConfigSnapshot { return {
       { entryId: ids.entryB, roundRanks: [2], roundAwardScores: [5], aggregateScore: 5 },
     ],
   }],
+  resultEntryPolicies: [{
+    competitionId: ids.competition,
+    defaultMethodKey: 'score',
+    allowedMethodKeys: ['score', 'outcome'],
+    methods: [
+      { methodKey: 'score', label: '得点', kind: 'SCORE', inputMode: 'NUMBER', inputSchemaId: 'schema-1', projection: { type: 'SINGLE_FIELD', fieldKey: 'count', direction: 'HIGHER_IS_BETTER' } },
+      { methodKey: 'outcome', label: '勝敗', kind: 'OUTCOME', inputMode: 'WIN_LOSS', inputSchemaId: 'schema-outcome', projection: { type: 'DIRECT_OUTCOME', fieldKey: 'winner' } },
+    ],
+  }],
 } }
+function standardSetupDraft(): TournamentSetupDraft {
+  return {
+    draftFormatVersion: 2, draftId: 'standard-service-config', createdAt: '2026-08-23T00:00:00Z', updatedAt: '2026-08-23T00:00:00Z', currentStep: 'OPERATIONS_CHECK',
+    source: { type: 'STANDARD', templateId: EXCHANGE_FESTIVAL_TEMPLATE.templateId }, tournament: { name: '標準大会' },
+    teams: [{ teamKey: 'team-red', name: '赤組' }, { teamKey: 'team-blue', name: '青組' }],
+    courtStations: [{ stationKey: 'court-a', label: 'Aコート', displayOrder: 0 }, { stationKey: 'court-b', label: 'Bコート', displayOrder: 1 }],
+    competitions: structuredClone(EXCHANGE_FESTIVAL_TEMPLATE.competitions),
+  }
+}
 async function seed(db: AppDatabase) { return new ConfigRepository(db).apply(snapshot(), { operator: '本部', createdAt: '2026-08-19T09:00:00+09:00', changeClass: 'INPUT_SCHEMA' }) }
 interface ExpectedCourtResultService {
   listSessions(): Promise<Array<{ scoringSessionId: ScoringSessionId; label: string; competitionName: string; inputScope: string; courtRunCount: number }>>
@@ -73,6 +102,15 @@ describe('Court production Result service', () => {
     expect(await target.listSessions()).toEqual([expect.objectContaining({ scoringSessionId: ids.session, inputScope: 'WHOLE_SLOT', courtRunCount: 2 })])
     const loaded = await target.loadSession(ids.session)
     expect(loaded.courtRuns.map((run) => run.courtRunId)).toEqual([ids.runA, ids.runB]); expect(loaded.entries.map((entry) => entry.entryId)).toEqual([ids.entryA, ids.entryB])
+  })
+  it('uses the standard config default method schema when allowed methods share version one', async () => {
+    const db = open()
+    const standard = compileTournamentSetup(standardSetupDraft())
+    await new ConfigRepository(db).apply(standard, { operator: '本部', createdAt: '2026-08-23T00:00:00Z', changeClass: 'INPUT_SCHEMA' })
+
+    const loaded = await service(db).loadSession(standard.scoringSessions[0]!.scoringSessionId)
+
+    expect(loaded.inputSchema.fields.map((field) => field.key)).toEqual(['first', 'second'])
   })
   it('creates only raw Result + initial immutable Revision and canonicalizes decimal input', async () => {
     const db = open(); await seed(db); const target = service(db)
@@ -94,11 +132,31 @@ describe('Court production Result service', () => {
     const corrected = await target.correctResult({ resultId: first.result.resultId, operator: '担当者B', inputMode: 'NUMBER', values: allValues('3', '4') })
     expect(corrected.revision.revisionNumber).toBe(2); expect(corrected.revision.parentRevisionIds).toEqual([first.revision.revisionId]); expect((await target.getResultHistory(first.result.resultId)).revisions).toHaveLength(2); expect(await db.resultRevisions.get(first.revision.revisionId)).toEqual(firstSnapshot)
   })
-  it('allows multiple configured physical CourtRuns to feed one ScoringSession without assuming a fixed court topology', async () => {
+  it('keeps one logical Result per ScoringSession even when different CourtRun subsets are entered independently', async () => {
     const db = open(); await seed(db); const target = service(db)
     await target.saveResult({ scoringSessionId: ids.session, courtRunIds: [ids.runA], operator: '東担当', inputMode: 'NUMBER', values: { [ids.entryA]: { count: '7', verified: true } } })
     await target.saveResult({ scoringSessionId: ids.session, courtRunIds: [ids.runB], operator: '西担当', inputMode: 'NUMBER', values: { [ids.entryB]: { count: '8', verified: true } } })
-    const saved = await target.listSessionResults(ids.session); expect(saved).toHaveLength(2); expect(saved.map((item) => item.result.scoringSessionId)).toEqual([ids.session, ids.session])
+    const saved = await target.listSessionResults(ids.session)
+    expect(saved).toHaveLength(1)
+    expect(saved[0]!.result.scoringSessionId).toBe(ids.session)
+    expect(saved[0]!.revisions).toHaveLength(2)
+    expect(saved[0]!.projection.conflictState.status).toBe('UNRESOLVED')
+    expect(saved[0]!.projection.conflictState.commonConfirmedAncestorRevisionId).toBeNull()
+  })
+
+  it('produces one logical Result with an unresolved conflict when two devices independently save the same task', async () => {
+    const db = open(); await seed(db)
+    const deviceA = createCourtResultService(db, { deviceId: 'device-a' as DeviceId }) as unknown as ExpectedCourtResultService
+    const deviceB = createCourtResultService(db, { deviceId: 'device-b' as DeviceId }) as unknown as ExpectedCourtResultService
+    const savedA = await deviceA.saveResult({ scoringSessionId: ids.session, operator: '東担当', inputMode: 'NUMBER', values: allValues('1', '2') })
+    const savedB = await deviceB.saveResult({ scoringSessionId: ids.session, operator: '西担当', inputMode: 'NUMBER', values: allValues('3', '4') })
+    expect(savedA.result.resultId).toBe(savedB.result.resultId)
+    expect(await db.results.count()).toBe(1)
+    const history = await deviceA.getResultHistory(savedA.result.resultId)
+    expect(history.revisions).toHaveLength(2)
+    expect(history.projection.conflictState.status).toBe('UNRESOLVED')
+    expect(history.projection.candidateHeads.map((head) => head.revisionId).sort())
+      .toEqual([savedA.revision.revisionId, savedB.revision.revisionId].sort())
   })
   it('fails explicitly when the active ScoringSession/InputSchema configuration is inconsistent', async () => {
     const db = open(); await seed(db); await db.inputSchemas.clear(); const target = service(db)
@@ -106,7 +164,7 @@ describe('Court production Result service', () => {
     await expect(target.saveResult({ scoringSessionId: 'missing-session' as ScoringSessionId, operator: '担当者', inputMode: 'NUMBER', values: {} })).rejects.toThrow(/ScoringSession|session/i)
   })
   it('keeps production Result data separate from simulator/test-case stores', async () => {
-    const db = open(); await seed(db); const sentinel = { testCaseId: 'simulator-only', name: 'simulator', competitionId: ids.competition, rounds: [], expected: [] }; await db.scoringTestCases.add(sentinel); const target = service(db)
+    const db = open(); await seed(db); const sentinel = { testCaseId: 'simulator-only', methodKey: 'score', name: 'simulator', competitionId: ids.competition, rounds: [], expected: [] }; await db.scoringTestCases.add(sentinel); const target = service(db)
     await target.saveResult({ scoringSessionId: ids.session, operator: '担当者', inputMode: 'NUMBER', values: allValues('5', '6') })
     expect(await db.scoringTestCases.get('simulator-only')).toEqual(sentinel); expect(await db.results.count()).toBe(1); expect(await db.resultRevisions.count()).toBe(1)
   })
@@ -114,5 +172,96 @@ describe('Court production Result service', () => {
     const name = `court-result-reload-${crypto.randomUUID()}`; const db1 = open(name); await seed(db1); const firstService = service(db1)
     const first = await firstService.saveResult({ scoringSessionId: ids.session, operator: '担当者A', inputMode: 'NUMBER', values: allValues('1', '2') }); await firstService.correctResult({ resultId: first.result.resultId, operator: '担当者B', inputMode: 'NUMBER', values: allValues('2', '3') }); db1.close()
     const db2 = open(name); const restored = await service(db2).getResultHistory(first.result.resultId); expect(restored.result.resultId).toBe(first.result.resultId); expect(restored.revisions).toHaveLength(2); expect(restored.projection.effectiveRevision?.revisionNumber).toBe(2)
+  })
+
+  describe('method-aware entry', () => {
+    function outcomeValues(winner: 'a' | 'b') {
+      return {
+        [ids.entryA]: { winner: winner === 'a' ? 'WIN' : 'LOSS' },
+        [ids.entryB]: { winner: winner === 'a' ? 'LOSS' : 'WIN' },
+      }
+    }
+
+    it('loads the policy, default method, allowed methods, and their schemas', async () => {
+      const db = open(); await seed(db); const target = service(db) as unknown as {
+        loadTask(scoringSessionId: ScoringSessionId): Promise<{
+          policy: { defaultMethodKey: string; allowedMethodKeys: string[] }
+          allowedMethods: Array<{ methodKey: string }>
+          schemasByMethodKey: Record<string, { inputSchemaId: string }>
+        }>
+      }
+      const task = await target.loadTask(ids.session)
+      expect(task.policy.defaultMethodKey).toBe('score')
+      expect(task.policy.allowedMethodKeys).toEqual(['score', 'outcome'])
+      expect(task.allowedMethods.map((method) => method.methodKey)).toEqual(['score', 'outcome'])
+      expect(task.schemasByMethodKey.score?.inputSchemaId).toBe('schema-1')
+      expect(task.schemasByMethodKey.outcome?.inputSchemaId).toBe('schema-outcome')
+    })
+
+    it('saves through a non-default allowed method using that method\'s own schema', async () => {
+      const db = open(); await seed(db); const target = service(db) as unknown as {
+        saveResult(input: { scoringSessionId: ScoringSessionId; operator: string; methodKey: string; values: Record<string, Record<string, unknown>> }): Promise<{ result: Result; revision: ResultRevision }>
+      }
+      const saved = await target.saveResult({ scoringSessionId: ids.session, operator: '担当者', methodKey: 'outcome', values: outcomeValues('a') })
+      expect(saved.revision.inputMode).toBe('WIN_LOSS')
+      expect(saved.revision.rawData).toMatchObject({ inputSchemaId: 'schema-outcome', inputSchemaVersion: 1 })
+    })
+
+    it('rejects a method that is not in the allowed list', async () => {
+      const db = open(); await seed(db); const target = service(db) as unknown as {
+        saveResult(input: { scoringSessionId: ScoringSessionId; operator: string; methodKey: string; values: Record<string, Record<string, unknown>> }): Promise<unknown>
+      }
+      await expect(target.saveResult({ scoringSessionId: ids.session, operator: '担当者', methodKey: 'not-a-method', values: {} }))
+        .rejects.toThrow(/not allowed|not defined/i)
+    })
+
+    it('previews the same projected rank/outcome that Host scoring would compute', async () => {
+      const db = open(); await seed(db); const target = service(db) as unknown as {
+        previewResult(input: { scoringSessionId: ScoringSessionId; methodKey: string; values: Record<string, Record<string, unknown>> }): Promise<{
+          methodKey: string
+          projection: { entries: Array<{ entryId: CompetitionEntryId; rank: number; outcome?: string }> }
+        }>
+      }
+      const preview = await target.previewResult({ scoringSessionId: ids.session, methodKey: 'outcome', values: outcomeValues('b') })
+      expect(preview.methodKey).toBe('outcome')
+      expect(preview.projection.entries).toEqual(expect.arrayContaining([
+        expect.objectContaining({ entryId: ids.entryA, rank: 2, outcome: 'LOSS' }),
+        expect.objectContaining({ entryId: ids.entryB, rank: 1, outcome: 'WIN' }),
+      ]))
+    })
+
+    it('defaults a correction to the original method and can switch to another allowed method', async () => {
+      const db = open(); await seed(db); const target = service(db) as unknown as {
+        saveResult(input: { scoringSessionId: ScoringSessionId; operator: string; methodKey: string; values: Record<string, Record<string, unknown>> }): Promise<{ result: Result; revision: ResultRevision }>
+        correctResult(input: { resultId: ResultId; operator: string; methodKey?: string; values: Record<string, Record<string, unknown>> }): Promise<{ result: Result; revision: ResultRevision }>
+      }
+      const first = await target.saveResult({ scoringSessionId: ids.session, operator: '担当者A', methodKey: 'score', values: allValues('1', '2') })
+
+      const sameMethodCorrection = await target.correctResult({ resultId: first.result.resultId, operator: '担当者B', values: allValues('9', '2') })
+      expect(sameMethodCorrection.revision.rawData).toMatchObject({ inputSchemaId: 'schema-1' })
+
+      const switched = await target.correctResult({ resultId: first.result.resultId, operator: '担当者C', methodKey: 'outcome', values: outcomeValues('a') })
+      expect(switched.revision.inputMode).toBe('WIN_LOSS')
+      expect(switched.revision.rawData).toMatchObject({ inputSchemaId: 'schema-outcome' })
+    })
+  })
+
+  describe('in-progress draft', () => {
+    it('persists, reloads, and discards a local result-entry draft', async () => {
+      const db = open(); await seed(db); const target = service(db) as unknown as {
+        saveDraft(draft: { scoringSessionId: ScoringSessionId; methodKey: string; values: Record<string, Record<string, unknown>> }): Promise<void>
+        loadDraft(): Promise<{ scoringSessionId: ScoringSessionId; methodKey: string } | undefined>
+        discardDraft(): Promise<void>
+      }
+
+      expect(await target.loadDraft()).toBeUndefined()
+
+      await target.saveDraft({ scoringSessionId: ids.session, methodKey: 'score', values: { [ids.entryA]: { count: '5' } } })
+      const loaded = await target.loadDraft()
+      expect(loaded).toMatchObject({ scoringSessionId: ids.session, methodKey: 'score' })
+
+      await target.discardDraft()
+      expect(await target.loadDraft()).toBeUndefined()
+    })
   })
 })

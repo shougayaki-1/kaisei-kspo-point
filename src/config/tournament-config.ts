@@ -8,13 +8,15 @@ import type {
   Competition,
   CompetitionEntry,
   CourtRun,
+  CourtStation,
   ScheduleSlot,
   ScoringSession,
   Team,
   Tournament,
 } from '../domain/tournament'
 import type { InputField, InputSchema } from './input-schema'
-import { unsupportedScoringProfileMessage } from './scoring-profile'
+import type { ResultEntryMethodDefinition, ResultEntryPolicy } from './result-entry-policy'
+import { selectUniqueHighestVersion, unsupportedScoringProfileMessage } from './scoring-profile'
 import type { ScoringTestCase } from './scoring-test-case'
 
 export interface TournamentConfigSnapshot {
@@ -22,12 +24,14 @@ export interface TournamentConfigSnapshot {
   teams: Team[]
   competitions: Competition[]
   competitionEntries: CompetitionEntry[]
+  courtStations: CourtStation[]
   scheduleSlots: ScheduleSlot[]
   courtRuns: CourtRun[]
   scoringSessions: ScoringSession[]
   inputSchemas: InputSchema[]
   scoringProfiles: ScoringProfile[]
   scoringTestCases: ScoringTestCase[]
+  resultEntryPolicies: ResultEntryPolicy[]
 }
 
 export interface ConfigValidationIssue {
@@ -85,6 +89,41 @@ function checkRequiredText(
   targetId?: string,
 ): void {
   if (!value.trim()) error(issues, 'EMPTY_LABEL', `${label}を入力してください。`, targetId)
+}
+
+function checkDisplayOrder(
+  issues: ConfigValidationIssue[],
+  value: number,
+  label: string,
+  targetId: string,
+): void {
+  if (!Number.isInteger(value) || value < 0) {
+    error(issues, 'INVALID_DISPLAY_ORDER', `${label}の表示順は0以上の整数にしてください。`, targetId)
+  }
+}
+
+function validateResultEntryMethod(
+  issues: ConfigValidationIssue[],
+  policy: ResultEntryPolicy,
+  method: ResultEntryMethodDefinition,
+  inputSchemas: Map<string, InputSchema>,
+): void {
+  const target = `${policy.competitionId}:${method.methodKey}`
+  checkRequiredText(issues, method.methodKey, '結果入力方式キー', target)
+  checkRequiredText(issues, method.label, '結果入力方式名', target)
+  const schema = inputSchemas.get(method.inputSchemaId)
+  if (!schema || schema.competitionId !== policy.competitionId) {
+    error(issues, 'RESULT_ENTRY_METHOD_SCHEMA_COMPETITION_MISMATCH', '結果入力方式のInputSchemaが存在しないか競技が一致しません。', target)
+  }
+  if (method.projection.type === 'SUM_FIELDS' && method.projection.fieldKeys.length === 0) {
+    error(issues, 'EMPTY_RESULT_PROJECTION_FIELDS', '合計方式には入力項目を1件以上指定してください。', target)
+  }
+  if (
+    (method.projection.type === 'SINGLE_FIELD' || method.projection.type === 'DIRECT_RANK' || method.projection.type === 'DIRECT_OUTCOME') &&
+    !method.projection.fieldKey.trim()
+  ) {
+    error(issues, 'EMPTY_RESULT_PROJECTION_FIELD', '結果変換の入力項目キーを指定してください。', target)
+  }
 }
 
 const PLAYER_PII_FIELD_PATTERN = /(?:player|athlete|participant|student|guardian|parent|child|person|personal)[\s._-]*(?:name|id|identifier|number|code|email|phone|contact|birth|dob|address)|(?:選手|参加者|生徒|児童|保護者|本人|子ども|個人)[\s._-]*(?:名|氏名|名前|番号|識別|id|メール|電話|連絡|住所|生年月日)|(?:氏名|名前|生年月日|連絡先|電話|メール|住所|学籍|個人番号)/i
@@ -162,8 +201,19 @@ function validateScoringTestCase(
   testCase: ScoringTestCase,
   competitions: Map<string, Competition>,
   entries: Map<string, CompetitionEntry>,
+  profilesByCompetition: Map<string, ScoringProfile[]>,
+  policiesByCompetition: Map<string, ResultEntryPolicy[]>,
+  schemasById: Map<string, InputSchema[]>,
 ): void {
   checkRequiredText(issues, testCase.name, '得点テスト名', testCase.testCaseId)
+  if (!testCase.methodKey.trim()) {
+    error(
+      issues,
+      'MISSING_SCORING_TEST_METHOD',
+      '得点テストの結果入力方式を指定してください。',
+      testCase.testCaseId,
+    )
+  }
   if (!competitions.has(testCase.competitionId)) {
     error(
       issues,
@@ -171,6 +221,49 @@ function validateScoringTestCase(
       `${testCase.name || testCase.testCaseId} の競技が存在しません。`,
       testCase.testCaseId,
     )
+  }
+  const profileSelection = selectUniqueHighestVersion(
+    profilesByCompetition.get(testCase.competitionId) ?? [],
+  )
+  if (profileSelection.status === 'AMBIGUOUS') {
+    error(
+      issues,
+      'AMBIGUOUS_SCORING_PROFILE_VERSION',
+      `得点テストの競技にversion ${profileSelection.version} のScoringProfileが複数あります。`,
+      testCase.testCaseId,
+    )
+  }
+  const usesMethodProjection = testCase.rounds.some((round) => round.rawValues !== undefined) &&
+    profileSelection.status === 'SELECTED' && !profileSelection.value.scoringRule
+  const policies = policiesByCompetition.get(testCase.competitionId) ?? []
+  if (policies.length === 0) {
+    if (usesMethodProjection) {
+      error(issues, 'MISSING_SCORING_TEST_METHOD_POLICY', '得点テストの結果入力方式ポリシーがありません。', testCase.testCaseId)
+    }
+  } else if (policies.length !== 1) {
+    error(issues, 'AMBIGUOUS_SCORING_TEST_METHOD', '得点テストの結果入力方式ポリシーが一意に決まりません。', testCase.testCaseId)
+  } else {
+    const policy = policies[0]!
+    const methods = policy.methods.filter((method) =>
+      method.methodKey === testCase.methodKey && policy.allowedMethodKeys.includes(method.methodKey),
+    )
+    if (methods.length === 0) {
+      error(issues, 'UNKNOWN_SCORING_TEST_METHOD', `得点テストの入力方式 ${testCase.methodKey} は許可されていません。`, testCase.testCaseId)
+    } else if (methods.length !== 1) {
+      error(issues, 'AMBIGUOUS_SCORING_TEST_METHOD', `得点テストの入力方式 ${testCase.methodKey} が一意に決まりません。`, testCase.testCaseId)
+    } else if (usesMethodProjection) {
+      const method = methods[0]!
+      const schemas = (schemasById.get(method.inputSchemaId) ?? [])
+        .filter((schema) => schema.competitionId === testCase.competitionId)
+      if (schemas.length !== 1) {
+        error(
+          issues,
+          'SCORING_TEST_METHOD_SCHEMA_COMPETITION_MISMATCH',
+          '得点テストの入力方式とInputSchemaの競技が一致しないか一意に決まりません。',
+          testCase.testCaseId,
+        )
+      }
+    }
   }
   if (testCase.rounds.length === 0) {
     error(
@@ -389,16 +482,19 @@ export function validateTournamentConfig(snapshot: TournamentConfigSnapshot): Co
   checkDuplicateIds(issues, snapshot.teams, (item) => item.teamId)
   checkDuplicateIds(issues, snapshot.competitions, (item) => item.competitionId)
   checkDuplicateIds(issues, snapshot.competitionEntries, (item) => item.entryId)
+  checkDuplicateIds(issues, snapshot.courtStations, (item) => item.courtStationId)
   checkDuplicateIds(issues, snapshot.scheduleSlots, (item) => item.slotId)
   checkDuplicateIds(issues, snapshot.courtRuns, (item) => item.courtRunId)
   checkDuplicateIds(issues, snapshot.scoringSessions, (item) => item.scoringSessionId)
   checkDuplicateIds(issues, snapshot.inputSchemas, (item) => item.inputSchemaId)
   checkDuplicateIds(issues, snapshot.scoringProfiles, (item) => item.scoringProfileId)
   checkDuplicateIds(issues, snapshot.scoringTestCases, (item) => item.testCaseId)
+  checkDuplicateIds(issues, snapshot.resultEntryPolicies, (item) => item.competitionId)
 
   for (const team of snapshot.teams) checkRequiredId(issues, team.teamId, 'Team')
   for (const competition of snapshot.competitions) checkRequiredId(issues, competition.competitionId, 'Competition')
   for (const entry of snapshot.competitionEntries) checkRequiredId(issues, entry.entryId, 'CompetitionEntry')
+  for (const station of snapshot.courtStations) checkRequiredId(issues, station.courtStationId, 'CourtStation')
   for (const slot of snapshot.scheduleSlots) checkRequiredId(issues, slot.slotId, 'ScheduleSlot')
   for (const run of snapshot.courtRuns) checkRequiredId(issues, run.courtRunId, 'CourtRun')
   for (const session of snapshot.scoringSessions) checkRequiredId(issues, session.scoringSessionId, 'ScoringSession')
@@ -409,6 +505,25 @@ export function validateTournamentConfig(snapshot: TournamentConfigSnapshot): Co
   const teams = new Map(snapshot.teams.map((item) => [item.teamId, item]))
   const competitions = new Map(snapshot.competitions.map((item) => [item.competitionId, item]))
   const entries = new Map(snapshot.competitionEntries.map((item) => [item.entryId, item]))
+  const profilesByCompetition = new Map<string, ScoringProfile[]>()
+  for (const profile of snapshot.scoringProfiles) {
+    const profiles = profilesByCompetition.get(profile.competitionId) ?? []
+    profiles.push(profile)
+    profilesByCompetition.set(profile.competitionId, profiles)
+  }
+  const policiesByCompetition = new Map<string, ResultEntryPolicy[]>()
+  for (const policy of snapshot.resultEntryPolicies) {
+    const policies = policiesByCompetition.get(policy.competitionId) ?? []
+    policies.push(policy)
+    policiesByCompetition.set(policy.competitionId, policies)
+  }
+  const schemasById = new Map<string, InputSchema[]>()
+  for (const schema of snapshot.inputSchemas) {
+    const schemas = schemasById.get(schema.inputSchemaId) ?? []
+    schemas.push(schema)
+    schemasById.set(schema.inputSchemaId, schemas)
+  }
+  const courtStations = new Map(snapshot.courtStations.map((item) => [item.courtStationId, item]))
   const slots = new Map(snapshot.scheduleSlots.map((item) => [item.slotId, item]))
   const runs = new Map(snapshot.courtRuns.map((item) => [item.courtRunId, item]))
 
@@ -441,8 +556,22 @@ export function validateTournamentConfig(snapshot: TournamentConfigSnapshot): Co
     }
   }
 
+  const courtDisplayOrders = new Set<number>()
+  for (const station of snapshot.courtStations) {
+    checkRequiredText(issues, station.label, 'コート名', station.courtStationId)
+    if (station.tournamentId !== tournamentId) {
+      error(issues, 'COURT_STATION_TOURNAMENT_MISMATCH', 'CourtStationの大会IDが一致しません。', station.courtStationId)
+    }
+    checkDisplayOrder(issues, station.displayOrder, 'コート', station.courtStationId)
+    if (courtDisplayOrders.has(station.displayOrder)) {
+      error(issues, 'DUPLICATE_COURT_STATION_DISPLAY_ORDER', 'CourtStationの表示順が重複しています。', station.courtStationId)
+    }
+    courtDisplayOrders.add(station.displayOrder)
+  }
+
   for (const slot of snapshot.scheduleSlots) {
     checkRequiredText(issues, slot.label, '展開名', slot.slotId)
+    checkDisplayOrder(issues, slot.displayOrder, '展開', slot.slotId)
     if (!competitions.has(slot.competitionId)) {
       error(issues, 'UNKNOWN_SLOT_COMPETITION', 'ScheduleSlot の競技が存在しません。', slot.slotId)
     }
@@ -457,7 +586,9 @@ export function validateTournamentConfig(snapshot: TournamentConfigSnapshot): Co
   }
 
   for (const run of snapshot.courtRuns) {
-    checkRequiredText(issues, run.courtLabel, 'コート名', run.courtRunId)
+    if (!courtStations.has(run.courtStationId)) {
+      error(issues, 'UNKNOWN_COURT_STATION', 'CourtRun のCourtStationが存在しません。', run.courtRunId)
+    }
     const slot = slots.get(run.slotId)
     if (!slot) {
       error(issues, 'UNKNOWN_RUN_SLOT', 'CourtRun のScheduleSlotが存在しません。', run.courtRunId)
@@ -479,6 +610,10 @@ export function validateTournamentConfig(snapshot: TournamentConfigSnapshot): Co
 
   for (const session of snapshot.scoringSessions) {
     checkRequiredText(issues, session.label, '入力セッション名', session.scoringSessionId)
+    checkDisplayOrder(issues, session.displayOrder, '入力セッション', session.scoringSessionId)
+    if (!courtStations.has(session.leadCourtStationId)) {
+      error(issues, 'UNKNOWN_SESSION_LEAD_COURT_STATION', 'ScoringSession の代表CourtStationが存在しません。', session.scoringSessionId)
+    }
     const competition = competitions.get(session.competitionId)
     const slot = slots.get(session.slotId)
     if (!competition) {
@@ -613,7 +748,38 @@ export function validateTournamentConfig(snapshot: TournamentConfigSnapshot): Co
   }
 
   for (const testCase of snapshot.scoringTestCases) {
-    validateScoringTestCase(issues, testCase, competitions, entries)
+    validateScoringTestCase(
+      issues,
+      testCase,
+      competitions,
+      entries,
+      profilesByCompetition,
+      policiesByCompetition,
+      schemasById,
+    )
+  }
+
+  const inputSchemas = new Map(snapshot.inputSchemas.map((schema) => [schema.inputSchemaId, schema]))
+  for (const policy of snapshot.resultEntryPolicies) {
+    if (!competitions.has(policy.competitionId)) {
+      error(issues, 'UNKNOWN_RESULT_ENTRY_POLICY_COMPETITION', 'ResultEntryPolicy の競技が存在しません。', policy.competitionId)
+    }
+    const methodKeys = new Set<string>()
+    for (const method of policy.methods) {
+      if (methodKeys.has(method.methodKey)) {
+        error(issues, 'DUPLICATE_RESULT_ENTRY_METHOD_KEY', `結果入力方式 ${method.methodKey} が重複しています。`, policy.competitionId)
+      }
+      methodKeys.add(method.methodKey)
+      validateResultEntryMethod(issues, policy, method, inputSchemas)
+    }
+    for (const methodKey of policy.allowedMethodKeys) {
+      if (!methodKeys.has(methodKey)) {
+        error(issues, 'UNKNOWN_ALLOWED_RESULT_ENTRY_METHOD', `許可方式 ${methodKey} の定義がありません。`, policy.competitionId)
+      }
+    }
+    if (!policy.allowedMethodKeys.includes(policy.defaultMethodKey)) {
+      error(issues, 'DEFAULT_RESULT_ENTRY_METHOD_NOT_ALLOWED', '既定の結果入力方式は許可方式に含めてください。', policy.competitionId)
+    }
   }
 
   return issues

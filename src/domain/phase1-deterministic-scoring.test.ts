@@ -62,6 +62,7 @@ function exactTestCase(): ScoringTestCase {
   return {
     testCaseId: 'exact-test-1',
     competitionId,
+    methodKey: 'score',
     name: 'exact decimal regression',
     rounds: [
       {
@@ -177,6 +178,7 @@ describe('Phase 1 deterministic scoring RED', () => {
         defaultInputScope: 'WHOLE_SLOT',
       }],
       competitionEntries: entries(),
+      courtStations: [],
       scheduleSlots: [],
       courtRuns: [],
       scoringSessions: [],
@@ -198,6 +200,7 @@ describe('Phase 1 deterministic scoring RED', () => {
       scoringTestCases: [{
         testCaseId: 'persisted-config-test',
         competitionId,
+        methodKey: 'score',
         name: 'persisted config',
         rounds: [{
           roundId: 'persisted-round-1',
@@ -209,6 +212,7 @@ describe('Phase 1 deterministic scoring RED', () => {
           { entryId: entryTwo, roundRanks: [1], roundAwardScores: ['0.3'], aggregateScore: '0.3' },
         ],
       }],
+      resultEntryPolicies: [],
     } as unknown as TournamentConfigSnapshot
 
     await repository.apply(snapshot, {

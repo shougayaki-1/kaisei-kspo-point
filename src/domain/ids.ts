@@ -5,6 +5,7 @@ export type TeamId = Brand<string, 'TeamId'>
 export type CompetitionId = Brand<string, 'CompetitionId'>
 export type CompetitionEntryId = Brand<string, 'CompetitionEntryId'>
 export type ScheduleSlotId = Brand<string, 'ScheduleSlotId'>
+export type CourtStationId = Brand<string, 'CourtStationId'>
 export type CourtRunId = Brand<string, 'CourtRunId'>
 export type ScoringSessionId = Brand<string, 'ScoringSessionId'>
 export type ResultId = Brand<string, 'ResultId'>

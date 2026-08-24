@@ -25,10 +25,16 @@ function snapshot(): TournamentConfigSnapshot {
       defaultInputScope: 'WHOLE_SLOT',
     }],
     competitionEntries: [{ entryId, competitionId, teamId, label: '1組' }],
+    courtStations: [],
     scheduleSlots: [],
     courtRuns: [],
     scoringSessions: [],
-    inputSchemas: [],
+    inputSchemas: [{
+      inputSchemaId: 'schema-score',
+      competitionId,
+      version: 1,
+      fields: [{ key: 'score', label: '得点', type: 'NUMBER', required: true, min: 0 }],
+    }],
     scoringProfiles: [{
       scoringProfileId: 'profile-1' as ScoringProfileId,
       competitionId,
@@ -41,17 +47,31 @@ function snapshot(): TournamentConfigSnapshot {
     scoringTestCases: [{
       testCaseId: 'test-1',
       competitionId,
+      methodKey: 'score',
       name: '通常順位',
       rounds: [{
         roundId: 'round-1',
         label: '第1試合',
-        values: [{ entryId, value: 100 }],
+        rawValues: [{ entryId, fields: { score: 100 } }],
       }],
       expected: [{
         entryId,
         roundRanks: [1],
         roundAwardScores: [30],
         aggregateScore: 30,
+      }],
+    }],
+    resultEntryPolicies: [{
+      competitionId,
+      defaultMethodKey: 'score',
+      allowedMethodKeys: ['score'],
+      methods: [{
+        methodKey: 'score',
+        label: '得点',
+        kind: 'SCORE',
+        inputMode: 'NUMBER',
+        inputSchemaId: 'schema-score',
+        projection: { type: 'SINGLE_FIELD', fieldKey: 'score', direction: 'HIGHER_IS_BETTER' },
       }],
     }],
   }
@@ -75,6 +95,73 @@ describe('scoring test config validation', () => {
     expect(errorCodes(config)).toContain('DUPLICATE_ID')
   })
 
+  it('requires every persisted scoring test to name an allowed input method', () => {
+    const config = snapshot()
+    config.scoringTestCases[0].methodKey = ''
+
+    const codes = errorCodes(config)
+    expect(codes).toContain('MISSING_SCORING_TEST_METHOD')
+    expect(codes).toContain('UNKNOWN_SCORING_TEST_METHOD')
+  })
+
+  it('rejects a method-aware scoring test when its competition has no policy', () => {
+    const config = snapshot()
+    config.resultEntryPolicies = []
+
+    expect(errorCodes(config)).toContain('MISSING_SCORING_TEST_METHOD_POLICY')
+  })
+
+  it('rejects a method-aware scoring test when its policy resolves the method ambiguously', () => {
+    const config = snapshot()
+    config.resultEntryPolicies.push(structuredClone(config.resultEntryPolicies[0]))
+
+    expect(errorCodes(config)).toContain('AMBIGUOUS_SCORING_TEST_METHOD')
+  })
+
+  it('rejects a method-aware scoring test when its allowed method is missing', () => {
+    const config = snapshot()
+    const policy = config.resultEntryPolicies[0]!
+    policy.defaultMethodKey = 'detail'
+    policy.allowedMethodKeys = ['detail']
+    policy.methods[0]!.methodKey = 'detail'
+
+    expect(errorCodes(config)).toContain('UNKNOWN_SCORING_TEST_METHOD')
+  })
+
+  it('rejects a method-aware scoring test when its method schema belongs to another competition', () => {
+    const config = snapshot()
+    config.inputSchemas[0]!.competitionId = 'other-competition' as CompetitionId
+
+    expect(errorCodes(config)).toContain('SCORING_TEST_METHOD_SCHEMA_COMPETITION_MISMATCH')
+  })
+
+  it.each([false, true])('uses the highest-version derived profile regardless of array order (%s)', (derivedFirst) => {
+    const config = snapshot()
+    config.resultEntryPolicies = []
+    const nonDerived = { ...config.scoringProfiles[0]!, version: 1 }
+    const derived = {
+      ...config.scoringProfiles[0]!,
+      scoringProfileId: 'profile-2' as ScoringProfileId,
+      version: 2,
+      scoringRule: { type: 'WEIGHTED_SUM' as const, terms: [{ fieldKey: 'score', weight: 1 }] },
+    }
+    config.scoringProfiles = derivedFirst ? [derived, nonDerived] : [nonDerived, derived]
+
+    expect(errorCodes(config)).not.toContain('MISSING_SCORING_TEST_METHOD_POLICY')
+  })
+
+  it('rejects an ambiguous highest-version scoring profile for a method-aware test', () => {
+    const config = snapshot()
+    const duplicateHighest = {
+      ...config.scoringProfiles[0]!,
+      scoringProfileId: 'profile-2' as ScoringProfileId,
+      version: 1,
+    }
+    config.scoringProfiles.push(duplicateHighest)
+
+    expect(errorCodes(config)).toContain('AMBIGUOUS_SCORING_PROFILE_VERSION')
+  })
+
   it('rejects an unknown competition and missing rounds', () => {
     const config = snapshot()
     config.scoringTestCases[0].competitionId = 'missing-competition' as CompetitionId
@@ -87,7 +174,7 @@ describe('scoring test config validation', () => {
 
   it('rejects a round entry that is unknown or belongs to another competition', () => {
     const config = snapshot()
-    config.scoringTestCases[0].rounds[0].values![0].entryId = 'missing-entry' as CompetitionEntryId
+    config.scoringTestCases[0].rounds[0].rawValues![0].entryId = 'missing-entry' as CompetitionEntryId
 
     expect(errorCodes(config)).toContain('UNKNOWN_SCORING_TEST_ENTRY')
   })

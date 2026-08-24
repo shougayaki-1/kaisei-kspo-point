@@ -41,6 +41,7 @@ function snapshotFor(prefix: string, name = `${prefix}大会`): TournamentConfig
   const slotId = `${prefix}-slot-1` as ScheduleSlotId
   const courtRunId = `${prefix}-run-1` as CourtRunId
   const scoringSessionId = `${prefix}-session-1` as ScoringSessionId
+  const courtStationId = `${prefix}-court-station-1` as never
 
   return {
     tournament: {
@@ -57,11 +58,12 @@ function snapshotFor(prefix: string, name = `${prefix}大会`): TournamentConfig
       defaultInputScope: 'WHOLE_SLOT',
     }],
     competitionEntries: [{ entryId, competitionId, teamId, label: '1組' }],
-    scheduleSlots: [{ slotId, competitionId, label: '第1展開' }],
+    courtStations: [{ courtStationId, tournamentId, label: 'A', displayOrder: 1 }],
+    scheduleSlots: [{ slotId, competitionId, label: '第1展開', displayOrder: 1 }],
     courtRuns: [{
       courtRunId,
       slotId,
-      courtLabel: 'A',
+      courtStationId,
       participantEntryIds: [entryId],
     }],
     scoringSessions: [{
@@ -69,6 +71,8 @@ function snapshotFor(prefix: string, name = `${prefix}大会`): TournamentConfig
       competitionId,
       slotId,
       label: '第1展開 全体',
+      displayOrder: 1,
+      leadCourtStationId: courtStationId,
       courtRunIds: [courtRunId],
       inputScope: 'WHOLE_SLOT',
     }],
@@ -90,6 +94,7 @@ function snapshotFor(prefix: string, name = `${prefix}大会`): TournamentConfig
     scoringTestCases: [{
       testCaseId: `${prefix}-test-1`,
       competitionId,
+      methodKey: 'score',
       name: '通常順位',
       rounds: [{
         roundId: `${prefix}-round-1`,
@@ -98,6 +103,7 @@ function snapshotFor(prefix: string, name = `${prefix}大会`): TournamentConfig
       }],
       expected: [{ entryId, roundRanks: [1], roundAwardScores: [30], aggregateScore: 30 }],
     }],
+    resultEntryPolicies: [],
   }
 }
 
@@ -346,6 +352,31 @@ describe('Config Update service', () => {
     })
     expect((await courtRepository.loadCurrent(originalDraft.tournament.tournamentId))?.tournament.name).toBe('変更後')
     expect((await courtRepository.listVersions(originalDraft.tournament.tournamentId))[0].snapshot.tournament.name).toBe('shared大会')
+  })
+
+  it('blocks activation while an in-progress Court result draft is unsaved and unblocks after save/discard', async () => {
+    const courtDb = db(`config-court-draft-gate-${crypto.randomUUID()}`)
+    const hostRepository = new ConfigRepository(courtDb)
+    const draftSnapshot = snapshotFor('draft-gate')
+    await hostRepository.apply(draftSnapshot, metadata('2026-08-19T10:00:00+09:00'))
+    const v1 = await hostRepository.getActiveVersion(draftSnapshot.tournament.tournamentId)
+
+    const service = createConfigUpdateService(courtDb)
+    await courtDb.localSettings.put({
+      key: 'court.resultEntryDraft.v1',
+      value: { scoringSessionId: 'session-1', methodKey: 'score', values: {}, updatedAt: '2026-08-19T10:05:00+09:00' },
+    })
+
+    await expect(service.activate(v1!.configVersionId!, {
+      operator: 'Court担当',
+      activatedAt: '2026-08-19T10:06:00+09:00',
+    })).rejects.toThrow(/保存|破棄/)
+
+    await service.discardResultEntryDraft()
+    await expect(service.activate(v1!.configVersionId!, {
+      operator: 'Court担当',
+      activatedAt: '2026-08-19T10:07:00+09:00',
+    })).resolves.toMatchObject({ version: 1 })
   })
 
   it('rejects same ConfigVersion ID with different immutable content and rejects incompatible activation', async () => {

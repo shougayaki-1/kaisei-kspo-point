@@ -1,227 +1,32 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { useState } from 'react'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { SetupCompetitionDraft, TournamentSetupDraft } from '../../config/setup/setup-types'
 import { TemplateStep } from './TemplateStep'
 
-interface TemplateStepHarnessProps {
-  initialTemplateSource?: TournamentSetupDraft['templateSource']
-  initialCompetitions?: SetupCompetitionDraft[]
-}
-
-function TemplateStepHarness({
-  initialTemplateSource = { type: 'NONE' },
-  initialCompetitions = [],
-}: TemplateStepHarnessProps) {
-  const [templateSource, setTemplateSource] = useState<TournamentSetupDraft['templateSource']>(
-    initialTemplateSource,
-  )
-  const [competitions, setCompetitions] = useState<SetupCompetitionDraft[]>(initialCompetitions)
-
-  return (
-    <>
-      <TemplateStep
-        templateSource={templateSource}
-        competitions={competitions}
-        onTemplateChange={(nextTemplateSource, nextCompetitions) => {
-          setTemplateSource(nextTemplateSource)
-          setCompetitions(nextCompetitions)
-        }}
-      />
-      <output aria-label="template-state">
-        {JSON.stringify({
-          templateSource,
-          competitionKeys: competitions.map((competition) => competition.competitionKey),
-          competitions,
-        })}
-      </output>
-    </>
-  )
-}
-
-function readState() {
-  return JSON.parse(screen.getByLabelText('template-state').textContent ?? '{}') as {
-    templateSource: TournamentSetupDraft['templateSource']
-    competitionKeys: string[]
-    competitions: SetupCompetitionDraft[]
-  }
+function Harness() {
+  const [source, setSource] = useState<TournamentSetupDraft['source']>({ type: 'PREVIOUS', configVersionId: 'previous-config' })
+  const [competitions, setCompetitions] = useState<SetupCompetitionDraft[]>([])
+  return <><TemplateStep source={source} competitions={competitions} onTemplateChange={(nextSource, nextCompetitions) => { setSource(nextSource); setCompetitions(nextCompetitions) }} /><output aria-label="state">{JSON.stringify({ source, competitions })}</output></>
 }
 
 describe('TemplateStep', () => {
-  beforeEach(() => {
-    localStorage.clear()
+  beforeEach(() => localStorage.clear())
+
+  it('selects the standard exchange-festival template into a v2 source and competitions', () => {
+    render(<Harness />)
+    fireEvent.click(screen.getByRole('radio', { name: '交流祭 標準設定' }))
+    const state = JSON.parse(screen.getByLabelText('state').textContent ?? '{}')
+    expect(state).toMatchObject({ source: { type: 'STANDARD', templateId: 'exchange-festival-v2' }, competitions: [{ competitionKey: 'tug-of-war' }] })
+    expect(state.competitions[0].methods).toHaveLength(3)
+    expect(screen.getByRole('checkbox', { name: '綱引き' })).toBeChecked()
   })
 
-  it('shows event templates separately from generic templates and defaults event competitions to selected', () => {
-    render(<TemplateStepHarness />)
-
-    const eventSection = screen.getByLabelText('行事テンプレート一覧')
-    const genericSection = screen.getByLabelText('汎用テンプレート一覧')
-
-    expect(within(eventSection).getByRole('heading', { name: '行事テンプレート' })).toBeInTheDocument()
-    expect(within(genericSection).getByRole('heading', { name: '汎用テンプレート' })).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('radio', { name: '運動交流祭 2026' }))
-
-    expect(screen.getByRole('checkbox', { name: '大玉運び' })).toBeChecked()
-    expect(screen.getByRole('checkbox', { name: '全員リレー' })).toBeChecked()
-    expect(readState()).toMatchObject({
-      templateSource: {
-        type: 'BUILT_IN',
-        templateId: 'sports-festival-2026',
-        templateVersion: 1,
-      },
-      competitionKeys: ['ball-carry', 'relay'],
-    })
-
-    fireEvent.click(screen.getByRole('checkbox', { name: '全員リレー' }))
-
-    expect(screen.getByRole('checkbox', { name: '全員リレー' })).not.toBeChecked()
-    expect(readState().competitionKeys).toEqual(['ball-carry'])
-  })
-
-  it('adds a valid imported template to the local device list and keeps it selectable after remount', async () => {
-    const file = new File([
-      JSON.stringify({
-        templateFormatVersion: 1,
-        templateId: 'device-template-v1',
-        templateVersion: 1,
-        name: '端末専用テンプレート',
-        competitions: [
-          {
-            competitionKey: 'device-quantity',
-            name: '端末計測競技',
-            competitionKind: 'QUANTITY',
-            inputGrouping: 'WHOLE_ROUND',
-            rounds: 1,
-            courts: 2,
-            groupsPerTeam: 1,
-            scoring: {
-              inputType: 'NUMBER',
-              rankingDirection: 'HIGHER',
-              rankPoints: {},
-            },
-          },
-        ],
-      }),
-    ], 'device-template.json', { type: 'application/json' })
-
-    const view = render(<TemplateStepHarness />)
-
-    fireEvent.change(screen.getByLabelText('テンプレート JSON を読み込む'), {
-      target: { files: [file] },
-    })
-
-    expect(await screen.findByRole('radio', { name: '端末専用テンプレート' })).toBeInTheDocument()
-
-    view.unmount()
-    render(<TemplateStepHarness />)
-
-    expect(await screen.findByRole('radio', { name: '端末専用テンプレート' })).toBeInTheDocument()
-  })
-
-  it('shows a validation error for invalid imports and leaves the active draft unchanged', async () => {
-    const invalidFile = new File([
-      JSON.stringify({
-        templateFormatVersion: 1,
-        templateId: 'broken-template',
-        templateVersion: 1,
-        name: '壊れたテンプレート',
-      }),
-    ], 'broken-template.json', { type: 'application/json' })
-
-    render(<TemplateStepHarness />)
-
-    fireEvent.click(screen.getByRole('radio', { name: '運動交流祭 2026' }))
-    expect(readState().competitionKeys).toEqual(['ball-carry', 'relay'])
-
-    fireEvent.change(screen.getByLabelText('テンプレート JSON を読み込む'), {
-      target: { files: [invalidFile] },
-    })
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('テンプレートを読み込めませんでした')
-    await waitFor(() => {
-      expect(readState().competitionKeys).toEqual(['ball-carry', 'relay'])
-    })
-    expect(screen.queryByRole('radio', { name: '壊れたテンプレート' })).not.toBeInTheDocument()
-  })
-
-  it('preserves edited competitions that stay selected when another template competition is toggled', () => {
-    render(
-      <TemplateStepHarness
-        initialTemplateSource={{
-          type: 'BUILT_IN',
-          templateId: 'sports-festival-2026',
-          templateVersion: 1,
-        }}
-        initialCompetitions={[
-          {
-            competitionKey: 'ball-carry',
-            name: '編集済み大玉運び',
-            competitionKind: 'QUANTITY',
-            inputGrouping: 'PER_COURT',
-            rounds: 1,
-            courts: 2,
-            groupsPerTeam: 3,
-            scoring: {
-              inputType: 'NUMBER',
-              rankingDirection: 'LOWER',
-              rankPoints: {},
-            },
-          },
-          {
-            competitionKey: 'relay',
-            name: '全員リレー',
-            competitionKind: 'TIME',
-            inputGrouping: 'PER_COURT',
-            rounds: 1,
-            courts: 4,
-            groupsPerTeam: 1,
-            scoring: {
-              inputType: 'TIME',
-              rankingDirection: 'LOWER',
-              rankPoints: {},
-            },
-          },
-        ]}
-      />,
-    )
-
-    fireEvent.click(screen.getByRole('checkbox', { name: '全員リレー' }))
-
-    expect(readState().competitions).toEqual([
-      expect.objectContaining({
-        competitionKey: 'ball-carry',
-        name: '編集済み大玉運び',
-        inputGrouping: 'PER_COURT',
-        groupsPerTeam: 3,
-        scoring: expect.objectContaining({
-          rankingDirection: 'LOWER',
-        }),
-      }),
-    ])
-
-    fireEvent.click(screen.getByRole('checkbox', { name: '全員リレー' }))
-
-    expect(readState().competitions).toEqual([
-      expect.objectContaining({
-        competitionKey: 'ball-carry',
-        name: '編集済み大玉運び',
-        inputGrouping: 'PER_COURT',
-        groupsPerTeam: 3,
-        scoring: expect.objectContaining({
-          rankingDirection: 'LOWER',
-        }),
-      }),
-      expect.objectContaining({
-        competitionKey: 'relay',
-        name: '全員リレー',
-        inputGrouping: 'PER_COURT',
-        groupsPerTeam: 1,
-        scoring: expect.objectContaining({
-          rankingDirection: 'LOWER',
-        }),
-      }),
-    ])
+  it('rejects a v1 template import without changing the selected v2 source', async () => {
+    render(<Harness />)
+    const file = new File([JSON.stringify({ templateFormatVersion: 1 })], 'old.json', { type: 'application/json' })
+    fireEvent.change(screen.getByLabelText('テンプレート JSON を読み込む'), { target: { files: [file] } })
+    expect(await screen.findByRole('alert')).toHaveTextContent('テンプレートを読み込めませんでした。')
+    expect(JSON.parse(screen.getByLabelText('state').textContent ?? '{}').source).toEqual({ type: 'PREVIOUS', configVersionId: 'previous-config' })
   })
 })

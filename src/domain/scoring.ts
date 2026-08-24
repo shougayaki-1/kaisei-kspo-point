@@ -101,6 +101,12 @@ export interface ScoringScenarioRound<TId extends string = string> {
   roundId: string
   values?: RankedParticipantValue<TId>[]
   rawValues?: RawParticipantValue<TId>[]
+  projected?: Array<{
+    participantId: TId
+    rank: number
+    comparisonValue?: ExactValue
+    outcome?: MatchOutcome
+  }>
 }
 
 export interface ScoringScenario<TId extends string = string> {

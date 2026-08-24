@@ -1,8 +1,8 @@
-import { createId } from '../../domain/ids'
 import type {
   CompetitionEntryId,
   CompetitionId,
   CourtRunId,
+  CourtStationId,
   ScheduleSlotId,
   ScoringProfileId,
   ScoringSessionId,
@@ -10,365 +10,313 @@ import type {
   TournamentId,
 } from '../../domain/ids'
 import type { InputScope } from '../../domain/tournament'
-import type { InputField, InputSchema } from '../input-schema'
+import type { InputSchema } from '../input-schema'
+import type { ResultEntryMethodDefinition, ResultEntryPolicy } from '../result-entry-policy'
+import { canonicalizeExactValue } from '../../domain/exact-decimal'
+import { projectResultEntry } from '../../domain/result-entry-projection'
+import type { ScoringTestCase } from '../scoring-test-case'
 import type { TournamentConfigSnapshot } from '../tournament-config'
-import {
-  autoAssignCompetitionSchedule,
-  type SetupCompetitionSchedule,
-} from './schedule-assignment'
-import type { SetupCompetitionDraft, SetupTeamDraft, TournamentSetupDraft } from './setup-types'
-
-interface TeamCompileResult {
-  teams: TournamentConfigSnapshot['teams']
-  teamIdsByKey: Map<string, TeamId>
-}
-
-interface CompetitionEntryCompileResult {
-  competitionEntries: TournamentConfigSnapshot['competitionEntries']
-  orderedEntryIds: CompetitionEntryId[]
-}
-
-interface ScheduleCompileResult {
-  scheduleSlots: TournamentConfigSnapshot['scheduleSlots']
-  courtRuns: TournamentConfigSnapshot['courtRuns']
-  scoringSessions: TournamentConfigSnapshot['scoringSessions']
-}
+import { autoAssignCompetitionSchedule } from './schedule-assignment'
+import type { SetupCompetitionDraft, TournamentSetupDraft } from './setup-types'
 
 export interface SetupCompilerOptions {
-  createId: <T extends string>() => T
+  createId: <T extends string>(kind: string, stableKey: string) => T
 }
 
 const defaultOptions: SetupCompilerOptions = {
-  createId,
+  createId: (kind, stableKey) => `${kind}:${stableKey}` as never,
 }
 
-function courtLabel(index: number): string {
-  return String.fromCharCode(65 + index)
-}
-
-function slotLabel(round: number): string {
-  return `第${round}展開`
-}
-
-function groupSuffix(index: number): string {
-  return String(index + 1)
+function id<T extends string>(
+  options: SetupCompilerOptions,
+  kind: string,
+  draftId: string,
+  persistedKey: string,
+): T {
+  return options.createId<T>(kind, `${draftId}:${persistedKey}`)
 }
 
 function toInputScope(grouping: SetupCompetitionDraft['inputGrouping']): InputScope {
-  switch (grouping) {
-    case 'PER_COURT':
-      return 'PER_COURT'
-    case 'WHOLE_ROUND':
-      return 'WHOLE_SLOT'
-    case 'CUSTOM_GROUP':
-      return 'CUSTOM_GROUP'
-  }
+  return grouping
 }
 
-function toRankingDirection(
-  draft: SetupCompetitionDraft,
-): 'HIGHER_IS_BETTER' | 'LOWER_IS_BETTER' {
-  if (draft.scoring.rankingDirection === 'LOWER') return 'LOWER_IS_BETTER'
-  if (draft.scoring.rankingDirection === 'HIGHER') return 'HIGHER_IS_BETTER'
-  return draft.competitionKind === 'RANKING' ? 'LOWER_IS_BETTER' : 'HIGHER_IS_BETTER'
+function rankingDirection(draft: SetupCompetitionDraft): 'HIGHER_IS_BETTER' | 'LOWER_IS_BETTER' {
+  const projection = draft.methods.find((method) => method.methodKey === draft.defaultMethodKey)?.projection
+  return projection?.type === 'SINGLE_FIELD' || projection?.type === 'SUM_FIELDS'
+    ? projection.direction
+    : draft.competitionKind === 'TIME' || draft.competitionKind === 'RANKING'
+      ? 'LOWER_IS_BETTER'
+      : 'HIGHER_IS_BETTER'
 }
 
 function compileTeams(
-  teams: SetupTeamDraft[],
+  draft: TournamentSetupDraft,
   tournamentId: TournamentId,
   options: SetupCompilerOptions,
-): TeamCompileResult {
-  const compiledTeams: TournamentConfigSnapshot['teams'] = []
-  const teamIdsByKey = new Map<string, TeamId>()
-
-  for (const team of teams) {
-    const teamId = options.createId<TeamId>()
-    compiledTeams.push({
-      teamId,
-      tournamentId,
-      name: team.name,
-    })
-    teamIdsByKey.set(team.teamKey, teamId)
-  }
-
-  return {
-    teams: compiledTeams,
-    teamIdsByKey,
-  }
+): { teams: TournamentConfigSnapshot['teams']; ids: Map<string, TeamId> } {
+  const ids = new Map<string, TeamId>()
+  const teams = draft.teams.map((team) => {
+    const teamId = id<TeamId>(options, 'team', draft.draftId, team.teamKey)
+    ids.set(team.teamKey, teamId)
+    return { teamId, tournamentId, name: team.name }
+  })
+  return { teams, ids }
 }
 
-function compileCompetitionEntries(
-  teams: SetupTeamDraft[],
-  teamIdsByKey: Map<string, TeamId>,
+function compileEntries(
+  draft: TournamentSetupDraft,
+  competition: SetupCompetitionDraft,
   competitionId: CompetitionId,
-  draft: SetupCompetitionDraft,
+  teamIds: Map<string, TeamId>,
   options: SetupCompilerOptions,
-): CompetitionEntryCompileResult {
-  const competitionEntries: TournamentConfigSnapshot['competitionEntries'] = []
-  const orderedEntryIds: CompetitionEntryId[] = []
-
-  for (const team of teams) {
-    const teamId = teamIdsByKey.get(team.teamKey)
-    if (!teamId) continue
-
-    for (let groupIndex = 0; groupIndex < draft.groupsPerTeam; groupIndex += 1) {
-      const entryId = options.createId<CompetitionEntryId>()
-      const label = draft.groupsPerTeam === 1
-        ? team.name
-        : `${team.name} ${groupSuffix(groupIndex)}`
-
-      competitionEntries.push({
+): { entries: TournamentConfigSnapshot['competitionEntries']; ids: Map<string, CompetitionEntryId> } {
+  const ids = new Map<string, CompetitionEntryId>()
+  const entries = draft.teams.flatMap((team) => {
+    const teamId = teamIds.get(team.teamKey)
+    if (!teamId) return []
+    return Array.from({ length: competition.groupsPerTeam }, (_, index) => {
+      const groupNumber = index + 1
+      const entryKey = `${team.teamKey}:group-${groupNumber}`
+      const entryId = id<CompetitionEntryId>(options, 'competitionEntry', draft.draftId, `${competition.competitionKey}:${entryKey}`)
+      ids.set(entryKey, entryId)
+      return {
         entryId,
         competitionId,
         teamId,
-        label,
-      })
-      orderedEntryIds.push(entryId)
-    }
-  }
-
-  return {
-    competitionEntries,
-    orderedEntryIds,
-  }
+        label: competition.groupsPerTeam === 1 ? team.name : `${team.name} ${groupNumber}`,
+      }
+    })
+  })
+  return { entries, ids }
 }
 
 function compileSchedule(
+  draft: TournamentSetupDraft,
+  competition: SetupCompetitionDraft,
   competitionId: CompetitionId,
-  draft: SetupCompetitionDraft,
-  teams: SetupTeamDraft[],
-  entryIds: CompetitionEntryId[],
+  stationIds: Map<string, CourtStationId>,
+  entryIds: Map<string, CompetitionEntryId>,
   options: SetupCompilerOptions,
-): ScheduleCompileResult {
+): Pick<TournamentConfigSnapshot, 'scheduleSlots' | 'courtRuns' | 'scoringSessions'> {
+  const schedule = autoAssignCompetitionSchedule(competition, draft.teams, draft.courtStations)
   const scheduleSlots: TournamentConfigSnapshot['scheduleSlots'] = []
   const courtRuns: TournamentConfigSnapshot['courtRuns'] = []
   const scoringSessions: TournamentConfigSnapshot['scoringSessions'] = []
-  const resolvedSchedule = autoAssignCompetitionSchedule(draft, teams)
-  const entryIdsByKey = buildEntryIdsByKey(resolvedSchedule, entryIds)
 
-  for (const round of resolvedSchedule.rounds) {
-    const slotId = options.createId<ScheduleSlotId>()
-    const runIds: CourtRunId[] = []
-
+  for (const round of schedule.rounds) {
+    const slotId = id<ScheduleSlotId>(options, 'scheduleSlot', draft.draftId, `${competition.competitionKey}:${round.roundKey}`)
     scheduleSlots.push({
       slotId,
       competitionId,
-      label: slotLabel(round.roundNumber),
+      label: round.label,
+      displayOrder: round.roundNumber - 1,
       ...(round.startTime ? { plannedStart: round.startTime } : {}),
+      ...(round.endTime ? { plannedEnd: round.endTime } : {}),
     })
-
+    const runsByStationKey = new Map<string, CourtRunId>()
     for (const cell of round.cells) {
-      const courtRunId = options.createId<CourtRunId>()
-      const participantEntryIds = cell.entryKeys
-        .map((entryKey) => entryIdsByKey.get(entryKey))
-        .filter((entryId): entryId is CompetitionEntryId => Boolean(entryId))
-
+      const courtStationId = stationIds.get(cell.courtStationKey)
+      if (!courtStationId) {
+        throw new Error(`Unknown CourtStation key: ${cell.courtStationKey}`)
+      }
+      const courtRunId = id<CourtRunId>(options, 'courtRun', draft.draftId, `${competition.competitionKey}:${round.roundKey}:${cell.cellKey}`)
+      runsByStationKey.set(cell.courtStationKey, courtRunId)
       courtRuns.push({
         courtRunId,
         slotId,
-        courtLabel: courtLabel(cell.courtNumber - 1),
-        participantEntryIds,
+        courtStationId,
+        participantEntryIds: cell.entryKeys.flatMap((entryKey) => entryIds.get(entryKey) ?? []),
       })
-      runIds.push(courtRunId)
     }
 
-    if (draft.inputGrouping === 'WHOLE_ROUND') {
-      scoringSessions.push({
-        scoringSessionId: options.createId<ScoringSessionId>(),
-        competitionId,
-        slotId,
-        label: `${slotLabel(round.roundNumber)} 全体`,
-        courtRunIds: runIds,
-        inputScope: 'WHOLE_SLOT',
-      })
-      continue
-    }
-
-    if (draft.inputGrouping === 'PER_COURT') {
-      for (const [courtIndex, courtRunId] of runIds.entries()) {
-        scoringSessions.push({
-          scoringSessionId: options.createId<ScoringSessionId>(),
-          competitionId,
-          slotId,
-          label: `${slotLabel(round.roundNumber)} ${courtLabel(courtIndex)}`,
-          courtRunIds: [courtRunId],
-          inputScope: 'PER_COURT',
-        })
+    const tasks = schedule.inputGroups.filter((group) => group.roundNumber === round.roundNumber)
+    for (const [taskOrder, task] of tasks.entries()) {
+      const courtRunIds = task.courtStationKeys.flatMap((stationKey) => runsByStationKey.get(stationKey) ?? [])
+      if (courtRunIds.length !== task.courtStationKeys.length || courtRunIds.length === 0) {
+        throw new Error(`Invalid logical scoring task: ${task.groupKey}`)
       }
-      continue
-    }
-
-    for (const group of resolvedSchedule.inputGroups) {
-      if (group.roundNumber !== round.roundNumber) continue
-
-      const groupedRunIds = group.courtNumbers
-        .map((courtNumber) => runIds[courtNumber - 1])
-        .filter((courtRunId): courtRunId is CourtRunId => Boolean(courtRunId))
-
-      if (groupedRunIds.length === 0) continue
-
+      const leadCourtStationId = stationIds.get(task.courtStationKeys[0]!)
+      if (!leadCourtStationId) throw new Error(`Unknown representative CourtStation: ${task.groupKey}`)
       scoringSessions.push({
-        scoringSessionId: options.createId<ScoringSessionId>(),
+        scoringSessionId: id<ScoringSessionId>(options, 'scoringSession', draft.draftId, `${competition.competitionKey}:${round.roundKey}:${task.groupKey}`),
         competitionId,
         slotId,
-        label: group.label,
-        courtRunIds: groupedRunIds,
-        inputScope: 'CUSTOM_GROUP',
+        label: task.label,
+        displayOrder: taskOrder,
+        leadCourtStationId,
+        courtRunIds,
+        inputScope: toInputScope(competition.inputGrouping),
       })
     }
   }
-
-  return {
-    scheduleSlots,
-    courtRuns,
-    scoringSessions,
-  }
+  return { scheduleSlots, courtRuns, scoringSessions }
 }
 
-function buildEntryIdsByKey(
-  schedule: SetupCompetitionSchedule,
-  entryIds: CompetitionEntryId[],
-): Map<string, CompetitionEntryId> {
-  return new Map(
-    schedule.entries.map((entry, index) => [entry.entryKey, entryIds[index]]).filter(
-      (item): item is [string, CompetitionEntryId] => Boolean(item[1]),
-    ),
-  )
-}
-
-function compileInputSchema(
+function compileMethods(
+  draft: TournamentSetupDraft,
+  competition: SetupCompetitionDraft,
   competitionId: CompetitionId,
-  draft: SetupCompetitionDraft,
   options: SetupCompilerOptions,
-): InputSchema {
-  let field: InputField
-
-  switch (draft.scoring.inputType) {
-    case 'RANK':
-      field = {
-        key: 'rank',
-        label: '順位',
-        type: 'RANK',
-        required: true,
-        allowTies: true,
-      }
-      break
-    case 'TIME':
-      field = {
-        key: 'time',
-        label: 'タイム',
-        type: 'TIME',
-        required: true,
-      }
-      break
-    case 'NUMBER':
-      field = {
-        key: 'value',
-        label: '記録',
-        type: 'NUMBER',
-        required: true,
-      }
-      break
-    case 'WIN_LOSS':
-      field = {
-        key: 'result',
-        label: '勝敗',
-        type: 'WIN_LOSS',
-        required: true,
-      }
-      break
+): { schemas: InputSchema[]; policy: ResultEntryPolicy } {
+  const schemaIds = new Map<string, string>()
+  const schemas = competition.methods.map((method) => {
+    const inputSchemaId = id<string>(options, 'inputSchema', draft.draftId, `${competition.competitionKey}:${method.methodKey}`)
+    schemaIds.set(method.methodKey, inputSchemaId)
+    return { inputSchemaId, competitionId, version: 1, fields: structuredClone(method.fields) } as InputSchema
+  })
+  if (schemaIds.size !== competition.methods.length) {
+    throw new Error(`Duplicate result method key: ${competition.competitionKey}`)
   }
-
+  const methods = competition.methods.map((method) => {
+    const inputSchemaId = schemaIds.get(method.methodKey)
+    if (!inputSchemaId || !method.projection) throw new Error(`Incomplete result method: ${method.methodKey}`)
+    return {
+      methodKey: method.methodKey,
+      label: method.label,
+      kind: method.kind,
+      inputMode: method.inputMode,
+      inputSchemaId,
+      projection: structuredClone(method.projection),
+    }
+  })
   return {
-    inputSchemaId: options.createId<string>(),
-    competitionId,
-    version: 1,
-    fields: [field],
+    schemas,
+    policy: {
+      competitionId,
+      defaultMethodKey: competition.defaultMethodKey,
+      allowedMethodKeys: [...competition.allowedMethodKeys],
+      methods,
+    },
   }
 }
 
 function compileScoringProfile(
+  draft: TournamentSetupDraft,
+  competition: SetupCompetitionDraft,
   competitionId: CompetitionId,
-  draft: SetupCompetitionDraft,
   options: SetupCompilerOptions,
 ) {
   return {
-    scoringProfileId: options.createId<ScoringProfileId>(),
+    scoringProfileId: id<ScoringProfileId>(options, 'scoringProfile', draft.draftId, competition.competitionKey),
     competitionId,
     version: 1,
-    rankingRule: {
-      direction: toRankingDirection(draft),
-    },
+    rankingRule: { direction: rankingDirection(competition) },
     tieRule: 'AVERAGE_OCCUPIED_PLACES' as const,
-    awardRule: {
-      type: 'RANK_POINTS' as const,
-      rankPoints: structuredClone(draft.scoring.rankPoints),
-    },
+    awardRule: { type: 'RANK_POINTS' as const, rankPoints: structuredClone(competition.rankPoints) },
     aggregationRule: 'SUM' as const,
   }
+}
+
+function compileScoringTestCases(
+  draft: TournamentSetupDraft,
+  competition: SetupCompetitionDraft,
+  competitionId: CompetitionId,
+  entryIds: Map<string, CompetitionEntryId>,
+  policy: ResultEntryPolicy,
+  schemas: InputSchema[],
+  options: SetupCompilerOptions,
+): ScoringTestCase[] {
+  const methods = new Map(policy.methods.map((method) => [method.methodKey, method]))
+  const schemasById = new Map(schemas.map((schema) => [schema.inputSchemaId, schema]))
+  return competition.scoringTests.flatMap((test) => competition.allowedMethodKeys.map((methodKey) => {
+    const method = methods.get(methodKey)
+    const schema = method ? schemasById.get(method.inputSchemaId) : undefined
+    const inputs = test.methodInputs[methodKey]
+    if (!method || !schema || !inputs) throw new Error(`Representative input is missing for result method: ${methodKey}`)
+    const inputByTeam = new Map(inputs.map((input) => [input.teamKey, input]))
+    const rawValues = inputs.map((input) => {
+      const entryId = entryIds.get(`${input.teamKey}:group-1`)
+      if (!entryId) throw new Error(`Representative input references unknown team: ${input.teamKey}`)
+      return { entryId, fields: structuredClone(input.fields) }
+    })
+    const projected = projectResultEntry({
+      method: method as ResultEntryMethodDefinition,
+      schema,
+      entries: Object.fromEntries(rawValues.map((value) => [value.entryId, value.fields])),
+    })
+    const rounds = [{
+      roundId: `${test.testKey}:${methodKey}`,
+      label: test.name,
+      rawValues,
+    }]
+    const expected = Object.keys(test.expectedRanks).sort().map((teamKey) => {
+      const entryId = entryIds.get(`${teamKey}:group-1`)
+      if (!entryId || !inputByTeam.has(teamKey)) throw new Error(`Representative expectation references unknown team: ${teamKey}`)
+      const rank = test.expectedRanks[teamKey]!
+      const actualRank = projected.entries.find((value) => value.entryId === entryId)?.rank
+      if (actualRank !== rank) {
+        throw new Error(`Representative input for ${methodKey} does not produce the expected rank for ${teamKey}`)
+      }
+      const points = test.expectedAwardPoints[teamKey]
+      if (points === undefined) throw new Error(`Representative award points are missing for team: ${teamKey}`)
+      return { entryId, roundRanks: [rank], roundAwardScores: [canonicalizeExactValue(points)], aggregateScore: canonicalizeExactValue(points) }
+    })
+    return {
+      testCaseId: id<string>(options, 'scoringTestCase', draft.draftId, `${competition.competitionKey}:${test.testKey}:${methodKey}`),
+      competitionId,
+      methodKey,
+      name: `${test.name} (${method.label})`,
+      rounds,
+      expected,
+    }
+  }))
 }
 
 export function compileTournamentSetup(
   draft: TournamentSetupDraft,
   options?: Partial<SetupCompilerOptions>,
 ): TournamentConfigSnapshot {
-  const resolvedOptions: SetupCompilerOptions = {
-    ...defaultOptions,
-    ...options,
-  }
-  const tournamentId = resolvedOptions.createId<TournamentId>()
-  const compiledTeams = compileTeams(draft.teams, tournamentId, resolvedOptions)
-
-  const snapshot: TournamentConfigSnapshot = {
-    tournament: {
+  const resolved = { ...defaultOptions, ...options }
+  const tournamentId = id<TournamentId>(resolved, 'tournament', draft.draftId, 'tournament')
+  const compiledTeams = compileTeams(draft, tournamentId, resolved)
+  const stationIds = new Map<string, CourtStationId>()
+  const courtStations = draft.courtStations.map((station) => {
+    const courtStationId = id<CourtStationId>(resolved, 'courtStation', draft.draftId, station.stationKey)
+    stationIds.set(station.stationKey, courtStationId)
+    return {
+      courtStationId,
       tournamentId,
-      name: draft.tournament.name,
-      ...(draft.tournament.eventDate ? { eventDate: draft.tournament.eventDate } : {}),
-      currentConfigVersion: 0,
-    },
+      label: station.label,
+      ...(station.shortLabel ? { shortLabel: station.shortLabel } : {}),
+      displayOrder: station.displayOrder,
+    }
+  })
+  const snapshot: TournamentConfigSnapshot = {
+    tournament: { tournamentId, name: draft.tournament.name, ...(draft.tournament.eventDate ? { eventDate: draft.tournament.eventDate } : {}), currentConfigVersion: 0 },
     teams: compiledTeams.teams,
     competitions: [],
     competitionEntries: [],
+    courtStations,
     scheduleSlots: [],
     courtRuns: [],
     scoringSessions: [],
     inputSchemas: [],
     scoringProfiles: [],
     scoringTestCases: [],
+    resultEntryPolicies: [],
   }
-
-  for (const competitionDraft of draft.competitions) {
-    const competitionId = resolvedOptions.createId<CompetitionId>()
-
-    snapshot.competitions.push({
-      competitionId,
-      tournamentId,
-      name: competitionDraft.name,
-      defaultInputScope: toInputScope(competitionDraft.inputGrouping),
-    })
-
-    const entries = compileCompetitionEntries(
-      draft.teams,
-      compiledTeams.teamIdsByKey,
-      competitionId,
-      competitionDraft,
-      resolvedOptions,
-    )
-    const schedule = compileSchedule(
-      competitionId,
-      competitionDraft,
-      draft.teams,
-      entries.orderedEntryIds,
-      resolvedOptions,
-    )
-
-    snapshot.competitionEntries.push(...entries.competitionEntries)
+  for (const competition of draft.competitions) {
+    const competitionId = id<CompetitionId>(resolved, 'competition', draft.draftId, competition.competitionKey)
+    snapshot.competitions.push({ competitionId, tournamentId, name: competition.name, defaultInputScope: toInputScope(competition.inputGrouping) })
+    const entries = compileEntries(draft, competition, competitionId, compiledTeams.ids, resolved)
+    const schedule = compileSchedule(draft, competition, competitionId, stationIds, entries.ids, resolved)
+    const methods = compileMethods(draft, competition, competitionId, resolved)
+    snapshot.competitionEntries.push(...entries.entries)
     snapshot.scheduleSlots.push(...schedule.scheduleSlots)
     snapshot.courtRuns.push(...schedule.courtRuns)
     snapshot.scoringSessions.push(...schedule.scoringSessions)
-    snapshot.inputSchemas.push(compileInputSchema(competitionId, competitionDraft, resolvedOptions))
-    snapshot.scoringProfiles.push(compileScoringProfile(competitionId, competitionDraft, resolvedOptions))
+    snapshot.inputSchemas.push(...methods.schemas)
+    snapshot.resultEntryPolicies.push(methods.policy)
+    snapshot.scoringProfiles.push(compileScoringProfile(draft, competition, competitionId, resolved))
+    snapshot.scoringTestCases.push(...compileScoringTestCases(
+      draft,
+      competition,
+      competitionId,
+      entries.ids,
+      methods.policy,
+      methods.schemas,
+      resolved,
+    ))
   }
-
   return snapshot
 }

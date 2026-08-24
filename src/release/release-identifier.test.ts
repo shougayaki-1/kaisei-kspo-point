@@ -14,7 +14,7 @@ describe('release identifier', () => {
       appVersion: '0.1.0',
       releaseSha: validSha,
       activeConfigVersionId: 'config-approved',
-      databaseSchemaVersion: 5,
+      databaseSchemaVersion: 6,
       backupFormatVersion: 1,
     })
   })

@@ -13,9 +13,9 @@ import {
 function emptyPayload(): HostBackupPayload {
   return {
     tables: {
-      appMeta: [], tournaments: [], teams: [], competitions: [], competitionEntries: [],
+      appMeta: [], tournaments: [], teams: [], competitions: [], competitionEntries: [], courtStations: [],
       scheduleSlots: [], courtRuns: [], scoringSessions: [], inputSchemas: [], scoringProfiles: [],
-      scoringTestCases: [], configVersions: [], results: [], resultRevisions: [], conflictResolutions: [],
+      scoringTestCases: [], resultEntryPolicies: [], configVersions: [], results: [], resultRevisions: [], conflictResolutions: [],
       transferBatches: [], receivedQrParts: [], acknowledgements: [], revisionDeliveries: [],
       operators: [], auditEvents: [], localSettings: [],
     },

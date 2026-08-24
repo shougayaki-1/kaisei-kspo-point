@@ -25,9 +25,8 @@ export function CompetitionQuickEditor({
   disabled = false,
   onChange,
 }: CompetitionQuickEditorProps) {
-  const supportsRankingDirection = competition.competitionKind === 'TIME' || competition.competitionKind === 'QUANTITY'
   const supportedQuickGrouping =
-    competition.inputGrouping === 'PER_COURT' ? 'PER_COURT' : 'WHOLE_ROUND'
+    competition.inputGrouping === 'PER_COURT' ? 'PER_COURT' : 'WHOLE_SLOT'
 
   return (
     <Stack spacing={2}>
@@ -43,28 +42,9 @@ export function CompetitionQuickEditor({
         fullWidth
       />
 
-      {supportsRankingDirection ? (
-        <FormControl component="fieldset" disabled={disabled}>
-          <FormLabel>順位の付け方</FormLabel>
-          <RadioGroup
-            value={competition.scoring.rankingDirection}
-            onChange={(event) => onChange({
-              ...competition,
-              scoring: {
-                ...competition.scoring,
-                rankingDirection: event.target.value as SetupCompetitionDraft['scoring']['rankingDirection'],
-              },
-            })}
-          >
-            <FormControlLabel value="HIGHER" control={<Radio />} label="大きい記録が上位" />
-            <FormControlLabel value="LOWER" control={<Radio />} label="小さい記録が上位" />
-          </RadioGroup>
-        </FormControl>
-      ) : (
-        <Typography color="text.secondary">
-          この競技では順位の付け方は固定です。
-        </Typography>
-      )}
+      <Typography color="text.secondary">
+        順位の付け方と入力方法は「入力と得点」で確認します。
+      </Typography>
 
       <TextField
         label="1チームあたりの組数"
@@ -87,7 +67,7 @@ export function CompetitionQuickEditor({
             inputGrouping: event.target.value as SetupCompetitionDraft['inputGrouping'],
           })}
         >
-          <FormControlLabel value="WHOLE_ROUND" control={<Radio />} label="同じ回をまとめて入力" />
+          <FormControlLabel value="WHOLE_SLOT" control={<Radio />} label="同じ回をまとめて入力" />
           <FormControlLabel value="PER_COURT" control={<Radio />} label="コートごとに入力" />
         </RadioGroup>
       </FormControl>

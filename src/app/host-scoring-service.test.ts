@@ -5,6 +5,9 @@ import type {
 } from '../domain/ids'
 import type { Result, ResultRevision } from '../domain/result'
 import type { TournamentConfigSnapshot } from '../config/tournament-config'
+import { EXCHANGE_FESTIVAL_TEMPLATE } from '../config/setup/builtin-templates'
+import { compileTournamentSetup } from '../config/setup/setup-compiler'
+import type { TournamentSetupDraft } from '../config/setup/setup-types'
 import { ConfigRepository } from '../db/config-repository'
 import { createDatabase, type AppDatabase } from '../db/database'
 import { ResultRepository } from '../db/result-repository'
@@ -22,6 +25,7 @@ const ids = {
   entryA: 'entry-a' as CompetitionEntryId, entryB: 'entry-b' as CompetitionEntryId,
   slot1: 'slot-1' as ScheduleSlotId, slot2: 'slot-2' as ScheduleSlotId,
   run1: 'run-1' as CourtRunId, run2: 'run-2' as CourtRunId,
+  court1: 'court-1' as never, court2: 'court-2' as never,
   session1: 'session-1' as ScoringSessionId, session2: 'session-2' as ScoringSessionId,
   profile: 'profile-1' as ScoringProfileId,
 }
@@ -30,13 +34,15 @@ function config(rankPoints: Record<number, number | string> = { 1: 10, 2: 5 }): 
   teams: [{ teamId: ids.teamA, tournamentId: ids.tournament, name: 'Configured Red' }, { teamId: ids.teamB, tournamentId: ids.tournament, name: 'Configured Blue' }],
   competitions: [{ competitionId: ids.competition, tournamentId: ids.tournament, name: 'Configured Event', defaultInputScope: 'PER_COURT' }],
   competitionEntries: [{ entryId: ids.entryA, competitionId: ids.competition, teamId: ids.teamA, label: 'Red entry' }, { entryId: ids.entryB, competitionId: ids.competition, teamId: ids.teamB, label: 'Blue entry' }],
-  scheduleSlots: [{ slotId: ids.slot1, competitionId: ids.competition, label: 'Round 1' }, { slotId: ids.slot2, competitionId: ids.competition, label: 'Round 2' }],
-  courtRuns: [{ courtRunId: ids.run1, slotId: ids.slot1, courtLabel: 'Court alpha', participantEntryIds: [ids.entryA, ids.entryB] }, { courtRunId: ids.run2, slotId: ids.slot2, courtLabel: 'Court beta', participantEntryIds: [ids.entryA, ids.entryB] }],
-  scoringSessions: [{ scoringSessionId: ids.session1, competitionId: ids.competition, slotId: ids.slot1, label: 'Round 1 session', courtRunIds: [ids.run1], inputScope: 'PER_COURT' }, { scoringSessionId: ids.session2, competitionId: ids.competition, slotId: ids.slot2, label: 'Round 2 session', courtRunIds: [ids.run2], inputScope: 'PER_COURT' }],
+  courtStations: [{ courtStationId: ids.court1, tournamentId: ids.tournament, label: 'Court alpha', displayOrder: 1 }, { courtStationId: ids.court2, tournamentId: ids.tournament, label: 'Court beta', displayOrder: 2 }],
+  scheduleSlots: [{ slotId: ids.slot1, competitionId: ids.competition, label: 'Round 1', displayOrder: 1 }, { slotId: ids.slot2, competitionId: ids.competition, label: 'Round 2', displayOrder: 2 }],
+  courtRuns: [{ courtRunId: ids.run1, slotId: ids.slot1, courtStationId: ids.court1, participantEntryIds: [ids.entryA, ids.entryB] }, { courtRunId: ids.run2, slotId: ids.slot2, courtStationId: ids.court2, participantEntryIds: [ids.entryA, ids.entryB] }],
+  scoringSessions: [{ scoringSessionId: ids.session1, competitionId: ids.competition, slotId: ids.slot1, label: 'Round 1 session', displayOrder: 1, leadCourtStationId: ids.court1, courtRunIds: [ids.run1], inputScope: 'PER_COURT' }, { scoringSessionId: ids.session2, competitionId: ids.competition, slotId: ids.slot2, label: 'Round 2 session', displayOrder: 2, leadCourtStationId: ids.court2, courtRunIds: [ids.run2], inputScope: 'PER_COURT' }],
   inputSchemas: [{ inputSchemaId: 'schema-number', competitionId: ids.competition, version: 1, fields: [{ key: 'score', label: 'Raw score', type: 'NUMBER', required: true }] }],
   scoringProfiles: [{ scoringProfileId: ids.profile, competitionId: ids.competition, version: 1, rankingRule: { direction: 'HIGHER_IS_BETTER' }, tieRule: 'AVERAGE_OCCUPIED_PLACES', awardRule: { type: 'RANK_POINTS', rankPoints }, aggregationRule: 'SUM' }], scoringTestCases: [{
     testCaseId: 'test-1',
     competitionId: ids.competition,
+    methodKey: 'score',
     name: '通常順位',
     rounds: [{ roundId: 'test-round-1', label: '第1ラウンド', values: [{ entryId: ids.entryA, value: 2 }, { entryId: ids.entryB, value: 1 }] }],
     expected: [
@@ -44,7 +50,22 @@ function config(rankPoints: Record<number, number | string> = { 1: 10, 2: 5 }): 
       { entryId: ids.entryB, roundRanks: [2], roundAwardScores: [rankPoints[2] ?? 0], aggregateScore: rankPoints[2] ?? 0 },
     ],
   }],
+  resultEntryPolicies: [{
+    competitionId: ids.competition,
+    defaultMethodKey: 'score',
+    allowedMethodKeys: ['score'],
+    methods: [{ methodKey: 'score', label: '得点', kind: 'SCORE', inputMode: 'NUMBER', inputSchemaId: 'schema-number', projection: { type: 'SINGLE_FIELD', fieldKey: 'score', direction: 'HIGHER_IS_BETTER' } }],
+  }],
 } }
+function standardSetupDraft(): TournamentSetupDraft {
+  return {
+    draftFormatVersion: 2, draftId: 'standard-host-config', createdAt: '2026-08-23T00:00:00Z', updatedAt: '2026-08-23T00:00:00Z', currentStep: 'OPERATIONS_CHECK',
+    source: { type: 'STANDARD', templateId: EXCHANGE_FESTIVAL_TEMPLATE.templateId }, tournament: { name: '標準大会' },
+    teams: [{ teamKey: 'team-red', name: '赤組' }, { teamKey: 'team-blue', name: '青組' }],
+    courtStations: [{ stationKey: 'court-a', label: 'Aコート', displayOrder: 0 }, { stationKey: 'court-b', label: 'Bコート', displayOrder: 1 }],
+    competitions: structuredClone(EXCHANGE_FESTIVAL_TEMPLATE.competitions),
+  }
+}
 async function seedConfig(database: AppDatabase, rankPoints?: Record<number, number | string>) { const repository = new ConfigRepository(database); await repository.apply(config(rankPoints), { operator: 'Host', createdAt: '2026-08-19T10:00:00+09:00', changeClass: 'SCORING' }); return repository.getActiveVersion(ids.tournament) }
 function raw(a: string, b: string) { return { inputSchemaId: 'schema-number', inputSchemaVersion: 1, entries: { [ids.entryA]: { score: a }, [ids.entryB]: { score: b } } } }
 function derivedConfig(): TournamentConfigSnapshot {
@@ -90,6 +111,17 @@ async function saveConflict(database: AppDatabase) {
 }
 
 describe('Host authoritative scoring service', () => {
+  it('loads a multi-method standard config through its default method schema', async () => {
+    const database = db()
+    const snapshot = compileTournamentSetup(standardSetupDraft())
+    await new ConfigRepository(database).apply(snapshot, { operator: 'Host', createdAt: '2026-08-23T00:00:00Z', changeClass: 'INPUT_SCHEMA' })
+
+    const state = await createHostScoringService(database).loadAuthoritativeState()
+
+    expect(state.events).toHaveLength(1)
+    expect(state.events[0]!.participants).toEqual([])
+  })
+
   it('uses Task 4 projection and the shared Scoring Engine with Calculation Trace', async () => {
     const database = db(); const active = await seedConfig(database); const { child } = await saveLinear(database); const state = await createHostScoringService(database).loadAuthoritativeState()
     expect(state.configVersionId).toBe(active?.configVersionId); expect(state.projections.find((item) => item.resultId === 'result-r1')?.effectiveRevisionId).toBe(child.revisionId)
@@ -171,6 +203,40 @@ describe('Host authoritative scoring service', () => {
     const database = db(); const repository = new ConfigRepository(database); const initial = config({ 1: 10, 2: 5 }); await repository.apply(initial, { operator: 'Host', createdAt: '2026-08-19T10:00:00+09:00', changeClass: 'SCORING' }); const changed = structuredClone(initial); changed.scoringProfiles[0]!.awardRule.rankPoints = { 1: 30, 2: 10 }; const preview = await repository.previewRegression(changed); await repository.apply(changed, { operator: 'Host', createdAt: '2026-08-19T10:01:00+09:00', changeClass: 'SCORING', scoringTestApprovals: preview.filter((item) => item.status === 'FAIL').map((item) => ({ testCaseId: item.testCaseId, actualFingerprint: scoringTestResultFingerprint(item), operator: 'Host', approvedAt: '2026-08-19T10:00:30+09:00' })) }); await saveLinear(database)
     const state = await createHostScoringService(database).loadAuthoritativeState(); expect(state.configVersion).toBe(2); expect(state.events[0]?.scoringProfileId).toBe(ids.profile); expect(state.events[0]?.participants.map((item) => item.aggregateScore).sort()).toEqual([40, 40]); expect(state.standings.map((row) => row.teamName).sort()).toEqual(['Configured Blue', 'Configured Red'])
   })
+  it("resolves scoring by the Revision's own pinned ConfigVersion, not merely the current active method/schema", async () => {
+    const database = db()
+    const repository = new ConfigRepository(database)
+    const v1 = config({ 1: 10, 2: 5 })
+    await repository.apply(v1, { operator: 'Host', createdAt: '2026-08-19T10:00:00+09:00', changeClass: 'SCORING' })
+    const resultRepository = new ResultRepository(database)
+    const r1 = result('pinned-result', ids.session1, 'pinned-rev')
+    const rev1 = revision('pinned-result', 'pinned-rev', 1, [], '3', '2')
+    await resultRepository.saveResultWithRevision(r1, rev1)
+
+    const v2 = structuredClone(v1)
+    v2.inputSchemas.push({ inputSchemaId: 'schema-rank', competitionId: ids.competition, version: 1, fields: [{ key: 'rank', label: '順位', type: 'RANK', required: true, allowTies: false }] })
+    v2.resultEntryPolicies[0]!.defaultMethodKey = 'rank'
+    v2.resultEntryPolicies[0]!.allowedMethodKeys = ['score', 'rank']
+    v2.resultEntryPolicies[0]!.methods.push({
+      methodKey: 'rank', label: '順位', kind: 'RANK', inputMode: 'RANK_MANUAL', inputSchemaId: 'schema-rank',
+      projection: { type: 'DIRECT_RANK', fieldKey: 'rank' },
+    })
+    const preview = await repository.previewRegression(v2)
+    await repository.apply(v2, {
+      operator: 'Host', createdAt: '2026-08-19T10:05:00+09:00', changeClass: 'INPUT_SCHEMA',
+      scoringTestApprovals: preview.filter((item) => item.status === 'FAIL').map((item) => ({
+        testCaseId: item.testCaseId, actualFingerprint: scoringTestResultFingerprint(item), operator: 'Host', approvedAt: '2026-08-19T10:04:30+09:00',
+      })),
+    })
+
+    const state = await createHostScoringService(database).loadAuthoritativeState()
+    expect(state.configVersion).toBe(2)
+    const round1 = state.events[0]!.participants
+      .find((participant) => participant.entryId === ids.entryA)!
+      .rounds.find((round) => round.roundId === ids.session1)!
+    expect(round1.rank).toBe(1)
+  })
+
   it('exposes the tournament name from the active immutable ConfigVersion snapshot', async () => {
     const database = db()
     const repository = new ConfigRepository(database)

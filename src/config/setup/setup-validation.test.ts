@@ -1,217 +1,83 @@
 import { describe, expect, it } from 'vitest'
-import { compileTournamentSetup } from './setup-compiler'
-import type { SetupCompetitionDraft, TournamentSetupDraft } from './setup-types'
-import { mapConfigIssuesToSetupIssues, validateSetupDraft } from './setup-validation'
-import type { ConfigValidationIssue } from '../tournament-config'
-import { validateTournamentConfig } from '../tournament-config'
+import type { TournamentSetupDraft } from './setup-types'
+import { validateSetupDraft } from './setup-validation'
 
-function rankPoints(count: number): Record<number, number> {
-  return Object.fromEntries(
-    Array.from({ length: count }, (_, index) => [index + 1, count - index]),
-  )
-}
-
-function buildCompetitionDraft(
-  competition: Partial<SetupCompetitionDraft> = {},
-): SetupCompetitionDraft {
+function draft(): TournamentSetupDraft {
   return {
-    competitionKey: 'competition-quantity',
-    name: '玉運び',
-    competitionKind: 'QUANTITY',
-    inputGrouping: 'WHOLE_ROUND',
-    rounds: 1,
-    courts: 4,
-    groupsPerTeam: 1,
-    scoring: {
-      inputType: 'NUMBER',
-      rankingDirection: 'HIGHER',
-      rankPoints: rankPoints(4),
-    },
-    ...competition,
+    draftFormatVersion: 2, draftId: 'draft', createdAt: '2026-08-21T00:00:00Z', updatedAt: '2026-08-21T00:00:00Z', currentStep: 'OPERATIONS_CHECK',
+    source: { type: 'STANDARD', templateId: 'exchange-festival-v2' }, tournament: { name: '大会' }, teams: [{ teamKey: 'red', name: '赤組' }], courtStations: [{ stationKey: 'court-a', label: 'Aコート', displayOrder: 0 }],
+    competitions: [{ competitionKey: 'count', name: '玉入れ', competitionKind: 'QUANTITY', inputGrouping: 'PER_COURT', rounds: 1, courts: 1, groupsPerTeam: 1, defaultMethodKey: 'score', allowedMethodKeys: ['score'], methods: [{ methodKey: 'score', label: '得点', kind: 'SCORE', inputMode: 'NUMBER', fields: [{ key: 'score', label: '得点', type: 'NUMBER', required: true }], projection: { type: 'SINGLE_FIELD', fieldKey: 'score', direction: 'HIGHER_IS_BETTER' } }], rankPoints: { 1: 30 }, scoringTests: [{ testKey: 'case', name: '代表', methodInputs: { score: [{ teamKey: 'red', fields: { score: 1 } }] }, expectedRanks: { red: 1 }, expectedAwardPoints: { red: 30 } }] }],
   }
-}
-
-function buildDraft(
-  competition: Partial<SetupCompetitionDraft> = {},
-): TournamentSetupDraft {
-  return {
-    draftFormatVersion: 1,
-    draftId: 'draft-1',
-    createdAt: '2026-08-21T09:00:00+09:00',
-    updatedAt: '2026-08-21T09:05:00+09:00',
-    currentStep: 'FINAL_CHECK',
-    tournament: {
-      name: '開成運動交流祭',
-      eventDate: '2026-09-20',
-    },
-    teams: [
-      { teamKey: 'team-red', name: '赤組' },
-      { teamKey: 'team-blue', name: '青組' },
-      { teamKey: 'team-yellow', name: '黄組' },
-      { teamKey: 'team-green', name: '緑組' },
-    ],
-    templateSource: {
-      type: 'BUILT_IN',
-      templateId: 'generic-quantity-v1',
-      templateVersion: 1,
-    },
-    competitions: [buildCompetitionDraft(competition)],
-  }
-}
-
-function createIdFactory() {
-  let index = 0
-
-  return <T extends string>() => `generated-${++index}` as T
 }
 
 describe('validateSetupDraft', () => {
-  it('routes a blank tournament name to the basic step', () => {
-    const issues = validateSetupDraft({
-      ...buildDraft(),
-      tournament: {
-        name: '   ',
-      },
-    })
-
-    expect(issues).toContainEqual(expect.objectContaining({
-      step: 'BASIC',
-      code: 'EMPTY_TOURNAMENT_NAME',
-    }))
+  it('accepts a v2 draft with stable Courts and allowed-method scoring tests', () => {
+    expect(validateSetupDraft(draft())).toEqual([])
   })
 
-  it('routes an empty team list to the teams step', () => {
-    const issues = validateSetupDraft({
-      ...buildDraft(),
-      teams: [],
-    })
-
-    expect(issues).toContainEqual(expect.objectContaining({
-      step: 'TEAMS',
-      code: 'EMPTY_TEAMS',
-    }))
-  })
-
-  it('routes a competition without confirmed scoring to the scoring review step', () => {
-    const issues = validateSetupDraft(buildDraft({
-      scoring: {
-        inputType: 'NUMBER',
-        rankingDirection: 'HIGHER',
-        rankPoints: {},
-      },
-    }))
-
-    expect(issues).toContainEqual(expect.objectContaining({
-      step: 'SCORING_REVIEW',
-      code: 'SCORING_CONFIRMATION_REQUIRED',
-      competitionKey: 'competition-quantity',
-    }))
-  })
-
-  it('routes missing custom court assignments to the schedule step', () => {
-    const issues = validateSetupDraft(buildDraft({
-      inputGrouping: 'CUSTOM_GROUP',
-      courts: 3,
-      customGroups: [
-        {
-          groupKey: 'group-a',
-          label: '第1展開 A',
-          round: 1,
-          courtIndexes: [1, 2],
-        },
-      ],
-    }))
-
-    expect(issues).toContainEqual(expect.objectContaining({
-      step: 'SCHEDULE',
-      code: 'MISSING_COURT_ASSIGNMENT',
-      competitionKey: 'competition-quantity',
-    }))
-  })
-})
-
-describe('mapConfigIssuesToSetupIssues', () => {
-  it('maps competition-scoped domain issues to a competition key and human message', () => {
-    const draft = buildDraft({
-      name: '台風の目',
-    })
-    const snapshot = compileTournamentSetup(draft, {
-      createId: createIdFactory(),
-    })
-    const issue: ConfigValidationIssue = {
-      severity: 'ERROR',
-      code: 'EMPTY_LABEL',
-      message: '競技名を入力してください。',
-      targetId: snapshot.competitions[0]!.competitionId,
-    }
-
-    const mapped = mapConfigIssuesToSetupIssues(draft, [issue])
-
-    expect(mapped).toEqual([
-      expect.objectContaining({
-        step: 'COMPETITIONS',
-        severity: 'ERROR',
-        code: 'EMPTY_LABEL',
-        competitionKey: 'competition-quantity',
-      }),
+  it('maps Court and task configuration issues to the four human steps', () => {
+    const invalid = draft()
+    invalid.courtStations[0]!.displayOrder = -1
+    invalid.competitions[0]!.allowedMethodKeys = ['missing']
+    invalid.competitions[0]!.scoringTests[0]!.methodInputs = {}
+    expect(validateSetupDraft(invalid).map((item) => ({ code: item.code, step: item.step }))).toEqual([
+      { code: 'INVALID_COURT_STATION_ORDER', step: 'CHANGES' },
+      { code: 'DEFAULT_METHOD_NOT_ALLOWED', step: 'INPUT_AND_SCORING' },
+      { code: 'UNKNOWN_ALLOWED_METHOD', step: 'INPUT_AND_SCORING' },
+      { code: 'INCOMPLETE_METHOD_SCORING_TEST', step: 'INPUT_AND_SCORING' },
     ])
-    expect(mapped[0]?.message).toContain('台風の目')
-    expect(mapped[0]?.message.startsWith('EMPTY_LABEL')).toBe(false)
   })
 
-  it('maps scoring domain issues to the scoring review step without exposing raw unknown codes', () => {
-    const draft = buildDraft({
-      scoring: {
-        inputType: 'NUMBER',
-        rankingDirection: 'HIGHER',
-        rankPoints: {},
-      },
-    })
-    const snapshot = compileTournamentSetup(draft, {
-      createId: createIdFactory(),
-    })
-    const configIssue = validateTournamentConfig(snapshot).find((issue) => issue.code === 'EMPTY_RANK_POINTS')
+  it('reports missing tournament, team, and Court setup as actionable changes', () => {
+    const invalid = draft()
+    invalid.tournament.name = ' '
+    invalid.teams = []
+    invalid.courtStations = []
 
-    expect(configIssue).toBeDefined()
-
-    const mapped = mapConfigIssuesToSetupIssues(draft, [configIssue!])
-
-    expect(mapped).toEqual([
-      expect.objectContaining({
-        step: 'SCORING_REVIEW',
-        severity: 'ERROR',
-        code: 'EMPTY_RANK_POINTS',
-        competitionKey: 'competition-quantity',
-      }),
+    expect(validateSetupDraft(invalid).map((item) => item.code)).toEqual([
+      'EMPTY_TOURNAMENT_NAME',
+      'EMPTY_TEAMS',
+      'EMPTY_COURT_STATIONS',
     ])
-    expect(mapped[0]?.message).toContain('玉運び')
-    expect(mapped[0]?.message).toContain('順位配点')
-    expect(mapped[0]?.message).not.toContain('EMPTY_RANK_POINTS')
-    expect(mapped[0]?.message).not.toContain('UNKNOWN_')
   })
 
-  it('hides raw internal domain terms for otherwise unhandled config issues without known target context', () => {
-    const draft = buildDraft({
-      name: '台風の目',
-    })
-    const issue: ConfigValidationIssue = {
-      severity: 'ERROR',
-      code: 'UNHANDLED_DOMAIN_ISSUE',
-      message: 'BEST_N の CompetitionEntry 集計設定が不正です。',
-      targetId: 'missing-target-id',
-    }
+  it('rejects duplicate stable Court keys', () => {
+    const invalid = draft()
+    invalid.courtStations.push({ stationKey: 'court-a', label: '別のAコート', displayOrder: 1 })
 
-    const mapped = mapConfigIssuesToSetupIssues(draft, [issue])
+    expect(validateSetupDraft(invalid)).toContainEqual(expect.objectContaining({
+      code: 'INVALID_COURT_STATION_KEY', step: 'CHANGES',
+    }))
+  })
 
-    expect(mapped).toEqual([
-      expect.objectContaining({
-        step: 'FINAL_CHECK',
-        severity: 'ERROR',
-        code: 'UNHANDLED_DOMAIN_ISSUE',
-      }),
-    ])
-    expect(mapped[0]?.message).not.toContain('BEST_N')
-    expect(mapped[0]?.message).not.toContain('CompetitionEntry')
-    expect(mapped[0]?.message).toBe('設定内容を確認してください。')
+  it('rejects a default result method that is not allowed', () => {
+    const invalid = draft()
+    invalid.competitions[0]!.allowedMethodKeys = []
+
+    expect(validateSetupDraft(invalid)).toContainEqual(expect.objectContaining({
+      code: 'DEFAULT_METHOD_NOT_ALLOWED', step: 'INPUT_AND_SCORING',
+    }))
+  })
+
+  it('rejects a custom input group that references an unknown Court', () => {
+    const invalid = draft()
+    invalid.competitions[0]!.inputGrouping = 'CUSTOM_GROUP'
+    invalid.competitions[0]!.customGroups = [{
+      groupKey: 'unknown-court', label: '不正グループ', round: 1, courtStationKeys: ['court-z'],
+    }]
+
+    expect(validateSetupDraft(invalid)).toContainEqual(expect.objectContaining({
+      code: 'UNKNOWN_GROUP_COURT', step: 'OPERATIONS_CHECK',
+    }))
+  })
+
+  it('requires at least one configured group for CUSTOM_GROUP input', () => {
+    const invalid = draft()
+    invalid.competitions[0]!.inputGrouping = 'CUSTOM_GROUP'
+    invalid.competitions[0]!.customGroups = []
+
+    expect(validateSetupDraft(invalid)).toContainEqual(expect.objectContaining({
+      code: 'EMPTY_CUSTOM_GROUPS', step: 'OPERATIONS_CHECK',
+    }))
   })
 })

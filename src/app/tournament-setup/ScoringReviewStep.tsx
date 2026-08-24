@@ -15,12 +15,12 @@ export interface ScoringReviewStepProps {
 }
 
 function scoringSummary(competition: SetupCompetitionDraft): string {
-  const pointCount = Object.keys(competition.scoring.rankPoints).length
+  const pointCount = Object.keys(competition.rankPoints).length
   return pointCount > 0 ? `順位に応じて${pointCount}位まで得点を付けます。` : '順位配点を確認してください。'
 }
 
 export function ScoringReviewStep({ competitions, issues, focusedCompetitionKey }: ScoringReviewStepProps) {
-  const scoringIssues = issues.filter((issue) => issue.step === 'SCORING_REVIEW')
+  const scoringIssues = issues.filter((issue) => issue.step === 'INPUT_AND_SCORING')
   const cardRefs = useRef(new Map<string, HTMLElement>())
 
   useEffect(() => {
@@ -66,7 +66,15 @@ export function ScoringReviewStep({ competitions, issues, focusedCompetitionKey 
                 <Typography component="h3" variant="subtitle1">{competitionName}</Typography>
                 <Typography color="text.secondary" variant="body2">{scoringSummary(competition)}</Typography>
               </div>
-              <CourtInputPreview competitionName={competition.name || 'この競技'} inputType={competition.scoring.inputType} />
+              {competition.methods
+                .filter((method) => competition.allowedMethodKeys.includes(method.methodKey))
+                .map((method) => (
+                  <CourtInputPreview
+                    key={method.methodKey}
+                    competitionName={competition.name || 'この競技'}
+                    method={method}
+                  />
+                ))}
             </Stack>
           </CardContent>
         </Card>

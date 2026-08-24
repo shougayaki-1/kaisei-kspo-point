@@ -9,6 +9,7 @@ import Typography from '@mui/material/Typography'
 import type { TournamentConfigSnapshot } from '../../config/tournament-config'
 import { scoringTestResultFingerprint } from '../../config/scoring-test-case'
 import type { SetupIssue } from '../../config/setup/setup-validation'
+import { OperationsPreview } from '../tournament-settings/OperationsPreview'
 import type {
   ConfigApplyPreview,
   ConfigApplyResult,
@@ -154,6 +155,8 @@ export function FinalCheckStep({
       ) : (
         <Alert severity="error">設定内容を作成できませんでした。入力内容を確認してください。</Alert>
       )}
+
+      {snapshot ? <OperationsPreview snapshot={snapshot} /> : null}
 
       {issues.length === 0 ? <Alert severity="success">確認が完了しました。</Alert> : null}
       {issues.map((issue, index) => (

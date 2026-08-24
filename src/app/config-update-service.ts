@@ -12,6 +12,14 @@ import {
 } from '../transfer/config-update'
 import { decodeQrFrame } from '../transfer/frame'
 import type { TransferProgress } from '../transfer/receiver'
+import { RESULT_ENTRY_DRAFT_KEY } from './court-result-service'
+
+export class ConfigActivationDraftError extends Error {
+  constructor() {
+    super('入力中の結果があります。保存するか破棄してから設定を反映してください。')
+    this.name = 'ConfigActivationDraftError'
+  }
+}
 
 export interface ConfigUpdateStatus {
   tournamentId: TournamentId | null
@@ -245,12 +253,19 @@ export function createConfigUpdateService(db: AppDatabase) {
     },
 
     async activate(configVersionId: string, activation: ConfigActivationMetadata): Promise<ConfigUpdateActivationResult> {
+      const draft = await db.localSettings.get(RESULT_ENTRY_DRAFT_KEY)
+      if (draft?.value !== undefined) throw new ConfigActivationDraftError()
+
       const applied = await configRepository.activateVersionForHost(configVersionId, activation)
       return {
         configVersionId,
         version: applied.version,
         tournamentId: applied.snapshot.tournament.tournamentId,
       }
+    },
+
+    async discardResultEntryDraft(): Promise<void> {
+      await db.localSettings.delete(RESULT_ENTRY_DRAFT_KEY)
     },
   }
 }

@@ -14,66 +14,22 @@ import Radio from '@mui/material/Radio'
 import RadioGroup from '@mui/material/RadioGroup'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
-import { GENERIC_SETUP_TEMPLATES } from '../../config/setup/builtin-templates'
+import { EXCHANGE_FESTIVAL_TEMPLATE, GENERIC_SETUP_TEMPLATES } from '../../config/setup/builtin-templates'
 import type { SetupCompetitionDraft, TournamentSetupDraft } from '../../config/setup/setup-types'
-import {
-  parseTournamentSetupTemplate,
-  type TournamentSetupTemplateFile,
-} from '../../config/setup/template-schema'
+import { parseTournamentSetupTemplate, type TournamentSetupTemplateFile } from '../../config/setup/template-schema'
 
 const IMPORTED_TEMPLATE_STORAGE_KEY = 'host.setupImportedTemplates.v1'
 
-const EVENT_SETUP_TEMPLATES: TournamentSetupTemplateFile[] = [
-  parseTournamentSetupTemplate({
-    templateFormatVersion: 1,
-    templateId: 'sports-festival-2026',
-    templateVersion: 1,
-    name: '運動交流祭 2026',
-    eventYear: 2026,
-    competitions: [
-      {
-        competitionKey: 'ball-carry',
-        name: '大玉運び',
-        competitionKind: 'QUANTITY',
-        inputGrouping: 'WHOLE_ROUND',
-        rounds: 1,
-        courts: 2,
-        groupsPerTeam: 1,
-        scoring: {
-          inputType: 'NUMBER',
-          rankingDirection: 'HIGHER',
-          rankPoints: {},
-        },
-      },
-      {
-        competitionKey: 'relay',
-        name: '全員リレー',
-        competitionKind: 'TIME',
-        inputGrouping: 'PER_COURT',
-        rounds: 1,
-        courts: 4,
-        groupsPerTeam: 1,
-        scoring: {
-          inputType: 'TIME',
-          rankingDirection: 'LOWER',
-          rankPoints: {},
-        },
-      },
-    ],
-  }),
-]
+const EVENT_SETUP_TEMPLATES: TournamentSetupTemplateFile[] = [EXCHANGE_FESTIVAL_TEMPLATE]
 
-interface TemplateOption {
-  storageType: Extract<TournamentSetupDraft['templateSource'], { type: 'BUILT_IN' | 'IMPORTED' }>['type']
-  template: TournamentSetupTemplateFile
-}
+interface TemplateOption { template: TournamentSetupTemplateFile }
 
 export interface TemplateStepProps {
-  templateSource: TournamentSetupDraft['templateSource']
+  source: TournamentSetupDraft['source']
   competitions: SetupCompetitionDraft[]
   disabled?: boolean
   onTemplateChange: (
-    templateSource: TournamentSetupDraft['templateSource'],
+    source: TournamentSetupDraft['source'],
     competitions: SetupCompetitionDraft[],
   ) => void
 }
@@ -115,12 +71,11 @@ function persistImportedTemplates(templates: TournamentSetupTemplateFile[]): voi
 }
 
 function optionValue(option: TemplateOption): string {
-  return `${option.storageType}:${option.template.templateId}:${option.template.templateVersion}`
+  return option.template.templateId
 }
 
-function activeOptionValue(templateSource: TournamentSetupDraft['templateSource']): string {
-  if (templateSource.type === 'NONE') return ''
-  return `${templateSource.type}:${templateSource.templateId}:${templateSource.templateVersion}`
+function activeOptionValue(source: TournamentSetupDraft['source']): string {
+  return source.type === 'STANDARD' ? source.templateId : ''
 }
 
 function mergeImportedTemplates(
@@ -221,7 +176,7 @@ function TemplateSection({
 }
 
 export function TemplateStep({
-  templateSource,
+  source,
   competitions,
   disabled = false,
   onTemplateChange,
@@ -235,20 +190,20 @@ export function TemplateStep({
 
   const eventOptions = useMemo<TemplateOption[]>(
     () => [
-      ...EVENT_SETUP_TEMPLATES.map((template) => ({ storageType: 'BUILT_IN' as const, template })),
+      ...EVENT_SETUP_TEMPLATES.map((template) => ({ template })),
       ...importedTemplates
         .filter((template) => template.eventYear !== undefined)
-        .map((template) => ({ storageType: 'IMPORTED' as const, template })),
+        .map((template) => ({ template })),
     ],
     [importedTemplates],
   )
 
   const genericOptions = useMemo<TemplateOption[]>(
     () => [
-      ...GENERIC_SETUP_TEMPLATES.map((template) => ({ storageType: 'BUILT_IN' as const, template })),
+      ...GENERIC_SETUP_TEMPLATES.filter((template) => template.templateId !== EXCHANGE_FESTIVAL_TEMPLATE.templateId).map((template) => ({ template })),
       ...importedTemplates
         .filter((template) => template.eventYear === undefined)
-        .map((template) => ({ storageType: 'IMPORTED' as const, template })),
+        .map((template) => ({ template })),
     ],
     [importedTemplates],
   )
@@ -259,8 +214,8 @@ export function TemplateStep({
   )
 
   const activeTemplate = useMemo(
-    () => allOptions.find((option) => optionValue(option) === activeOptionValue(templateSource)),
-    [allOptions, templateSource],
+    () => allOptions.find((option) => optionValue(option) === activeOptionValue(source)),
+    [allOptions, source],
   )
 
   const selectedCompetitionKeys = useMemo(
@@ -274,11 +229,7 @@ export function TemplateStep({
 
     setImportError(null)
     onTemplateChange(
-      {
-        type: selectedOption.storageType,
-        templateId: selectedOption.template.templateId,
-        templateVersion: selectedOption.template.templateVersion,
-      },
+      { type: 'STANDARD', templateId: selectedOption.template.templateId },
       cloneCompetitions(selectedOption.template.competitions),
     )
   }
@@ -299,7 +250,7 @@ export function TemplateStep({
       nextSelectedKeys,
     )
 
-    onTemplateChange(templateSource, nextCompetitions)
+    onTemplateChange(source, nextCompetitions)
   }
 
   const handleImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -354,7 +305,7 @@ export function TemplateStep({
         ariaLabel="行事テンプレート一覧"
         title="行事テンプレート"
         options={eventOptions}
-        selectedValue={activeOptionValue(templateSource)}
+        selectedValue={activeOptionValue(source)}
         disabled={disabled}
         onSelect={handleTemplateSelect}
       />
@@ -363,12 +314,12 @@ export function TemplateStep({
         ariaLabel="汎用テンプレート一覧"
         title="汎用テンプレート"
         options={genericOptions}
-        selectedValue={activeOptionValue(templateSource)}
+        selectedValue={activeOptionValue(source)}
         disabled={disabled}
         onSelect={handleTemplateSelect}
       />
 
-      {templateSource.type !== 'NONE' && activeTemplate ? (
+      {source.type === 'STANDARD' && activeTemplate ? (
         <Card variant="outlined">
           <CardContent>
             <FormControl component="fieldset" disabled={disabled} fullWidth>
@@ -395,7 +346,7 @@ export function TemplateStep({
         </Card>
       ) : null}
 
-      {templateSource.type !== 'NONE' && !activeTemplate ? (
+      {source.type === 'STANDARD' && !activeTemplate ? (
         <Alert severity="warning">
           この端末には選択中テンプレートの定義がありません。別のテンプレートを選ぶか、JSON を再読み込みしてください。
         </Alert>

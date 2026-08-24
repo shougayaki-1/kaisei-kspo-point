@@ -6,7 +6,7 @@ import { ConfigFilePanel } from './ConfigFilePanel'
 const imported: ConfigVersionRecord = {
   configVersionId: 'config-v1', tournamentId: 'tournament-1', version: 1,
   createdAt: '2026-08-20T00:00:00.000Z', operator: 'configuration officer', changeClass: 'SCORING',
-  snapshot: { tournament: { tournamentId: 'tournament-1' as never, name: 'Configured Tournament', eventDate: '2026-09-01', currentConfigVersion: 1 }, teams: [], competitions: [], competitionEntries: [], scheduleSlots: [], courtRuns: [], scoringSessions: [], inputSchemas: [], scoringProfiles: [], scoringTestCases: [] },
+  snapshot: { tournament: { tournamentId: 'tournament-1' as never, name: 'Configured Tournament', eventDate: '2026-09-01', currentConfigVersion: 1 }, teams: [], competitions: [], competitionEntries: [], courtStations: [], scheduleSlots: [], courtRuns: [], scoringSessions: [], inputSchemas: [], scoringProfiles: [], scoringTestCases: [], resultEntryPolicies: [] },
 }
 
 describe('ConfigFilePanel', () => {
