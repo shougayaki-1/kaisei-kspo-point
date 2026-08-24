@@ -204,6 +204,38 @@ describe('tournament config file', () => {
     expect(repository.activateVersionForHost).not.toHaveBeenCalled()
   })
 
+  it('allows an explicit tournament switch when allowTournamentSwitch is set', async () => {
+    const activeTournament: Tournament = {
+      tournamentId: 'tournament-a' as never,
+      name: '大会A',
+      currentConfigVersion: 1,
+    }
+    const imported = record()
+    imported.tournamentId = 'tournament-b'
+    imported.snapshot.tournament.tournamentId = 'tournament-b' as never
+    const repository = {
+      importVersion: vi.fn(),
+      getHostTournament: vi.fn(async () => activeTournament),
+      getActiveVersion: vi.fn(async () => undefined),
+      getVersionById: vi.fn(async () => imported),
+      previewRegression: vi.fn(async () => [{ testCaseId: 'case-1', status: 'PASS', actual: [], diffs: [] } as never]),
+      activateVersionForHost: vi.fn(async () => ({ version: imported.version, snapshot: imported.snapshot })),
+    } satisfies ConfigFileRepository
+
+    await expect(activateImportedConfigFile(
+      repository,
+      imported.configVersionId,
+      { operator: 'コート担当', activatedAt: '2026-08-24T12:00:00.000Z' },
+      { allowTournamentSwitch: true },
+    )).resolves.toMatchObject({ version: imported.version })
+
+    expect(repository.activateVersionForHost).toHaveBeenCalledWith(
+      imported.configVersionId,
+      expect.objectContaining({ operator: 'コート担当' }),
+      { allowTournamentSwitch: true },
+    )
+  })
+
   it('rejects production activation when a scoring profile has no regression test case', async () => {
     const imported = record()
     imported.snapshot.scoringTestCases = []

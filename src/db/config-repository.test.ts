@@ -328,4 +328,109 @@ describe('ConfigRepository', () => {
     const applied = await repository.apply(second, metadata('2026-08-19T12:30:00+09:00'))
     expect(applied.version).toBe(2)
   })
+
+  it('rejects activateVersionForHost for a different tournament without explicit switch approval', async () => {
+    const db = makeDb()
+    const repository = new ConfigRepository(db)
+    const tournamentA = snapshotFor('switch-a')
+    const appliedA = await repository.apply(tournamentA, metadata())
+    await repository.activateVersionForHost(
+      (await repository.listVersions(tournamentA.tournament.tournamentId))[0]!.configVersionId,
+      { operator: '本部担当', activatedAt: '2026-08-19T12:00:10+09:00' },
+    )
+
+    const tournamentB = snapshotFor('switch-b')
+    const importedB = await repository.importVersion({
+      configVersionId: 'switch-config-b-v1',
+      tournamentId: tournamentB.tournament.tournamentId,
+      version: 1,
+      createdAt: '2026-08-19T12:01:00+09:00',
+      operator: '本部担当',
+      changeClass: 'SCORING',
+      snapshot: { ...tournamentB, tournament: { ...tournamentB.tournament, currentConfigVersion: 1 } },
+    })
+
+    await expect(
+      repository.activateVersionForHost(importedB.configVersionId, {
+        operator: '本部担当',
+        activatedAt: '2026-08-19T12:02:00+09:00',
+      }),
+    ).rejects.toThrow(/explicit tournament switch|tournament mismatch/i)
+    expect((await repository.getHostTournament())?.tournamentId).toBe(tournamentA.tournament.tournamentId)
+    void appliedA
+  })
+
+  it('atomically switches the active tournament while preserving Result/Revision/TransferBatch history', async () => {
+    const db = makeDb()
+    const repository = new ConfigRepository(db)
+    const tournamentA = snapshotFor('atomic-a')
+    await repository.apply(tournamentA, metadata())
+    const configAId = (await repository.listVersions(tournamentA.tournament.tournamentId))[0]!.configVersionId
+    await repository.activateVersionForHost(configAId, {
+      operator: '本部担当',
+      activatedAt: '2026-08-19T12:00:10+09:00',
+    })
+
+    const result: Result = {
+      resultId: 'atomic-result-1' as never,
+      tournamentId: tournamentA.tournament.tournamentId,
+      competitionId: tournamentA.competitions[0].competitionId,
+      scoringSessionId: tournamentA.scoringSessions[0].scoringSessionId,
+      currentRevisionId: 'atomic-revision-1' as never,
+      createdAt: '2026-08-19T12:05:00+09:00',
+      createdByDeviceId: 'device-1' as never,
+    }
+    await db.results.add(result)
+    await db.resultRevisions.add({
+      revisionId: 'atomic-revision-1' as never,
+      resultId: 'atomic-result-1' as never,
+      revisionNumber: 1,
+      parentRevisionIds: [],
+      source: 'LOCAL' as never,
+      operator: 'コート担当',
+      inputMode: 'DIRECT_SCORE' as never,
+      rawData: {} as never,
+      configVersion: 1,
+      createdAt: '2026-08-19T12:05:00+09:00',
+    })
+    await db.transferBatches.add({
+      batchId: 'atomic-batch-1',
+      tournamentId: tournamentA.tournament.tournamentId,
+      status: 'PENDING' as never,
+      createdAt: '2026-08-19T12:06:00+09:00',
+      batch: {} as never,
+      encodedParts: [],
+      currentPartIndex: 0,
+    })
+
+    const resultCountBefore = await db.results.count()
+    const revisionCountBefore = await db.resultRevisions.count()
+    const transferCountBefore = await db.transferBatches.count()
+
+    const tournamentB = snapshotFor('atomic-b')
+    const importedB = await repository.importVersion({
+      configVersionId: 'atomic-config-b-v1',
+      tournamentId: tournamentB.tournament.tournamentId,
+      version: 1,
+      createdAt: '2026-08-19T12:07:00+09:00',
+      operator: '本部担当',
+      changeClass: 'SCORING',
+      snapshot: { ...tournamentB, tournament: { ...tournamentB.tournament, currentConfigVersion: 1 } },
+    })
+
+    await repository.activateVersionForHost(
+      importedB.configVersionId,
+      { operator: '本部担当', activatedAt: '2026-08-19T12:08:00+09:00' },
+      { allowTournamentSwitch: true },
+    )
+
+    expect((await repository.getHostTournament())?.tournamentId).toBe(tournamentB.tournament.tournamentId)
+    expect((await repository.getActiveVersion(tournamentB.tournament.tournamentId))?.configVersionId).toBe(importedB.configVersionId)
+    expect(await db.results.count()).toBe(resultCountBefore)
+    expect(await db.resultRevisions.count()).toBe(revisionCountBefore)
+    expect(await db.transferBatches.count()).toBe(transferCountBefore)
+    expect(await db.tournaments.count()).toBe(1)
+    expect(await db.teams.where('tournamentId').equals(tournamentA.tournament.tournamentId).count()).toBe(0)
+    expect(await db.teams.where('tournamentId').equals(tournamentB.tournament.tournamentId).count()).toBe(1)
+  })
 })

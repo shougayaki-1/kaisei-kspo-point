@@ -352,7 +352,47 @@ export class ConfigRepository {
     if (record.tournamentId !== expectedTournamentId) {
       throw new Error('ConfigVersion tournament mismatch; version is not compatible with this tournament')
     }
+    return this.activateVersionRecord(record, expectedTournamentId, activation)
+  }
 
+  async activateVersionForHost(
+    configVersionId: string,
+    activation: ConfigActivationMetadata,
+    options?: { allowTournamentSwitch?: boolean },
+  ): Promise<AppliedConfigVersion> {
+    const record = await this.getVersionById(configVersionId)
+    if (!record) throw new Error(`ConfigVersion ${configVersionId} does not exist`)
+    const hostTournament = await this.getHostTournament()
+    if (hostTournament && hostTournament.tournamentId !== record.tournamentId) {
+      if (options?.allowTournamentSwitch !== true) {
+        throw new Error('ConfigVersion tournament mismatch; explicit tournament switch is required to activate a different tournament')
+      }
+      return this.activateVersionRecord(
+        record,
+        record.tournamentId as TournamentId,
+        activation,
+        hostTournament.tournamentId as TournamentId,
+      )
+    }
+    if (!hostTournament) {
+      const tournamentIds = new Set((await this.db.configVersions.toArray()).map((item) => item.tournamentId))
+      if ([...tournamentIds].some((tournamentId) => tournamentId !== record.tournamentId)) {
+        throw new Error('Host tournament integrity error: imported ConfigVersions belong to multiple tournaments')
+      }
+    }
+    return this.activateVersionRecord(
+      record,
+      (hostTournament?.tournamentId ?? record.tournamentId) as TournamentId,
+      activation,
+    )
+  }
+
+  private async activateVersionRecord(
+    record: ConfigVersionRecord,
+    expectedTournamentId: TournamentId,
+    activation: ConfigActivationMetadata,
+    switchFromTournamentId?: TournamentId,
+  ): Promise<AppliedConfigVersion> {
     const snapshot = validateSnapshot(record.snapshot)
     if (snapshot.tournament.tournamentId !== expectedTournamentId) {
       throw new Error('ConfigVersion snapshot is not compatible with this tournament')
@@ -364,49 +404,40 @@ export class ConfigRepository {
 
     const tables = [...this.normalizedConfigTables(), this.db.auditEvents]
     return this.db.transaction('rw', tables, async () => {
+      if (switchFromTournamentId) {
+        await this.deleteNormalizedRowsForTournament(switchFromTournamentId)
+      }
       await this.replaceNormalizedRows(snapshot)
       const auditEvent: AuditEventRecord = {
         eventId: createId<string>(),
         type: 'CONFIG_UPDATED',
         timestamp: activation.activatedAt,
         targetId: record.configVersionId,
-        metadata: {
-          action: 'EXPLICIT_ACTIVATION',
-          operator: activation.operator,
-          activatedAt: activation.activatedAt,
-          deviceId: activation.deviceId,
-          configCreatedAt: record.createdAt,
-          configCreatedBy: record.operator,
-          version: record.version,
-          tournamentId: record.tournamentId,
-        },
+        metadata: switchFromTournamentId
+          ? {
+              action: 'EXPLICIT_TOURNAMENT_SWITCH',
+              previousTournamentId: switchFromTournamentId,
+              tournamentId: record.tournamentId,
+              configVersionId: record.configVersionId,
+              operator: activation.operator,
+              activatedAt: activation.activatedAt,
+              deviceId: activation.deviceId,
+              version: record.version,
+            }
+          : {
+              action: 'EXPLICIT_ACTIVATION',
+              operator: activation.operator,
+              activatedAt: activation.activatedAt,
+              deviceId: activation.deviceId,
+              configCreatedAt: record.createdAt,
+              configCreatedBy: record.operator,
+              version: record.version,
+              tournamentId: record.tournamentId,
+            },
       }
       await this.db.auditEvents.add(auditEvent)
       return { version: record.version, snapshot: clone(snapshot) }
     })
-  }
-
-  async activateVersionForHost(
-    configVersionId: string,
-    activation: ConfigActivationMetadata,
-  ): Promise<AppliedConfigVersion> {
-    const record = await this.getVersionById(configVersionId)
-    if (!record) throw new Error(`ConfigVersion ${configVersionId} does not exist`)
-    const hostTournament = await this.getHostTournament()
-    if (hostTournament && hostTournament.tournamentId !== record.tournamentId) {
-      throw new Error('ConfigVersion tournament mismatch; version is not compatible with the active Host tournament')
-    }
-    if (!hostTournament) {
-      const tournamentIds = new Set((await this.db.configVersions.toArray()).map((item) => item.tournamentId))
-      if ([...tournamentIds].some((tournamentId) => tournamentId !== record.tournamentId)) {
-        throw new Error('Host tournament integrity error: imported ConfigVersions belong to multiple tournaments')
-      }
-    }
-    return this.activateVersion(
-      configVersionId,
-      (hostTournament?.tournamentId ?? record.tournamentId) as TournamentId,
-      activation,
-    )
   }
 
   async apply(
@@ -596,8 +627,7 @@ export class ConfigRepository {
     ]
   }
 
-  private async replaceNormalizedRows(appliedSnapshot: TournamentConfigSnapshot): Promise<void> {
-    const tournamentId = appliedSnapshot.tournament.tournamentId
+  private async deleteNormalizedRowsForTournament(tournamentId: TournamentId): Promise<void> {
     const existingCompetitions = await this.db.competitions
       .where('tournamentId')
       .equals(tournamentId)
@@ -650,6 +680,10 @@ export class ConfigRepository {
       await this.db.courtRuns.where('slotId').anyOf(existingSlotIds).delete()
     }
     await this.db.competitions.where('tournamentId').equals(tournamentId).delete()
+  }
+
+  private async replaceNormalizedRows(appliedSnapshot: TournamentConfigSnapshot): Promise<void> {
+    await this.deleteNormalizedRowsForTournament(appliedSnapshot.tournament.tournamentId)
 
     await this.db.tournaments.put(appliedSnapshot.tournament)
     if (appliedSnapshot.teams.length > 0) await this.db.teams.bulkPut(appliedSnapshot.teams)

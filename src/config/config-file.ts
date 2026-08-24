@@ -96,19 +96,26 @@ export async function importTournamentConfigFile(
   return repository.importVersion(record)
 }
 
+export interface ImportedConfigActivationOptions {
+  allowTournamentSwitch?: boolean
+}
+
 export async function activateImportedConfigFile(
   repository: ConfigFileRepository,
   configVersionId: string,
   activation: ConfigActivationMetadata,
+  options?: ImportedConfigActivationOptions,
 ): Promise<AppliedConfigVersion> {
   const record = await repository.getVersionById(configVersionId)
   if (!record) throw new Error(`ConfigVersion ${configVersionId} does not exist`)
   const hostTournament = await repository.getHostTournament()
-  if (hostTournament && record.tournamentId !== hostTournament.tournamentId) {
+  const allowTournamentSwitch = options?.allowTournamentSwitch === true
+  const isCrossTournament = Boolean(hostTournament) && record.tournamentId !== hostTournament!.tournamentId
+  if (isCrossTournament && !allowTournamentSwitch) {
     throw new Error('ConfigVersion tournament mismatch with the active Host tournament')
   }
 
-  const active = hostTournament
+  const active = hostTournament && !isCrossTournament
     ? await repository.getActiveVersion(hostTournament.tournamentId)
     : undefined
   const testCasesByCompetition = new Map<string, number>()
@@ -165,5 +172,7 @@ export async function activateImportedConfigFile(
     }
   }
 
-  return repository.activateVersionForHost(configVersionId, activation)
+  return allowTournamentSwitch
+    ? repository.activateVersionForHost(configVersionId, activation, { allowTournamentSwitch: true })
+    : repository.activateVersionForHost(configVersionId, activation)
 }
