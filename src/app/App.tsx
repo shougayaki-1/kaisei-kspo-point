@@ -46,6 +46,8 @@ import { createConfigFilePanelServices } from './config-file-panel-service'
 import { ConfigUpdatePanel } from './ConfigUpdatePanel'
 import { createConfigUpdateService, type ConfigUpdateActivationResult } from './config-update-service'
 import type { ConfigUpdatePanelServices } from './ConfigUpdatePanel'
+import { HostConfigDistributionPanel } from './HostConfigDistributionPanel'
+import { createConfigDistributionServices, type ConfigDistributionServices } from './config-distribution-service'
 import { createCourtAssignmentService, type CourtAssignment } from './court-assignment-service'
 import { createCourtResultService } from './court-result-service'
 import { createCourtTaskService, type CourtTaskCard } from './court-task-service'
@@ -84,6 +86,7 @@ export interface AppProps {
   resetPersistentData?: () => Promise<void> | void
   hostBackupServices?: HostBackupPanelServices
   configUpdateServices?: ConfigUpdatePanelServices
+  configDistributionServices?: ConfigDistributionServices
   setupDraftRepository?: SetupDraftRepository
 }
 
@@ -125,6 +128,7 @@ export function App({
   resetPersistentData,
   hostBackupServices,
   configUpdateServices: injectedConfigUpdateServices,
+  configDistributionServices: injectedConfigDistributionServices,
   setupDraftRepository: injectedSetupDraftRepository,
 }: AppProps = {}) {
   const [mode, setMode] = useState<AppMode>(null)
@@ -149,6 +153,8 @@ export function App({
   const configFileServices = useMemo(() => createConfigFilePanelServices(appDatabase), [appDatabase])
   const browserConfigUpdateServices = useMemo(() => createConfigUpdateService(appDatabase), [appDatabase])
   const configUpdateServices = injectedConfigUpdateServices ?? browserConfigUpdateServices
+  const browserConfigDistributionServices = useMemo(() => createConfigDistributionServices(appDatabase), [appDatabase])
+  const configDistributionServices = injectedConfigDistributionServices ?? browserConfigDistributionServices
   const courtResultServices = useMemo(() => createCourtResultService(appDatabase, { deviceId }), [appDatabase, deviceId])
   const courtTransferHistoryServices = useMemo(() => createCourtTransferHistoryServices(appDatabase), [appDatabase])
   const hostScoringServices = useMemo(() => createHostScoringService(appDatabase), [appDatabase])
@@ -289,6 +295,12 @@ export function App({
     setKnownConfigVersion(result.version)
     setKnownConfigVersionId(result.configVersionId)
   }
+  const handleCourtConfigActivated = (result: { tournamentId: string; configVersionId: string; version: number }) => {
+    setActiveTournamentId(result.tournamentId as TournamentId)
+    setKnownConfigVersion(result.version)
+    setKnownConfigVersionId(result.configVersionId)
+    void refreshCourtState()
+  }
   const returnToModeSelection = () => { setMode(null); setHostTab('CONFIG') }
   const handleOpenSettingsStage = (_step: SetupStep) => setEditNotice(true)
   const handleAssignmentSubmit = async (input: { courtStationId: CourtStationId; competitionId?: CompetitionId; source: 'QR' | 'MANUAL' }) => {
@@ -358,13 +370,7 @@ export function App({
               snapshot={hostSnapshot}
               onOpenStage={handleOpenSettingsStage}
               distributionManagement={
-                <ConfigUpdatePanel
-                  mode="HOST"
-                  services={configUpdateServices}
-                  operatorName={operatorName}
-                  deviceId={deviceId}
-                  onActivated={handleConfigUpdateActivated}
-                />
+                <HostConfigDistributionPanel services={configDistributionServices} />
               }
               advancedManagement={
                 <ConfigFilePanel

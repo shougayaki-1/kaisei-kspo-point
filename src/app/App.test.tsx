@@ -215,6 +215,30 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: '本部バックアップ・復元' })).toBeInTheDocument()
   })
 
+  it('distributes tournament config as JSON on the Host distribution screen', async () => {
+    let version = 0
+    let snapshot: Awaited<ReturnType<ConfigRepository['loadCurrent']>>
+    const statefulRepository: Pick<ConfigRepository, 'loadCurrent' | 'apply'> = {
+      loadCurrent: vi.fn(async () => snapshot ? structuredClone(snapshot) : undefined),
+      apply: vi.fn(async (next) => {
+        version += 1
+        const applied = { ...structuredClone(next), tournament: { ...next.tournament, currentConfigVersion: version } }
+        snapshot = applied
+        return { version, snapshot: structuredClone(applied) }
+      }),
+    }
+    render(<App configRepository={statefulRepository} setupDraftRepository={readyToApplySetupDraftRepository()} />)
+    fireEvent.click(screen.getByRole('button', { name: '本部モード' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'この内容で大会を作成する' }))
+    expect(await screen.findByRole('heading', { name: '開成運動交流祭' })).toBeInTheDocument()
+
+    fireEvent.click(await screen.findByRole('button', { name: '配布する' }))
+
+    expect(screen.getByRole('button', { name: '大会設定 JSON を保存' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '大会設定QRを表示' })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('コート配布用QR')).toBeInTheDocument()
+  })
+
   it('synchronizes App config diagnostics after Court Config Update activation', async () => {
     render(<App configUpdateServices={configUpdateServices()} />)
     fireEvent.click(screen.getByRole('button', { name: 'コートモード' }))

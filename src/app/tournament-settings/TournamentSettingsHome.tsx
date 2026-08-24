@@ -100,7 +100,7 @@ export function TournamentSettingsHome({
       title: 'コート端末への配布',
       summary: `大会設定を共有して、コート${snapshot.courtStations.length}か所を割り当てます`,
       action: () => setView('DISTRIBUTION'),
-      actionLabel: 'QRを表示',
+      actionLabel: '配布する',
     },
     {
       key: 'validation',
