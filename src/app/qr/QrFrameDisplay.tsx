@@ -1,4 +1,5 @@
-import { QRCodeSVG } from 'qrcode.react'
+import { BrowserQRCodeSvgWriter } from '@zxing/browser'
+import { useEffect, useRef } from 'react'
 
 export interface QrFrameDisplayProps {
   value: string
@@ -9,9 +10,16 @@ export interface QrFrameDisplayProps {
 const DEFAULT_QR_SIZE = 360
 
 export function QrFrameDisplay({ value, label, size = DEFAULT_QR_SIZE }: QrFrameDisplayProps) {
-  return (
-    <div className="qr-frame-display" role="img" aria-label={label}>
-      <QRCodeSVG value={value} size={size} level="M" marginSize={4} />
-    </div>
-  )
+  const containerRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+    const writer = new BrowserQRCodeSvgWriter()
+    const svg = writer.write(value, size, size)
+    svg.setAttribute('aria-hidden', 'true')
+    container.replaceChildren(svg)
+  }, [size, value])
+
+  return <div ref={containerRef} className="qr-frame-display" role="img" aria-label={label} />
 }
