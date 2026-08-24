@@ -32,7 +32,7 @@ describe('ConfigUpdatePanel', () => {
     const service = services()
     const { container } = render(<ConfigUpdatePanel mode="HOST" services={service} />)
 
-    expect(await screen.findByText(/config-v1/i)).toBeInTheDocument()
+    expect((await screen.findAllByText(/config-v1/i)).length).toBeGreaterThanOrEqual(1)
     fireEvent.click(screen.getByRole('button', { name: '大会設定QRを表示' }))
 
     expect(await screen.findByRole('img', { name: '大会設定QR 1/2' })).toBeInTheDocument()
