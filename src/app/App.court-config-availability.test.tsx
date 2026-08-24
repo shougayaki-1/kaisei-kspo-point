@@ -34,13 +34,14 @@ function statefulConfigRepository(): Pick<ConfigRepository, 'loadCurrent' | 'app
   let version = 0
   return {
     loadCurrent: vi.fn(async () => snapshot ? structuredClone(snapshot) : undefined),
-    apply: vi.fn(async (next) => {
+    apply: vi.fn(async (next: TournamentConfigSnapshot) => {
       version += 1
-      snapshot = {
+      const appliedSnapshot: TournamentConfigSnapshot = {
         ...structuredClone(next),
         tournament: { ...next.tournament, currentConfigVersion: version },
       }
-      return { version, snapshot: structuredClone(snapshot) }
+      snapshot = appliedSnapshot
+      return { version, snapshot: structuredClone(appliedSnapshot) }
     }),
   }
 }
