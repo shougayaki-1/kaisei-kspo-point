@@ -35,19 +35,21 @@ The production build embeds `VITE_RELEASE_SHA` at build time from the approved c
 - [ ] Confirm no waiting Service Worker is auto-activated. If an update is available, leave it waiting during the event unless an explicit controlled change is approved.
 - [ ] Create a fresh Host portable backup and record its creation time/checksum.
 - [ ] Restore that backup on the spare Host before the event and compare ConfigVersion ID and standings.
+- [ ] Distribute the same approved tournament configuration JSON file to every Court device and confirm the ConfigVersion ID matches after activation.
 - [ ] Disable network physically and perform the Manual physical rehearsal below.
 
 ## Court
 
-1. Confirm App version, Device ID, active ConfigVersion, and Court role.
-2. Select the configured ScoringSession. Do not derive a session from a physical court label.
-3. Enter only the raw InputSchema values configured for the CompetitionEntries shown.
-4. Save the Result. The Court does not determine authoritative event points or aggregate standings.
-5. If correction is required, append a correction Revision. Never overwrite an older Revision.
-6. Generate/store the immutable RESULT_BATCH QR fragments.
-7. Present all QR fragments to Host. Fragment order may vary; do not recreate a different batch with the same batch ID.
-8. Scan the Host ACK. Confirm the historical batch becomes ACKNOWLEDGED.
-9. If ACK is forgotten or Host recovery requires it, reopen the historical batch and resend the exact stored fragments.
+1. If no tournament is active, select the Host-provided .json file, validate it, explicitly activate it, then set the assigned Court by QR or manual selection.
+2. Confirm App version, Device ID, active ConfigVersion, and Court role.
+3. Select the configured ScoringSession. Do not derive a session from a physical court label.
+4. Enter only the raw InputSchema values configured for the CompetitionEntries shown.
+5. Save the Result. The Court does not determine authoritative event points or aggregate standings.
+6. If correction is required, append a correction Revision. Never overwrite an older Revision.
+7. Generate/store the immutable RESULT_BATCH QR fragments.
+8. Present all QR fragments to Host. Fragment order may vary; do not recreate a different batch with the same batch ID.
+9. Scan the Host ACK. Confirm the historical batch becomes ACKNOWLEDGED.
+10. If ACK is forgotten or Host recovery requires it, reopen the historical batch and resend the exact stored fragments.
 
 ## Host
 
@@ -72,15 +74,22 @@ The production build embeds `VITE_RELEASE_SHA` at build time from the approved c
 
 ## Config update
 
-### Config file import/export on Host
+### Tournament configuration JSON distribution
 
-1. Export the active immutable ConfigVersion as a `KAISEI_TOURNAMENT_CONFIG` schema-v1 JSON document when an archival/transfer copy is required.
-2. For an incoming config file, use `設定ファイルを検証・取り込む` first. Import persists an immutable version but does not activate it.
-3. Review validation results. Duplicate IDs, broken CompetitionEntry/CourtRun/ScoringSession references, invalid InputSchema/rank point tables, and unsupported scoring modes must fail closed.
-4. Confirm every ScoringProfile has at least one regression ScoringTestCase. Both the Host editor apply path and config-file activation fail closed on a missing test, non-PASS result, removed/changed baseline without review, missing provenance, malformed approval metadata, or stale approval; approved expectation updates are written to the audit log.
-5. Only then use the explicit activation action. The active Host Tournament is checked by the service; do not select a Tournament ID from the imported file.
+This is the normal event-day method for getting a tournament configuration onto every Court device. It replaces scanning many QR frames with copying one `.json` file.
 
-### CONFIG_UPDATE QR to Court
+1. Host: on `大会設定` → `コート端末への配布` → `配布する`, press `大会設定 JSON を保存` to save the active immutable ConfigVersion as one `KAISEI_TOURNAMENT_CONFIG` schema-v1 `.json` document (filename `kaisei-kspo-<year>-config-v<version>.json`).
+2. Host: copy that exact same file to every Court device by any offline means (AirDrop, USB, OS share, pre-event cloud staging). Every Court receives an identical file; the file never contains a Court's own device ID, camera state, or assignment.
+3. Court: on `大会設定を受け取る`, press `大会設定 JSON を選択` and choose the file. The file is parsed, validated, and staged — the active configuration is not changed yet.
+4. Court: review the staged summary (Tournament name, Config version, competition count, Court count). If a different Tournament is already active on this device, explicitly confirm the Tournament switch before proceeding; a same-Tournament version update still runs the existing regression/approval gates.
+5. Court: press `この大会設定を使用` to explicitly activate. Invalid JSON, an unsupported file schema, or a failed validation/regression gate leaves the current active configuration unchanged.
+6. Court: continue to `担当コートを設定` and scan the Court assignment QR or select the Court manually — the same small `COURT_ASSIGNMENT` QR/manual-selection path as before, unaffected by this change.
+
+For an archival/raw JSON import/export outside this normal distribution flow, the developer-facing `詳細管理` panel on Host retains `設定ファイルを検証・取り込む` and manual export, with the same validation, activation, and audit-log behavior described above.
+
+### Legacy/diagnostic CONFIG_UPDATE QR
+
+CONFIG_UPDATE QR distribution is retained for legacy/diagnostic/emergency use only. It is not the normal event-day distribution path and is not exposed on the normal Host/Court navigation; use it only when the JSON file distribution above is unavailable.
 
 1. Host exports the exact immutable ConfigVersion ID through CONFIG_UPDATE.
 2. Court receives/persists all QR parts; interrupted reception can resume after reload.
@@ -138,7 +147,7 @@ Use Host 1, Court 3–5, spare Host 1 where available, and an external monitor c
 - [ ] Create Host backup; then create/import another batch after backup.
 - [ ] Simulate Host failure; restore the old backup to spare Host.
 - [ ] Resend the post-backup historical batch; verify only missing Revision is recovered and duplicate resend is harmless.
-- [ ] Exercise CONFIG_UPDATE QR persistence and explicit activation using an approved compatible ConfigVersion.
+- [ ] Export one approved JSON file from Host, import that exact file on every Court, activate it, then assign each Court by assignment QR/manual selection.
 - [ ] Detect a waiting Service Worker update and confirm event-day pin prevents automatic activation across reload/restart.
 - [ ] Create final backup and verify final standings.
 - [ ] Confirm the structural production-config gate rejects player personal-information field keys/labels and that no such field is present in the final ConfigVersion; no player name, birthdate, contact information, or student personal identifier is requested/stored.
@@ -171,7 +180,7 @@ Formal Design §24 は18個 of normative invariants. The user-requested “28 in
 | 18 | §24: current rules outrank prior-year material | no production 2026 JSON generated from old data | authoritative-source blocker enforced in Task 14 | Final rule owner signs off exact 2026 ConfigVersion |
 | 19 | Supplemental: Display is read-only | `DisplayDashboard.test.tsx`, `App.test.tsx` | same Host service output | Inspect Display controls |
 | 20 | Supplemental: Display standings equal Host-authoritative state | `DisplayDashboard.test.tsx` | shared `loadAuthoritativeState` | Same Host browser profile + HDMI comparison |
-| 21 | Supplemental: versioned config file validates/imports without auto-activation | `config-file.test.ts`, `ConfigFilePanel.test.tsx` | production ConfigRepository boundary | Import final config on spare profile first |
+| 21 | Supplemental: versioned config file validates/imports without auto-activation, and the same JSON distributes to every Court | `config-file.test.ts`, `ConfigFilePanel.test.tsx`, `config-distribution-service.test.ts`, `HostConfigDistributionPanel.test.tsx`, `CourtConfigImportPanel.test.tsx` | production ConfigRepository boundary; `tournament-operations-ux-rehearsal.test.ts` JSON distribution to two Court devices | Import final config JSON on spare profile first; distribute the same JSON file to every Court device |
 | 22 | Supplemental: authoritative 2026 production config is final and approved | intentionally blocked; no guessed fixture | not runnable until source finalized | Mandatory rule-owner signoff |
 | 23 | Supplemental: installed PWA boots with physical network disabled | build/PWA tests only | automation cannot prove installed browser behavior | Mandatory physical offline boot |
 | 24 | Supplemental: real camera/USB QR path works | codec/frame/receiver automated | logical payload path automated | Mandatory physical scanner/camera test |
@@ -182,6 +191,6 @@ Formal Design §24 は18個 of normative invariants. The user-requested “28 in
 
 ## Automated scenario index
 
-The following requested event-day steps are automated either in the new cross-phase rehearsal or existing focused integration/regression suites: Court Result/correction; immutable RESULT_BATCH; QR fragmentation/out-of-order/duplicate/partial persistence/reload resume; single Host import/import marker; shared scoring/Calculation Trace/standings; divergence/common-ancestor projection/explicit resolution; ACK/history; backup/old-backup restore/historical resend/missing-revision recovery/double-add prevention/final standings equivalence; CONFIG_UPDATE persistence/explicit activation; cross-Tournament activation rejection; scoring regression/stale fingerprint/provenance rejection; safe reload; update pin policy; Display read-only/equality/polling resilience; and structural PII config validation.
+The following requested event-day steps are automated either in the new cross-phase rehearsal or existing focused integration/regression suites: Court Result/correction; immutable RESULT_BATCH; QR fragmentation/out-of-order/duplicate/partial persistence/reload resume; single Host import/import marker; shared scoring/Calculation Trace/standings; divergence/common-ancestor projection/explicit resolution; ACK/history; backup/old-backup restore/historical resend/missing-revision recovery/double-add prevention/final standings equivalence; JSON configuration export/staged import/explicit activation as the normal Court configuration distribution path (CONFIG_UPDATE QR persistence/explicit activation is retained only as legacy/diagnostic protocol coverage); cross-Tournament activation rejection and explicit atomic Tournament switch; scoring regression/stale fingerprint/provenance rejection; safe reload; update pin policy; Display read-only/equality/polling resilience; and structural PII config validation.
 
 Physical install, real camera/USB QR, true radio-offline boot, real multi-device concurrency, actual browser Service Worker lifecycle, and spare-device recovery remain manual gates as explicitly required by Formal Design.

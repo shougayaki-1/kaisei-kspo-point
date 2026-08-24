@@ -43,9 +43,10 @@ import { createTournamentConfigApplyService } from './tournament-setup/tournamen
 import { TournamentSettingsHome } from './tournament-settings/TournamentSettingsHome'
 import { ConfigFilePanel } from './ConfigFilePanel'
 import { createConfigFilePanelServices } from './config-file-panel-service'
-import { ConfigUpdatePanel } from './ConfigUpdatePanel'
-import { createConfigUpdateService, type ConfigUpdateActivationResult } from './config-update-service'
-import type { ConfigUpdatePanelServices } from './ConfigUpdatePanel'
+import { CourtConfigImportPanel } from './CourtConfigImportPanel'
+import { resolveCourtState } from './court-state-resolver'
+import { HostConfigDistributionPanel } from './HostConfigDistributionPanel'
+import { createConfigDistributionServices, type ConfigDistributionServices } from './config-distribution-service'
 import { createCourtAssignmentService, type CourtAssignment } from './court-assignment-service'
 import { createCourtResultService } from './court-result-service'
 import { createCourtTaskService, type CourtTaskCard } from './court-task-service'
@@ -83,7 +84,7 @@ export interface AppProps {
   pwaRuntime?: PwaRuntime
   resetPersistentData?: () => Promise<void> | void
   hostBackupServices?: HostBackupPanelServices
-  configUpdateServices?: ConfigUpdatePanelServices
+  configDistributionServices?: ConfigDistributionServices
   setupDraftRepository?: SetupDraftRepository
 }
 
@@ -124,7 +125,7 @@ export function App({
   pwaRuntime,
   resetPersistentData,
   hostBackupServices,
-  configUpdateServices: injectedConfigUpdateServices,
+  configDistributionServices: injectedConfigDistributionServices,
   setupDraftRepository: injectedSetupDraftRepository,
 }: AppProps = {}) {
   const [mode, setMode] = useState<AppMode>(null)
@@ -147,8 +148,8 @@ export function App({
   const browserConfigRepository = useMemo(() => new ConfigRepository(appDatabase), [appDatabase])
   const resolvedConfigRepository = configRepository ?? browserConfigRepository
   const configFileServices = useMemo(() => createConfigFilePanelServices(appDatabase), [appDatabase])
-  const browserConfigUpdateServices = useMemo(() => createConfigUpdateService(appDatabase), [appDatabase])
-  const configUpdateServices = injectedConfigUpdateServices ?? browserConfigUpdateServices
+  const browserConfigDistributionServices = useMemo(() => createConfigDistributionServices(appDatabase), [appDatabase])
+  const configDistributionServices = injectedConfigDistributionServices ?? browserConfigDistributionServices
   const courtResultServices = useMemo(() => createCourtResultService(appDatabase, { deviceId }), [appDatabase, deviceId])
   const courtTransferHistoryServices = useMemo(() => createCourtTransferHistoryServices(appDatabase), [appDatabase])
   const hostScoringServices = useMemo(() => createHostScoringService(appDatabase), [appDatabase])
@@ -186,6 +187,7 @@ export function App({
   const [courtSnapshot, setCourtSnapshot] = useState<TournamentConfigSnapshot | undefined>()
   const [courtTasks, setCourtTasks] = useState<CourtTaskCard[]>([])
   const [courtEntryTask, setCourtEntryTask] = useState<{ scoringSessionId: ScoringSessionId; taskLabel: string; correctionOfResultId?: ResultId } | null>(null)
+  const [courtConfigUpdateOpen, setCourtConfigUpdateOpen] = useState(false)
   const courtRefreshRequestIdRef = useRef(0)
 
   const tournamentConfigApplyFlow = useMemo(() => ({
@@ -210,21 +212,14 @@ export function App({
 
   const refreshCourtState = useMemo(() => async () => {
     const requestId = ++courtRefreshRequestIdRef.current
-    const assignment = await courtAssignmentServices.load()
-    let snapshot: TournamentConfigSnapshot | undefined
-    try {
-      const tournamentId = assignment?.tournamentId ?? activeTournamentId
-      snapshot = tournamentId
-        ? await resolvedConfigRepository.loadCurrent(tournamentId)
-        : undefined
-    } catch {
-      snapshot = undefined
-    }
-    const validAssignment = assignment && snapshot ? assignment : null
-    const tasks = validAssignment ? await courtTaskServices.listAssignedTasks(validAssignment) : []
+    const { snapshot, assignment, tasks } = await resolveCourtState(activeTournamentId, {
+      loadAssignment: () => courtAssignmentServices.load(),
+      loadSnapshot: (tournamentId) => resolvedConfigRepository.loadCurrent(tournamentId),
+      listTasks: (validAssignment) => courtTaskServices.listAssignedTasks(validAssignment),
+    })
     if (requestId !== courtRefreshRequestIdRef.current) return
     setCourtSnapshot(snapshot)
-    setCourtAssignment(validAssignment)
+    setCourtAssignment(assignment)
     setCourtTasks(tasks)
   }, [activeTournamentId, courtAssignmentServices, courtTaskServices, resolvedConfigRepository])
 
@@ -284,10 +279,12 @@ export function App({
     setKnownConfigVersion(result.version)
     setKnownConfigVersionId(result.configVersionId)
   }
-  const handleConfigUpdateActivated = (result: ConfigUpdateActivationResult) => {
-    setActiveTournamentId(result.tournamentId)
+  const handleCourtConfigActivated = (result: { tournamentId: string; configVersionId: string; version: number }) => {
+    setActiveTournamentId(result.tournamentId as TournamentId)
     setKnownConfigVersion(result.version)
     setKnownConfigVersionId(result.configVersionId)
+    setCourtConfigUpdateOpen(false)
+    void refreshCourtState()
   }
   const returnToModeSelection = () => { setMode(null); setHostTab('CONFIG') }
   const handleOpenSettingsStage = (_step: SetupStep) => setEditNotice(true)
@@ -358,13 +355,7 @@ export function App({
               snapshot={hostSnapshot}
               onOpenStage={handleOpenSettingsStage}
               distributionManagement={
-                <ConfigUpdatePanel
-                  mode="HOST"
-                  services={configUpdateServices}
-                  operatorName={operatorName}
-                  deviceId={deviceId}
-                  onActivated={handleConfigUpdateActivated}
-                />
+                <HostConfigDistributionPanel services={configDistributionServices} />
               }
               advancedManagement={
                 <ConfigFilePanel
@@ -396,7 +387,15 @@ export function App({
         <div><h1>コートモード</h1><p>競技結果を端末内に記録します。</p></div>
         <button type="button" onClick={returnToModeSelection}>モード選択へ戻る</button>
       </div>
-      {courtAssignment && courtSnapshot ? (
+      {!courtSnapshot || courtConfigUpdateOpen ? (
+        <CourtConfigImportPanel
+          services={configDistributionServices}
+          operatorName={operatorName}
+          deviceId={deviceId}
+          onActivated={handleCourtConfigActivated}
+          onCancel={courtSnapshot ? () => setCourtConfigUpdateOpen(false) : undefined}
+        />
+      ) : courtAssignment ? (
         courtEntryTask ? (
           <ResultEntryScreen
             services={courtResultServices}
@@ -415,6 +414,7 @@ export function App({
             tasks={courtTasks}
             onOpenTask={handleOpenTask}
             onChangeAssignment={() => { void handleChangeAssignment() }}
+            onUpdateConfig={() => setCourtConfigUpdateOpen(true)}
           />
         )
       ) : (
@@ -422,10 +422,10 @@ export function App({
           hasActiveConfig={Boolean(courtSnapshot)}
           courtStations={(courtSnapshot?.courtStations ?? []).map((station) => ({ courtStationId: station.courtStationId, label: station.label }))}
           competitions={(courtSnapshot?.competitions ?? []).map((competition) => ({ competitionId: competition.competitionId, name: competition.name }))}
+          onUpdateConfig={courtSnapshot ? () => setCourtConfigUpdateOpen(true) : undefined}
           onSubmit={handleAssignmentSubmit}
         />
       )}
-      <ConfigUpdatePanel mode="COURT" services={configUpdateServices} operatorName={operatorName} deviceId={deviceId} onActivated={handleConfigUpdateActivated} />
       <TransferDemo mode="COURT" deviceId={deviceId} />
       <CourtTransferHistory services={courtTransferHistoryServices} />
     </>

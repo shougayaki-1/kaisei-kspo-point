@@ -28,6 +28,7 @@ export interface CourtAssignmentPanelProps {
     competitionId?: CompetitionId
     source: 'QR' | 'MANUAL'
   }) => Promise<void>
+  onUpdateConfig?: () => void
 }
 
 const NO_COMPETITION = '' as const
@@ -37,6 +38,7 @@ export function CourtAssignmentPanel({
   courtStations,
   competitions,
   onSubmit,
+  onUpdateConfig,
 }: CourtAssignmentPanelProps) {
   const [cameraActive, setCameraActive] = useState(false)
   const [cameraError, setCameraError] = useState('')
@@ -110,6 +112,10 @@ export function CourtAssignmentPanel({
           本部から渡されたQRを読み取るか、下のリストから直接選んでください。
         </Typography>
       </div>
+
+      {onUpdateConfig ? (
+        <Button variant="text" sx={{ alignSelf: 'flex-start' }} onClick={onUpdateConfig}>大会設定を更新</Button>
+      ) : null}
 
       {submitError ? <Alert severity="error">{submitError}</Alert> : null}
       {cameraError ? <Alert severity="warning">{cameraError}</Alert> : null}

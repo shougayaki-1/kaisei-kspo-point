@@ -82,7 +82,7 @@ describe('TournamentSettingsHome', () => {
 
     expect(screen.queryByText('大会設定共有コンテンツ')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('コート配布用QR')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByText('QRを表示'))
+    fireEvent.click(screen.getByText('配布する'))
 
     expect(screen.getByText('大会設定共有コンテンツ')).toBeInTheDocument()
     expect(screen.getByLabelText('コート配布用QR')).toBeInTheDocument()
