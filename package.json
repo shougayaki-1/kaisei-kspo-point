@@ -17,6 +17,7 @@
     "@mui/material": "^9.3.1",
     "@zxing/browser": "^0.2.1",
     "dexie": "latest",
+    "qrcode.react": "4.2.0",
     "react": "latest",
     "react-dom": "latest",
     "zod": "latest"
