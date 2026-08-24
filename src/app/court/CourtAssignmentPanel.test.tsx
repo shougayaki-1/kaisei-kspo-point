@@ -56,4 +56,24 @@ describe('CourtAssignmentPanel', () => {
 
     expect(await screen.findByText('この大会の設定と一致しません。')).toBeInTheDocument()
   })
+
+  it('offers an explicit way to update the tournament configuration when provided', () => {
+    const onUpdateConfig = vi.fn()
+    render(
+      <CourtAssignmentPanel
+        hasActiveConfig
+        courtStations={courtStations}
+        competitions={competitions}
+        onSubmit={vi.fn()}
+        onUpdateConfig={onUpdateConfig}
+      />,
+    )
+    fireEvent.click(screen.getByText('大会設定を更新'))
+    expect(onUpdateConfig).toHaveBeenCalled()
+  })
+
+  it('does not show an update-config action when none is provided', () => {
+    render(<CourtAssignmentPanel hasActiveConfig courtStations={courtStations} competitions={competitions} onSubmit={vi.fn()} />)
+    expect(screen.queryByText('大会設定を更新')).not.toBeInTheDocument()
+  })
 })

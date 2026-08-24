@@ -61,6 +61,25 @@ describe('App Court configuration availability', () => {
     expect(screen.queryByText(/設定が届いていません/)).not.toBeInTheDocument()
   })
 
+  it('lets an unassigned Court device with an active config open and leave the config-update flow', async () => {
+    render(<App configRepository={statefulConfigRepository()} setupDraftRepository={setupDraftRepository()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '本部モード' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'この内容で大会を作成する' }))
+    expect(await screen.findByText('第3回開成運動交流祭')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'モード選択へ戻る' }))
+    fireEvent.click(screen.getByRole('button', { name: 'コートモード' }))
+
+    expect(await screen.findByRole('heading', { name: '担当コートを設定してください' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('大会設定を更新'))
+    expect(await screen.findByRole('heading', { name: '大会設定を受け取る' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('戻る'))
+    expect(await screen.findByRole('heading', { name: '担当コートを設定してください' })).toBeInTheDocument()
+  })
+
   it('moves an empty Court device from JSON import to Court assignment once activated', async () => {
     const snapshot: TournamentConfigSnapshot = {
       tournament: { tournamentId: 'json-tournament' as never, name: 'JSON配布大会', currentConfigVersion: 1 },

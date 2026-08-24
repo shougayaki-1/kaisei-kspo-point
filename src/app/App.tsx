@@ -422,6 +422,7 @@ export function App({
           hasActiveConfig={Boolean(courtSnapshot)}
           courtStations={(courtSnapshot?.courtStations ?? []).map((station) => ({ courtStationId: station.courtStationId, label: station.label }))}
           competitions={(courtSnapshot?.competitions ?? []).map((competition) => ({ competitionId: competition.competitionId, name: competition.name }))}
+          onUpdateConfig={courtSnapshot ? () => setCourtConfigUpdateOpen(true) : undefined}
           onSubmit={handleAssignmentSubmit}
         />
       )}
