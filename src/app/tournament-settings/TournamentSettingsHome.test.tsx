@@ -86,6 +86,6 @@ describe('TournamentSettingsHome', () => {
 
     expect(screen.getByText('大会設定共有コンテンツ')).toBeInTheDocument()
     expect(screen.getByLabelText('コート配布用QR')).toBeInTheDocument()
-    expect(screen.getByText(/最初に大会設定を共有/)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '1. 最初に大会設定を共有' })).toBeInTheDocument()
   })
 })
