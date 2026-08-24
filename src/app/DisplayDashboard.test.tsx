@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { HostScoringState } from './host-scoring-service'
 import { HostScoringDashboard } from './HostScoringDashboard'
@@ -7,6 +7,7 @@ import { DisplayDashboard } from './DisplayDashboard'
 function authoritativeState(): HostScoringState {
   return {
     tournamentId: 'tournament-1' as never,
+    tournamentName: '表示テスト大会',
     configVersionId: 'config-v2',
     configVersion: 2,
     projections: [{
@@ -65,8 +66,13 @@ describe('DisplayDashboard', () => {
     const hostService = { loadAuthoritativeState: vi.fn().mockResolvedValue(state) }
 
     const display = render(<DisplayDashboard service={displayService} />)
-    expect(await screen.findByText('1位 Configured Red: 7.5')).toBeInTheDocument()
-    expect(screen.getByText(/config-v2/)).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '表示テスト大会' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '総合順位' })).toBeInTheDocument()
+    const row = screen.getByRole('listitem', { name: '1位 Configured Red 7.5点' })
+    expect(within(row).getByText('1')).toBeInTheDocument()
+    expect(within(row).getByText('Configured Red')).toBeInTheDocument()
+    expect(within(row).getByText('7.5')).toBeInTheDocument()
+    expect(screen.getByText('Config v2')).toBeInTheDocument()
     expect(displayService.loadAuthoritativeState).toHaveBeenCalledOnce()
     display.unmount()
 
@@ -79,7 +85,7 @@ describe('DisplayDashboard', () => {
     const service = { loadAuthoritativeState: vi.fn().mockResolvedValue(authoritativeState()) }
     render(<DisplayDashboard service={service} />)
 
-    await screen.findByText('1位 Configured Red: 7.5')
+    await screen.findByRole('listitem', { name: '1位 Configured Red 7.5点' })
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
     expect(screen.queryByText(/Calculation Trace/)).not.toBeInTheDocument()
     expect(screen.queryByText(/競合を解決/)).not.toBeInTheDocument()
@@ -94,11 +100,11 @@ describe('DisplayDashboard', () => {
     const service = { loadAuthoritativeState: vi.fn().mockResolvedValue(frozen) }
 
     const first = render(<DisplayDashboard service={service} />)
-    expect(await screen.findByText('1位 Configured Red: 7.5')).toBeInTheDocument()
+    expect(await screen.findByRole('listitem', { name: '1位 Configured Red 7.5点' })).toBeInTheDocument()
     first.unmount()
 
     render(<DisplayDashboard service={service} />)
-    expect(await screen.findByText('1位 Configured Red: 7.5')).toBeInTheDocument()
+    expect(await screen.findByRole('listitem', { name: '1位 Configured Red 7.5点' })).toBeInTheDocument()
     expect(frozen).toEqual(before)
     expect(service.loadAuthoritativeState).toHaveBeenCalledTimes(2)
   })
@@ -122,12 +128,12 @@ describe('DisplayDashboard', () => {
 
     render(<DisplayDashboard service={service} refreshIntervalMs={1000} />)
     await act(async () => { await Promise.resolve() })
-    expect(screen.getByText('1位 Configured Red: 7.5')).toBeInTheDocument()
+    expect(screen.getByRole('listitem', { name: '1位 Configured Red 7.5点' })).toBeInTheDocument()
 
     await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
 
-    expect(screen.getByText('1位 Configured Blue: 8')).toBeInTheDocument()
-    expect(screen.queryByText('1位 Configured Red: 7.5')).not.toBeInTheDocument()
+    expect(screen.getByRole('listitem', { name: '1位 Configured Blue 8点' })).toBeInTheDocument()
+    expect(screen.queryByRole('listitem', { name: '1位 Configured Red 7.5点' })).not.toBeInTheDocument()
     expect(service.loadAuthoritativeState).toHaveBeenCalledTimes(2)
   })
 
@@ -165,10 +171,10 @@ describe('DisplayDashboard', () => {
 
     render(<DisplayDashboard service={service} refreshIntervalMs={1000} />)
     await act(async () => { await Promise.resolve() })
-    expect(screen.getByText('1位 Configured Red: 7.5')).toBeInTheDocument()
+    expect(screen.getByRole('listitem', { name: '1位 Configured Red 7.5点' })).toBeInTheDocument()
 
     await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
-    expect(screen.getByText('1位 Configured Red: 7.5')).toBeInTheDocument()
+    expect(screen.getByRole('listitem', { name: '1位 Configured Red 7.5点' })).toBeInTheDocument()
     expect(screen.getByRole('alert')).toHaveTextContent('一時的なIndexedDB読み取り失敗')
   })
 })

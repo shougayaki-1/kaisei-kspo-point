@@ -18,7 +18,7 @@ export interface ConfigUpdatePanelServices {
     frames: string[]
   }>
   ingestFrame(encoded: string, receivedAt: string): Promise<{
-    complete: boolean
+    progress: { complete: boolean }
     importedConfigVersionId?: string
     tournamentId?: TournamentId
   }>
@@ -90,7 +90,7 @@ export function ConfigUpdatePanel({
     setMessage('')
     try {
       const result = await services.ingestFrame(input.trim(), now())
-      if (result.complete && result.importedConfigVersionId) {
+      if (result.progress.complete && result.importedConfigVersionId) {
         setImportedId(result.importedConfigVersionId)
         setMessage('ConfigVersionを保存しました。まだ有効化されていません。')
         await reloadStatus()

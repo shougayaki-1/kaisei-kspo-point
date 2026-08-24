@@ -20,7 +20,7 @@ function services(): ConfigUpdatePanelServices {
       frames: ['KSPO1:frame-1', 'KSPO1:frame-2'],
     }),
     ingestFrame: vi.fn().mockResolvedValue({
-      complete: true,
+      progress: { complete: true },
       importedConfigVersionId: 'config-v2',
     }),
     activate: vi.fn().mockResolvedValue(undefined),

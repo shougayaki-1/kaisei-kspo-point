@@ -78,7 +78,7 @@ describe('tournament operations UX offline rehearsal', () => {
     const exported = await hostConfigUpdateService.exportVersion(active!.configVersionId!, 900)
     let ingest
     for (const frame of exported.frames) ingest = await courtConfigUpdateService.ingestFrame(frame, '2026-08-24T00:11:00+09:00')
-    expect(ingest?.complete).toBe(true)
+    expect(ingest?.progress.complete).toBe(true)
     const activation = await courtConfigUpdateService.activate(ingest!.importedConfigVersionId!, {
       operator: 'コート担当', activatedAt: '2026-08-24T00:12:00+09:00',
     })

@@ -69,6 +69,7 @@ export interface HostEventScore {
 
 export interface HostScoringState {
   tournamentId: TournamentId
+  tournamentName: string
   configVersionId: string
   configVersion: number
   projections: HostProjectionView[]
@@ -381,6 +382,7 @@ export function createHostScoringService(db: AppDatabase) {
 
     return {
       tournamentId: snapshot.tournament.tournamentId,
+      tournamentName: snapshot.tournament.name,
       configVersionId: active.configVersionId,
       configVersion: active.version,
       projections: views,

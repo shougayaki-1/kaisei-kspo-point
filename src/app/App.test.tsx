@@ -80,7 +80,7 @@ function configUpdateServices(): ConfigUpdatePanelServices {
       versions: activeConfigVersionId ? [{ configVersionId: activeConfigVersionId, version: 2 }] : [],
     })),
     exportVersion: vi.fn(async () => ({ configVersionId: 'config-v2', frames: ['frame'] })),
-    ingestFrame: vi.fn(async () => ({ complete: true, importedConfigVersionId: 'config-v2', tournamentId: 'tournament-1' as never })),
+    ingestFrame: vi.fn(async () => ({ progress: { complete: true }, importedConfigVersionId: 'config-v2', tournamentId: 'tournament-1' as never })),
     activate: vi.fn(async () => {
       activeConfigVersionId = 'config-v2'
       return { configVersionId: 'config-v2', version: 2, tournamentId: 'tournament-1' as never }
